@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / test artifacts
+.runs/
+runs/
+*.log
+
+# Env / local config
+.env
+.env.*
+venv/
+.venv/
+config.ini
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

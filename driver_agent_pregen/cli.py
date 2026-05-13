@@ -18,7 +18,7 @@ from .report import run_final_report_builder
 from .repo_utils import RepositoryAccessor
 from .spec_agent import run_pre_spec_agent
 from .symbol_scanner import run_symbol_scanner
-from .utils import now_timestamp, slugify, write_json
+from .utils import now_timestamp, read_text, slugify, write_json, write_text
 from .validation import run_validation_agent
 
 
@@ -45,10 +45,103 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--llm-retry-backoff-sec", type=int, default=3, help="LLM retry backoff seconds")
 
     p.add_argument("--patch-candidates", type=int, default=1, help="number of patch candidates to request from LLM")
-    p.add_argument("--enable-qemu", action="store_true", help="enable qemu/kunit runtime command execution if present in generated suite commands")
+    p.add_argument(
+        "--affected-func-signal-mode",
+        type=str,
+        choices=["kernel_only", "kernel_plus_other_drivers"],
+        default="kernel_plus_other_drivers",
+        help=(
+            "affected-function signal source mode: "
+            "'kernel_only' uses strict kernel-side evidence only; "
+            "'kernel_plus_other_drivers' additionally allows migration hints from non-target drivers "
+            "(target module diff is still excluded)."
+        ),
+    )
+    p.add_argument(
+        "--validation-patch-file",
+        type=str,
+        default=None,
+        help="optional unified diff patch to override LLM patch candidates during validation",
+    )
+    p.set_defaults(enable_qemu=True)
+    p.add_argument(
+        "--enable-qemu",
+        dest="enable_qemu",
+        action="store_true",
+        help="enable qemu/kunit runtime command execution if present in generated suite commands (default: enabled)",
+    )
+    p.add_argument(
+        "--disable-qemu",
+        dest="enable_qemu",
+        action="store_false",
+        help="disable qemu/kunit runtime command execution",
+    )
     p.add_argument("--qemu-timeout-sec", type=int, default=3600, help="timeout seconds for suite/qemu commands")
     p.add_argument("--cleanup-worktrees", action="store_true", help="remove temporary worktrees after validation")
     return p
+
+
+def _extract_touched_files_from_patch(patch_text: str) -> list[str]:
+    out: list[str] = []
+    for line in patch_text.splitlines():
+        if not line.startswith("+++ b/"):
+            continue
+        rel = line[len("+++ b/") :].strip()
+        if rel == "/dev/null":
+            continue
+        if rel and rel not in out:
+            out.append(rel)
+    return out
+
+
+def _override_patch_generation_with_file(
+    *,
+    run_dir: Path,
+    patch_generation: dict[str, Any],
+    patch_file: Path,
+) -> dict[str, Any]:
+    if not patch_file.exists() or not patch_file.is_file():
+        raise FileNotFoundError(f"validation patch file not found: {patch_file}")
+
+    patch_text = read_text(patch_file)
+    if not patch_text.strip():
+        raise ValueError(f"validation patch file is empty: {patch_file}")
+
+    candidate_id = "USER-CORRECT-001"
+    cdir = run_dir / "patch_runs" / "user_correct_001"
+    cdir.mkdir(parents=True, exist_ok=True)
+
+    raw_path = cdir / "01_raw_patch.diff"
+    fixed_path = cdir / "02_fixed_patch.diff"
+    write_text(raw_path, patch_text)
+    write_text(fixed_path, patch_text)
+
+    touched = _extract_touched_files_from_patch(patch_text)
+    out = dict(patch_generation)
+    out["patch_candidates"] = [
+        {
+            "candidate_id": candidate_id,
+            "strategy": "user_supplied_correct_patch",
+            "rationale": f"override from {patch_file.as_posix()}",
+            "evidence": ["user supplied kernel module patch diff"],
+            "open_questions": [],
+            "touched_files": touched,
+            "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
+            "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
+            "line_fix_ok": True,
+            "line_fix_messages": ["override_patch_no_line_fix_required"],
+        }
+    ]
+    out["selected_candidate_id"] = candidate_id
+    out["manual_patch_override"] = True
+    out["manual_patch_override_source"] = patch_file.as_posix()
+
+    notes = list(out.get("module_level_notes", []))
+    notes.append(f"manual patch override from {patch_file.as_posix()}")
+    out["module_level_notes"] = notes
+
+    write_json(run_dir / "patch_generation.json", out)
+    return out
 
 
 def _make_case_id(module_path: str, old_ref: str | None, new_ref: str | None) -> str:
@@ -60,7 +153,7 @@ def _make_case_id(module_path: str, old_ref: str | None, new_ref: str | None) ->
     return slugify("__".join(parts))
 
 
-def run_pipeline(args: argparse.Namespace) -> Path:
+def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
     accessor = RepositoryAccessor.from_args(
         repo=args.repo,
         old_ref=args.old_ref,
@@ -90,6 +183,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         "llm_enabled": args.enable_llm,
         "llm_provider": args.llm_provider,
         "llm_model": args.llm_model,
+        "affected_func_signal_mode": args.affected_func_signal_mode,
         "stages": [],
     }
     write_json(run_dir / "metadata.json", metadata)
@@ -134,7 +228,13 @@ def run_pipeline(args: argparse.Namespace) -> Path:
 
     kernel_diffs = stage(
         "04_kernel_definition_diff_builder",
-        lambda: run_kernel_diff_builder(accessor, extracted_dir, locations_payload, args.module_path),
+        lambda: run_kernel_diff_builder(
+            accessor,
+            extracted_dir,
+            locations_payload,
+            args.module_path,
+            affected_func_signal_mode=args.affected_func_signal_mode,
+        ),
     )
 
     impact_graph = stage(
@@ -233,6 +333,16 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         ),
     )
 
+    if args.validation_patch_file:
+        patch_generation = stage(
+            "09b1_patch_override",
+            lambda: _override_patch_generation_with_file(
+                run_dir=run_dir,
+                patch_generation=patch_generation,
+                patch_file=Path(args.validation_patch_file).expanduser().resolve(),
+            ),
+        )
+
     validation = stage(
         "09c_validation_agent",
         lambda: run_validation_agent(
@@ -281,17 +391,18 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         ),
     )
 
-    metadata["status"] = "ok"
+    pipeline_ok = str(validation.get("status", "")).lower() == "ok"
+    metadata["status"] = "ok" if pipeline_ok else "failed_validation"
     write_json(run_dir / "metadata.json", metadata)
-    return run_dir
+    return run_dir, pipeline_ok
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    run_dir = run_pipeline(args)
+    run_dir, ok = run_pipeline(args)
     print(f"[driver-agent-pregen] completed: {run_dir}")
-    return 0
+    return 0 if ok else 2
 
 
 if __name__ == "__main__":

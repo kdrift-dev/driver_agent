@@ -8,9 +8,15 @@ from .prompts import build_pre_spec_prompt
 from .utils import read_text
 
 
-def _load_slices(extracted_dir: Path, impact_graph: dict[str, Any], max_chars_per_slice: int = 6000) -> list[dict[str, Any]]:
+def _load_slices(
+    extracted_dir: Path,
+    impact_graph: dict[str, Any],
+    *,
+    list_key: str = "affected_functions",
+    max_chars_per_slice: int = 6000,
+) -> list[dict[str, Any]]:
     slices = []
-    for afn in impact_graph.get("affected_functions", []):
+    for afn in impact_graph.get(list_key, []):
         rel = afn.get("local_slice_path")
         if not rel:
             continue
@@ -52,7 +58,8 @@ def run_pre_spec_agent(
         "kernel_definition_diffs": kernel_definition_diffs,
         "compatibility_obligations": compatibility_obligations,
         "impact_graph": impact_graph,
-        "affected_function_slices": _load_slices(extracted_dir, impact_graph),
+        "affected_function_slices": _load_slices(extracted_dir, impact_graph, list_key="affected_functions"),
+        "context_function_slices": _load_slices(extracted_dir, impact_graph, list_key="context_functions"),
         "instruction": "Generate migration-specific pre/post conditions grounded in kernel compatibility obligations and caller/callback context.",
     }
 
@@ -64,6 +71,11 @@ def run_pre_spec_agent(
         "module_spec": {
             "summary": "dry-run or no-provider placeholder",
             "required_module_level_properties": [],
+            "required_changes": [],
+            "optional_changes": [],
+            "unsupported_assumptions": [],
+            "evidence_used": [],
+            "confidence": "low",
         },
     }
 

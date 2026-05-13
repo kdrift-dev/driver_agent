@@ -113,7 +113,7 @@ class OpenRouterProvider:
                             out.append(part.get("text", ""))
                     return "".join(out)
                 return content or ""
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, RuntimeError) as exc:
+            except Exception as exc:
                 last_exc = exc
                 if attempt >= self.max_retries:
                     break

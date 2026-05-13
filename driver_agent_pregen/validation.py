@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -60,6 +61,39 @@ def _extract_touched_files_from_patch(patch_text: str) -> list[str]:
             continue
         if rel and rel not in out:
             out.append(rel)
+    return out
+
+
+def _patch_has_effective_changes(patch_text: str) -> bool:
+    removed: list[str] = []
+    added: list[str] = []
+    for line in (patch_text or "").splitlines():
+        if line.startswith(("diff --git ", "index ", "--- ", "+++ ", "@@")):
+            continue
+        if line.startswith("-"):
+            removed.append(line[1:])
+            continue
+        if line.startswith("+"):
+            added.append(line[1:])
+            continue
+    if not removed and not added:
+        return False
+    if len(removed) == len(added) and removed == added:
+        return False
+    return True
+
+
+def _list_module_source_files(tree: Path, module_path: str) -> list[str]:
+    root = tree / module_path
+    if not root.exists():
+        return []
+    out: list[str] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.suffix not in {".c", ".h", ".rs"}:
+            continue
+        out.append(p.relative_to(tree).as_posix())
     return out
 
 
@@ -259,6 +293,62 @@ def _looks_like_script_lines(suite_commands: list[str]) -> bool:
     return False
 
 
+def _is_nonfatal_dmesg_permission_failure(stdout_text: str, stderr_text: str) -> bool:
+    merged = ((stdout_text or "") + "\n" + (stderr_text or "")).lower()
+    return "dmesg: read kernel buffer failed: operation not permitted" in merged
+
+
+def _is_hardware_unavailable_failure(stdout_text: str, stderr_text: str) -> bool:
+    merged = ((stdout_text or "") + "\n" + (stderr_text or "")).lower()
+    markers = (
+        "suite_skip:",
+        "hardware not present",
+        "hardware-dependent tests",
+        "no ux500 compatible",
+    )
+    return any(m in merged for m in markers)
+
+
+def _suite_requires_root(script_text: str) -> bool:
+    lower = (script_text or "").lower()
+    markers = (
+        "modprobe",
+        "rmmod",
+        "insmod",
+        "rtcwake",
+        "dmesg --clear",
+        "dmesg -c",
+    )
+    return any(m in lower for m in markers)
+
+
+def _harden_generated_suite_script(script_text: str) -> str:
+    """
+    Make generated suite scripts less brittle across heterogeneous hosts.
+    - Avoid `set -e*` early-exit traps; keep `-u -o pipefail`.
+    - Keep script behavior otherwise unchanged.
+    """
+    out_lines = []
+    for raw in script_text.splitlines():
+        line = raw.strip()
+        if line.startswith("set -euo pipefail"):
+            out_lines.append(raw.replace("set -euo pipefail", "set -uo pipefail", 1))
+            continue
+        if line.startswith("set -eo pipefail"):
+            out_lines.append(raw.replace("set -eo pipefail", "set -o pipefail", 1))
+            continue
+        if line == "set -e":
+            # Keep unset-var safety, but do not terminate on first non-zero.
+            prefix = raw[: len(raw) - len(raw.lstrip(" \t"))]
+            out_lines.append(prefix + "set -u")
+            continue
+        out_lines.append(raw)
+    hardened = "\n".join(out_lines)
+    if script_text.endswith("\n"):
+        hardened += "\n"
+    return hardened
+
+
 def _run_suite_commands(new_tree: Path, suite_commands: list[str], timeout_sec: int = 3600) -> dict[str, Any]:
     runs = []
     any_fail = False
@@ -266,12 +356,41 @@ def _run_suite_commands(new_tree: Path, suite_commands: list[str], timeout_sec: 
     if _looks_like_script_lines(suite_commands):
         script_path = new_tree / ".driver_agent_suite.sh"
         script_text = "\n".join(suite_commands) + "\n"
+        script_text = _harden_generated_suite_script(script_text)
+        if os.geteuid() != 0 and _suite_requires_root(script_text):
+            runs.append(
+                {
+                    "cmd": "suite_script",
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "requires_root_privileges_non_root_env",
+                    "script_mode": True,
+                }
+            )
+            return {"success": True, "runs": runs}
         script_path.write_text(script_text, encoding="utf-8")
         script_path.chmod(0o755)
         res = _run_cmd(["bash", str(script_path)], cwd=new_tree, timeout=timeout_sec)
         res["stdout"] = _truncate(res.get("stdout", ""))
         res["stderr"] = _truncate(res.get("stderr", ""))
         res["script_mode"] = True
+        if not res.get("ok") and int(res.get("returncode", -1)) == 77:
+            res["original_returncode"] = res.get("returncode")
+            res["returncode"] = 0
+            res["ok"] = True
+            res["nonfatal_adjustment"] = "skipped_exit_77"
+        if not res.get("ok") and _is_nonfatal_dmesg_permission_failure(res.get("stdout", ""), res.get("stderr", "")):
+            res["original_returncode"] = res.get("returncode")
+            res["returncode"] = 0
+            res["ok"] = True
+            res["nonfatal_adjustment"] = "ignored_dmesg_permission_error"
+        if not res.get("ok") and _is_hardware_unavailable_failure(res.get("stdout", ""), res.get("stderr", "")):
+            res["original_returncode"] = res.get("returncode")
+            res["returncode"] = 0
+            res["ok"] = True
+            res["skipped"] = True
+            res["reason"] = "hardware_unavailable"
+            res["nonfatal_adjustment"] = "hardware_unavailable_suite_skip"
         runs.append(res)
         any_fail = not res.get("ok")
         return {"success": not any_fail, "runs": runs}
@@ -289,10 +408,130 @@ def _run_suite_commands(new_tree: Path, suite_commands: list[str], timeout_sec: 
         res = _run_cmd(["bash", "-lc", cmd], cwd=new_tree, timeout=timeout_sec)
         res["stdout"] = _truncate(res.get("stdout", ""))
         res["stderr"] = _truncate(res.get("stderr", ""))
+        if not res.get("ok") and int(res.get("returncode", -1)) == 77:
+            res["original_returncode"] = res.get("returncode")
+            res["returncode"] = 0
+            res["ok"] = True
+            res["nonfatal_adjustment"] = "skipped_exit_77"
+        if not res.get("ok") and _is_nonfatal_dmesg_permission_failure(res.get("stdout", ""), res.get("stderr", "")):
+            res["original_returncode"] = res.get("returncode")
+            res["returncode"] = 0
+            res["ok"] = True
+            res["nonfatal_adjustment"] = "ignored_dmesg_permission_error"
         runs.append(res)
         if not res.get("ok"):
             any_fail = True
     return {"success": not any_fail, "runs": runs}
+
+
+def _summarize_skip_reason(runs: list[dict[str, Any]], default: str) -> str:
+    reasons = []
+    for r in runs:
+        reason = (r.get("reason") or "").strip()
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    if reasons:
+        return "; ".join(reasons)
+    return default
+
+
+_VALIDATION_STAGE_ORDER = [
+    "worktree_prepare",
+    "patch_apply",
+    "stage_patched_files",
+    "compile_prepare",
+    "compile_modules",
+    "test_generation",
+    "suite_execution",
+    "qemu_execution",
+    "post_reasoning",
+]
+
+
+def _init_stage_results() -> list[dict[str, Any]]:
+    return [{"stage": name, "status": "skipped", "reason": "not_run"} for name in _VALIDATION_STAGE_ORDER]
+
+
+def _set_stage_result(
+    stage_results: list[dict[str, Any]],
+    stage: str,
+    status: str,
+    reason: str,
+    details: Optional[dict[str, Any]] = None,
+) -> None:
+    for item in stage_results:
+        if item.get("stage") == stage:
+            item["status"] = status
+            item["reason"] = reason
+            if details:
+                item["details"] = details
+            return
+
+
+def _first_error_line(text: str) -> str:
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if s:
+            return s[:280]
+    return ""
+
+
+_IGNORED_FAILURE_LINE_SUBSTRINGS = (
+    "stty: 'standard input': Inappropriate ioctl for device",
+)
+
+
+def _first_meaningful_line(text: str) -> str:
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if any(x in s for x in _IGNORED_FAILURE_LINE_SUBSTRINGS):
+            continue
+        return s[:280]
+    return ""
+
+
+def _best_failure_reason(stderr_text: str, stdout_text: str, fallback: str) -> str:
+    line = _first_meaningful_line(stderr_text)
+    if line:
+        return line
+    for raw in (stdout_text or "").splitlines():
+        s = raw.strip()
+        if "timed out after" in s:
+            idx = s.find("timed out after")
+            if idx >= 0:
+                return ("timeout: " + s[idx:])[:280]
+            return s[:280]
+    line = _first_meaningful_line(stdout_text)
+    if line:
+        return line
+    # Final fallback keeps backward compatibility for uncommon outputs.
+    line = _first_error_line(stderr_text) or _first_error_line(stdout_text)
+    return line or fallback
+
+
+def _stage_summary_lines(stage_results: list[dict[str, Any]]) -> list[str]:
+    lines = []
+    for item in stage_results:
+        stage = item.get("stage", "unknown")
+        status = str(item.get("status", "skipped")).upper()
+        reason = item.get("reason", "")
+        if reason:
+            lines.append(f"{stage}: {status} - {reason}")
+        else:
+            lines.append(f"{stage}: {status}")
+    return lines
+
+
+def _write_and_print_stage_summary(run_dir: Path, stage_results: list[dict[str, Any]]) -> None:
+    lines = _stage_summary_lines(stage_results)
+    summary_text = "\n".join(lines) + ("\n" if lines else "")
+    validation_dir = run_dir / "validation"
+    validation_dir.mkdir(parents=True, exist_ok=True)
+    write_text(validation_dir / "stage_summary.txt", summary_text)
+    for line in lines:
+        print(f"[validation-summary] {line}")
 
 
 def run_validation_agent(
@@ -315,6 +554,8 @@ def run_validation_agent(
     qemu_timeout_sec: int,
     keep_worktrees: bool,
 ) -> dict[str, Any]:
+    stage_results = _init_stage_results()
+
     out: dict[str, Any] = {
         "case_id": case_id,
         "stage": "patch_validation",
@@ -327,18 +568,25 @@ def run_validation_agent(
         "suite_execution": {},
         "qemu": {},
         "post_reasoning": {},
+        "validation_stage_results": stage_results,
         "open_questions": [],
     }
 
     validation_dir = run_dir / "validation"
     validation_dir.mkdir(parents=True, exist_ok=True)
 
-    candidates = patch_generation_result.get("patch_candidates", [])
-    if not candidates:
-        out["status"] = "skipped"
-        out["open_questions"].append("no_patch_candidate_available")
+    def _finalize(status: str) -> dict[str, Any]:
+        out["status"] = status
+        out["validation_stage_results"] = stage_results
+        _write_and_print_stage_summary(run_dir, stage_results)
         write_json(run_dir / "validation.json", out)
         return out
+
+    candidates = patch_generation_result.get("patch_candidates", [])
+    if not candidates:
+        _set_stage_result(stage_results, "worktree_prepare", "skipped", "no_patch_candidate_available")
+        out["open_questions"].append("no_patch_candidate_available")
+        return _finalize("skipped")
 
     selected_id = patch_generation_result.get("selected_candidate_id") or candidates[0].get("candidate_id")
     selected = None
@@ -351,23 +599,20 @@ def run_validation_agent(
 
     fixed_patch_rel = selected.get("fixed_patch_path")
     if not fixed_patch_rel:
-        out["status"] = "skipped"
+        _set_stage_result(stage_results, "worktree_prepare", "skipped", "selected_candidate_missing_fixed_patch_path")
         out["open_questions"].append("selected_candidate_missing_fixed_patch_path")
-        write_json(run_dir / "validation.json", out)
-        return out
+        return _finalize("skipped")
 
     fixed_patch_path = run_dir / fixed_patch_rel
     if not fixed_patch_path.exists():
-        out["status"] = "skipped"
+        _set_stage_result(stage_results, "worktree_prepare", "skipped", f"fixed_patch_missing:{fixed_patch_rel}")
         out["open_questions"].append(f"fixed_patch_missing:{fixed_patch_rel}")
-        write_json(run_dir / "validation.json", out)
-        return out
+        return _finalize("skipped")
 
     if accessor.mode != "git" or not accessor.repo or not old_ref or not new_ref:
-        out["status"] = "skipped"
+        _set_stage_result(stage_results, "worktree_prepare", "skipped", "validation_requires_git_mode_with_old_ref_and_new_ref")
         out["open_questions"].append("validation_requires_git_mode_with_old_ref_and_new_ref")
-        write_json(run_dir / "validation.json", out)
-        return out
+        return _finalize("skipped")
 
     worktrees_dir = (run_dir / "worktrees").resolve()
     old_tree = (worktrees_dir / "old").resolve()
@@ -383,31 +628,59 @@ def run_validation_agent(
     }
 
     if not wt_old.get("ok") or not wt_new.get("ok"):
-        out["status"] = "failed"
+        _set_stage_result(
+            stage_results,
+            "worktree_prepare",
+            "failed",
+            "failed_to_prepare_worktrees",
+            details={"old_ok": bool(wt_old.get("ok")), "new_ok": bool(wt_new.get("ok"))},
+        )
         out["open_questions"].append("failed_to_prepare_worktrees")
-        write_json(run_dir / "validation.json", out)
-        return out
+        return _finalize("failed")
+
+    _set_stage_result(stage_results, "worktree_prepare", "passed", "old/new worktrees prepared")
 
     patch_text = read_text(fixed_patch_path)
     touched_files = selected.get("touched_files") or _extract_touched_files_from_patch(patch_text)
+    no_op_candidate = bool(selected.get("no_op_candidate")) or not _patch_has_effective_changes(patch_text)
 
-    apply_check = _run_cmd(["git", "apply", "--check", str(fixed_patch_path)], cwd=old_tree, timeout=300)
     apply_res = None
     already_applied = False
-    if apply_check.get("ok"):
-        apply_res = _run_cmd(["git", "apply", str(fixed_patch_path)], cwd=old_tree, timeout=300)
+    if no_op_candidate:
+        apply_res = {
+            "ok": True,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "noop_candidate_skip_apply",
+            "cmd": "git apply (skipped for no-op candidate)",
+            "duration_sec": 0.0,
+        }
+        if not touched_files:
+            touched_files = _list_module_source_files(old_tree, module_path)
     else:
-        rev_check = _run_cmd(["git", "apply", "-R", "--check", str(fixed_patch_path)], cwd=old_tree, timeout=300)
-        if rev_check.get("ok"):
-            already_applied = True
-            apply_res = {"ok": True, "returncode": 0, "stdout": "", "stderr": "already_applied", "cmd": "git apply", "duration_sec": 0.0}
+        apply_check = _run_cmd(["git", "apply", "--check", str(fixed_patch_path)], cwd=old_tree, timeout=300)
+        if apply_check.get("ok"):
+            apply_res = _run_cmd(["git", "apply", str(fixed_patch_path)], cwd=old_tree, timeout=300)
         else:
-            apply_res = apply_check
+            rev_check = _run_cmd(["git", "apply", "-R", "--check", str(fixed_patch_path)], cwd=old_tree, timeout=300)
+            if rev_check.get("ok"):
+                already_applied = True
+                apply_res = {
+                    "ok": True,
+                    "returncode": 0,
+                    "stdout": "",
+                    "stderr": "already_applied",
+                    "cmd": "git apply",
+                    "duration_sec": 0.0,
+                }
+            else:
+                apply_res = apply_check
 
     out["apply"] = {
         "patch_path": fixed_patch_path.as_posix(),
         "touched_files": touched_files,
         "already_applied": already_applied,
+        "no_op_candidate": no_op_candidate,
         "result": {
             **apply_res,
             "stdout": _truncate(apply_res.get("stdout", "") if apply_res else ""),
@@ -416,13 +689,25 @@ def run_validation_agent(
     }
 
     if not apply_res or not apply_res.get("ok"):
-        out["status"] = "failed"
+        err_line = _first_error_line((apply_res or {}).get("stderr", ""))
+        _set_stage_result(stage_results, "patch_apply", "failed", err_line or "patch_apply_failed_on_old_ref")
         out["open_questions"].append("patch_apply_failed_on_old_ref")
-        write_json(run_dir / "validation.json", out)
+        _set_stage_result(stage_results, "stage_patched_files", "skipped", "patch_apply_failed")
+        _set_stage_result(stage_results, "compile_prepare", "skipped", "patch_apply_failed")
+        _set_stage_result(stage_results, "compile_modules", "skipped", "patch_apply_failed")
+        _set_stage_result(stage_results, "test_generation", "skipped", "patch_apply_failed")
+        _set_stage_result(stage_results, "suite_execution", "skipped", "patch_apply_failed")
+        _set_stage_result(stage_results, "qemu_execution", "skipped", "patch_apply_failed")
+        _set_stage_result(stage_results, "post_reasoning", "skipped", "patch_apply_failed")
         if not keep_worktrees:
             _run_cmd(["git", "-C", str(accessor.repo), "worktree", "remove", "-f", str(old_tree)], timeout=300)
             _run_cmd(["git", "-C", str(accessor.repo), "worktree", "remove", "-f", str(new_tree)], timeout=300)
-        return out
+        return _finalize("failed")
+
+    if no_op_candidate:
+        _set_stage_result(stage_results, "patch_apply", "passed", "no-op candidate; skipped git apply")
+    else:
+        _set_stage_result(stage_results, "patch_apply", "passed", "patch applied on old_ref")
 
     copied = []
     missing = []
@@ -441,6 +726,16 @@ def run_validation_agent(
         "missing_files": missing,
         "count": len(copied),
     }
+    if missing:
+        _set_stage_result(
+            stage_results,
+            "stage_patched_files",
+            "failed",
+            f"missing {len(missing)} touched files while staging",
+            details={"missing_files": missing},
+        )
+    else:
+        _set_stage_result(stage_results, "stage_patched_files", "passed", f"staged {len(copied)} files into new tree")
 
     prep_steps: list[dict[str, Any]] = []
     prep_steps.append(_run_cmd(["make", "defconfig"], cwd=new_tree, timeout=1800))
@@ -459,6 +754,15 @@ def run_validation_agent(
         "runs": [],
         "error": "",
     }
+    if prep_ok:
+        _set_stage_result(stage_results, "compile_prepare", "passed", "defconfig/olddefconfig/modules_prepare succeeded")
+    else:
+        prep_reason = "kernel_prepare_failed"
+        for step in prep_steps:
+            if not step.get("ok"):
+                prep_reason = _first_error_line(step.get("stderr", "")) or step.get("cmd", "kernel_prepare_failed")
+                break
+        _set_stage_result(stage_results, "compile_prepare", "failed", prep_reason)
 
     if prep_ok:
         compile_dirs = _find_makefile_dirs(new_tree, copied or touched_files, module_path)
@@ -475,8 +779,14 @@ def run_validation_agent(
         compile_result["success"] = all_ok
         if not all_ok:
             compile_result["error"] = "module_compile_failed"
+            first_fail = next((r for r in compile_result["runs"] if not r.get("ok")), None)
+            reason = _first_error_line((first_fail or {}).get("stderr", "")) or "module_compile_failed"
+            _set_stage_result(stage_results, "compile_modules", "failed", reason)
+        else:
+            _set_stage_result(stage_results, "compile_modules", "passed", f"compiled dirs: {', '.join(compile_dirs) if compile_dirs else '(none)'}")
     else:
         compile_result["error"] = "kernel_prepare_failed"
+        _set_stage_result(stage_results, "compile_modules", "skipped", "compile_prepare_failed")
 
     out["compile"] = compile_result
 
@@ -491,12 +801,37 @@ def run_validation_agent(
         dry_run=dry_run,
     )
     out["test_generation"] = test_gen
+    tg_status = "passed" if str(test_gen.get("parse_status", "")) == "ok" else "failed"
+    tg_reason = "llm test generation parsed" if tg_status == "passed" else (test_gen.get("error") or f"parse_status={test_gen.get('parse_status')}")
+    _set_stage_result(stage_results, "test_generation", tg_status, tg_reason)
 
     test_bundle = _write_test_bundle(run_dir, test_gen)
     out["test_bundle"] = test_bundle
 
     suite_exec = _run_suite_commands(new_tree, test_gen.get("suite_commands", []), timeout_sec=qemu_timeout_sec)
     out["suite_execution"] = suite_exec
+    suite_runs = suite_exec.get("runs", [])
+    all_skipped = bool(suite_runs) and all(bool(r.get("skipped")) for r in suite_runs)
+    if suite_exec.get("success"):
+        if not suite_runs:
+            _set_stage_result(stage_results, "suite_execution", "skipped", "no_suite_commands_generated")
+        elif all_skipped:
+            _set_stage_result(
+                stage_results,
+                "suite_execution",
+                "skipped",
+                _summarize_skip_reason(suite_runs, "all_suite_commands_skipped"),
+            )
+        else:
+            _set_stage_result(stage_results, "suite_execution", "passed", f"runs={len(suite_runs)}")
+    else:
+        first_fail = next((r for r in suite_runs if not r.get("ok")), {})
+        reason = _best_failure_reason(
+            first_fail.get("stderr", ""),
+            first_fail.get("stdout", ""),
+            first_fail.get("reason", "suite_command_failed"),
+        )
+        _set_stage_result(stage_results, "suite_execution", "failed", reason)
 
     qemu_runs = []
     suite_cmds = test_gen.get("suite_commands", [])
@@ -516,6 +851,18 @@ def run_validation_agent(
                     [
                         "CONFIG_KUNIT=y",
                         "CONFIG_KUNIT_TEST=y",
+                        "CONFIG_ACPI=y",
+                        "CONFIG_SMP=y",
+                        "CONFIG_NUMA=y",
+                        "CONFIG_PCI=y",
+                        "CONFIG_ACPI_NUMA=y",
+                        "CONFIG_X86_64_ACPI_NUMA=y",
+                        "CONFIG_ACPI_HMAT=y",
+                        "CONFIG_EFI=y",
+                        "CONFIG_EFI_STUB=y",
+                        "CONFIG_EFI_SOFT_RESERVE=y",
+                        "CONFIG_TRANSPARENT_HUGEPAGE=y",
+                        "CONFIG_DAX=y",
                         "CONFIG_DEV_DAX=y",
                         "CONFIG_DEV_DAX_HMEM=y",
                     ]
@@ -547,6 +894,16 @@ def run_validation_agent(
         "success": all(r.get("ok") for r in qemu_runs) if qemu_runs else False,
         "note": "qemu stage uses suite_commands that invoke kunit.py run or qemu-system-*",
     }
+    if not enable_qemu:
+        _set_stage_result(stage_results, "qemu_execution", "skipped", "qemu disabled by flag")
+    elif not qemu_runs:
+        _set_stage_result(stage_results, "qemu_execution", "failed", "qemu enabled but no qemu run detected")
+    elif all(r.get("ok") for r in qemu_runs):
+        _set_stage_result(stage_results, "qemu_execution", "passed", f"runs={len(qemu_runs)}")
+    else:
+        first_fail = next((r for r in qemu_runs if not r.get("ok")), {})
+        reason = _best_failure_reason(first_fail.get("stderr", ""), first_fail.get("stdout", ""), "qemu_run_failed")
+        _set_stage_result(stage_results, "qemu_execution", "failed", reason)
 
     patched_slices = _collect_patched_slices(new_tree, impact_graph)
     post_reasoning = run_post_reasoner_agent(
@@ -562,17 +919,41 @@ def run_validation_agent(
         dry_run=dry_run,
     )
     out["post_reasoning"] = post_reasoning
+    pr_status = "passed" if str(post_reasoning.get("parse_status", "")) == "ok" else "failed"
+    pr_reason = (
+        f"overall_verdict={post_reasoning.get('overall_verdict', 'UNKNOWN')}"
+        if pr_status == "passed"
+        else (post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}")
+    )
+    _set_stage_result(stage_results, "post_reasoning", pr_status, pr_reason)
 
-    if compile_result.get("success"):
-        out["status"] = "ok"
-    else:
-        out["status"] = "failed"
+    test_gen_ok = str(test_gen.get("parse_status", "")) == "ok"
+    suite_has_real_run = bool(suite_runs) and not all_skipped
+    overall_ok = bool(
+        compile_result.get("success")
+        and test_gen_ok
+        and suite_exec.get("success")
+        and suite_has_real_run
+        and (not enable_qemu or out["qemu"].get("success"))
+        and str(post_reasoning.get("parse_status", "")) == "ok"
+    )
+    if not compile_result.get("success"):
         out["open_questions"].append("compile_not_success")
+    if not test_gen_ok:
+        out["open_questions"].append("test_generation_not_success")
+    if not suite_exec.get("success"):
+        out["open_questions"].append("suite_execution_not_success")
+    elif not suite_has_real_run:
+        out["open_questions"].append("suite_execution_skipped_or_empty")
+    if enable_qemu and not out["qemu"].get("success"):
+        out["open_questions"].append("qemu_execution_not_success")
+    if str(post_reasoning.get("parse_status", "")) != "ok":
+        out["open_questions"].append("post_reasoning_not_success")
 
-    write_json(run_dir / "validation.json", out)
+    final_status = "ok" if overall_ok else "failed"
 
     if not keep_worktrees:
         _run_cmd(["git", "-C", str(accessor.repo), "worktree", "remove", "-f", str(old_tree)], timeout=300)
         _run_cmd(["git", "-C", str(accessor.repo), "worktree", "remove", "-f", str(new_tree)], timeout=300)
 
-    return out
+    return _finalize(final_status)

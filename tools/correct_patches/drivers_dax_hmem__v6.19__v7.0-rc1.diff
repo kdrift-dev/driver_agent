@@ -1,0 +1,33 @@
+diff --git a/drivers/dax/hmem/device.c b/drivers/dax/hmem/device.c
+index f9e1a76a04a9..56e3cbd181b5 100644
+--- a/drivers/dax/hmem/device.c
++++ b/drivers/dax/hmem/device.c
+@@ -83,8 +83,7 @@ static __init int hmem_register_one(struct resource *res, void *data)
+ 
+ static __init int hmem_init(void)
+ {
+-	walk_iomem_res_desc(IORES_DESC_SOFT_RESERVED,
+-			IORESOURCE_MEM, 0, -1, NULL, hmem_register_one);
++	walk_soft_reserve_res(0, -1, NULL, hmem_register_one);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/dax/hmem/hmem.c b/drivers/dax/hmem/hmem.c
+index c18451a37e4f..1cf7c2a0ee1c 100644
+--- a/drivers/dax/hmem/hmem.c
++++ b/drivers/dax/hmem/hmem.c
+@@ -73,11 +73,12 @@ static int hmem_register_device(struct device *host, int target_nid,
+ 		return 0;
+ 	}
+ 
+-	rc = region_intersects(res->start, resource_size(res), IORESOURCE_MEM,
+-			       IORES_DESC_SOFT_RESERVED);
++	rc = region_intersects_soft_reserve(res->start, resource_size(res));
+ 	if (rc != REGION_INTERSECTS)
+ 		return 0;
+ 
++	/* TODO: Add Soft-Reserved memory back to iomem */
++
+ 	id = memregion_alloc(GFP_KERNEL);
+ 	if (id < 0) {
+ 		dev_err(host, "memregion allocation failure for %pr\n", res);

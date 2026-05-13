@@ -8,9 +8,15 @@ from .prompts import build_post_reasoner_prompt, build_pre_reasoner_prompt
 from .utils import read_text
 
 
-def _collect_slices(extracted_dir: Path, impact_graph: dict[str, Any], max_chars: int = 6000) -> list[dict[str, Any]]:
+def _collect_slices(
+    extracted_dir: Path,
+    impact_graph: dict[str, Any],
+    *,
+    list_key: str = "affected_functions",
+    max_chars: int = 6000,
+) -> list[dict[str, Any]]:
     out = []
-    for afn in impact_graph.get("affected_functions", []):
+    for afn in impact_graph.get(list_key, []):
         rel = afn.get("local_slice_path")
         if not rel:
             continue
@@ -49,7 +55,8 @@ def run_pre_reasoner_agent(
         "kernel_definition_diffs": kernel_definition_diffs,
         "impact_graph": impact_graph,
         "callback_graph": callback_graph,
-        "affected_function_slices": _collect_slices(extracted_dir, impact_graph),
+        "affected_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="affected_functions"),
+        "context_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="context_functions"),
         "instruction": "Judge old driver compatibility against new kernel obligations and provide textual patch guidance.",
     }
 
@@ -62,6 +69,11 @@ def run_pre_reasoner_agent(
         "module_level_findings": ["dry-run or no-provider placeholder"],
         "hard_check_requirements": [],
         "semantic_check_requirements": [],
+        "required_changes": [],
+        "optional_changes": [],
+        "unsupported_assumptions": [],
+        "evidence_used": [],
+        "confidence": "low",
     }
 
     return llm_client.call_json(
@@ -108,6 +120,11 @@ def run_post_reasoner_agent(
         "function_results": [],
         "module_level_findings": ["dry-run or no-provider placeholder"],
         "remaining_open_questions": [],
+        "required_changes": [],
+        "optional_changes": [],
+        "unsupported_assumptions": [],
+        "evidence_used": [],
+        "confidence": "low",
     }
 
     return llm_client.call_json(

@@ -83,7 +83,6 @@ def run_definition_locator(
                 )
                 old_hits = _filter_function_like_hits(old_hits, name)
                 new_hits = _filter_function_like_hits(new_hits, name)
-
                 if not old_hits:
                     old_hits = accessor.search(
                         "old",

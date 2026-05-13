@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import unicodedata
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -13,6 +14,31 @@ from typing import Any, Iterable, Optional
 
 class CommandError(RuntimeError):
     """Raised when a shell command fails."""
+
+
+_CMD_SEMAPHORE_LOCK = threading.Lock()
+_CMD_SEMAPHORE: Optional[threading.BoundedSemaphore] = None
+_CMD_SEMAPHORE_SIZE: Optional[int] = None
+
+
+def _command_gate() -> Optional[threading.BoundedSemaphore]:
+    """Lazily create a process-level gate to limit concurrent subprocess calls."""
+    global _CMD_SEMAPHORE, _CMD_SEMAPHORE_SIZE
+    raw = os.getenv("DRIVER_AGENT_MAX_SUBPROCS", "").strip()
+    if not raw:
+        return None
+    try:
+        limit = int(raw)
+    except ValueError:
+        return None
+    if limit <= 0:
+        return None
+
+    with _CMD_SEMAPHORE_LOCK:
+        if _CMD_SEMAPHORE is None or _CMD_SEMAPHORE_SIZE != limit:
+            _CMD_SEMAPHORE = threading.BoundedSemaphore(limit)
+            _CMD_SEMAPHORE_SIZE = limit
+        return _CMD_SEMAPHORE
 
 
 def now_timestamp() -> str:
@@ -58,14 +84,26 @@ def run_cmd(
     check: bool = True,
     timeout: Optional[int] = None,
 ) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-    )
+    gate = _command_gate()
+    if gate is None:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    else:
+        with gate:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(cwd) if cwd else None,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+            )
     if check and proc.returncode != 0:
         raise CommandError(
             f"Command failed ({proc.returncode}): {' '.join(cmd)}\n"

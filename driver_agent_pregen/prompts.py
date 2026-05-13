@@ -10,6 +10,10 @@ Task: generate migration-specific pre/post conditions for affected driver functi
 Constraints:
 1. Only use evidence present in input.
 2. If evidence is missing, keep open_questions and do not invent kernel semantics.
+3. Do not require edits unless compatibility obligations are directly supported by evidence.
+4. Separate required compatibility changes from optional modernization/cleanup.
+5. If API usage remains source-compatible and no strong evidence proves it incorrect, mark as optional or UNKNOWN.
+6. Do not require caller/sibling edits unless evidence shows caller-visible contract/resource/locking/cleanup changes.
 3. Output MUST be strict JSON matching the required schema.
 """.strip()
 
@@ -22,6 +26,10 @@ Constraints:
 2. Use UNKNOWN when evidence is insufficient.
 3. Every claim must cite evidence from input.
 4. Generate textual patch guidance only, no code patch.
+5. Do not require edits unless compatibility obligations are directly supported by evidence.
+6. Separate required compatibility changes from optional modernization/cleanup.
+7. If API usage remains source-compatible and no strong evidence proves it incorrect, mark as optional or UNKNOWN.
+8. Do not require caller/sibling edits unless evidence shows caller-visible contract/resource/locking/cleanup changes.
 5. Output MUST be strict JSON matching the required schema.
 """.strip()
 
@@ -45,6 +53,9 @@ Constraints:
 1. Verdict must be PASS, FAIL, or UNKNOWN.
 2. Use UNKNOWN when evidence is insufficient.
 3. Every claim must cite evidence from input.
+4. Post-patch MATCH/PASS means the patch satisfies stated compatibility obligations, not global correctness.
+5. Separate required compatibility changes from optional modernization/cleanup.
+6. If evidence is insufficient for semantic correctness, prefer UNKNOWN and list unsupported assumptions.
 4. Output MUST be strict JSON matching the required schema.
 """.strip()
 
@@ -56,7 +67,11 @@ Constraints:
 1. Focus on init/probe/remove/pm/irq/workqueue/timer or module entry paths relevant to the module.
 2. Prefer executable commands and clear pass/fail assertions.
 3. Do not invent unavailable hardware; when hardware is uncertain, provide graceful-skip logic.
-4. Output MUST be strict JSON matching the required schema.
+4. For shell suites, avoid brittle early-exit style:
+   - do NOT use `set -e`
+   - use per-test return-code handling
+   - on missing hardware/platform prerequisites, mark test as SKIP instead of FAIL
+5. Output MUST be strict JSON matching the required schema.
 """.strip()
 
 
@@ -75,11 +90,21 @@ def build_pre_spec_prompt(input_payload: dict[str, Any]) -> str:
                 "relevant_kernel_contract": "string",
                 "evidence": ["string"],
                 "open_questions": ["string"],
+                "required_changes": ["string"],
+                "optional_changes": ["string"],
+                "unsupported_assumptions": ["string"],
+                "evidence_used": ["string"],
+                "confidence": "high|medium|low",
             }
         ],
         "module_spec": {
             "summary": "string",
             "required_module_level_properties": ["string"],
+            "required_changes": ["string"],
+            "optional_changes": ["string"],
+            "unsupported_assumptions": ["string"],
+            "evidence_used": ["string"],
+            "confidence": "high|medium|low",
         },
     }
     return (
@@ -108,11 +133,21 @@ def build_pre_reasoner_prompt(input_payload: dict[str, Any]) -> str:
                 "trigger_condition": "string",
                 "reasoning": "string",
                 "patch_guidance": "string",
+                "required_changes": ["string"],
+                "optional_changes": ["string"],
+                "unsupported_assumptions": ["string"],
+                "evidence_used": ["string"],
+                "confidence": "high|medium|low",
             }
         ],
         "module_level_findings": ["string"],
         "hard_check_requirements": ["string"],
         "semantic_check_requirements": ["string"],
+        "required_changes": ["string"],
+        "optional_changes": ["string"],
+        "unsupported_assumptions": ["string"],
+        "evidence_used": ["string"],
+        "confidence": "high|medium|low",
     }
     return (
         PRE_REASONER_INSTRUCTION
@@ -166,10 +201,20 @@ def build_post_reasoner_prompt(input_payload: dict[str, Any]) -> str:
                 "patched_behavior": "string",
                 "evidence": ["string"],
                 "residual_risk": "string",
+                "required_changes": ["string"],
+                "optional_changes": ["string"],
+                "unsupported_assumptions": ["string"],
+                "evidence_used": ["string"],
+                "confidence": "high|medium|low",
             }
         ],
         "module_level_findings": ["string"],
         "remaining_open_questions": ["string"],
+        "required_changes": ["string"],
+        "optional_changes": ["string"],
+        "unsupported_assumptions": ["string"],
+        "evidence_used": ["string"],
+        "confidence": "high|medium|low",
     }
     return (
         POST_REASONER_INSTRUCTION

@@ -1,0 +1,5 @@
+diff --git a/drivers/gpu/vga/vga_switcheroo.c b/drivers/gpu/vga/vga_switcheroo.c
+--- a/drivers/gpu/vga/vga_switcheroo.c
++++ b/drivers/gpu/vga/vga_switcheroo.c
+@@ -1 +1 @@
+ /* no changes required: all APIs confirmed compatible with v7.0-rc1 */

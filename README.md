@@ -79,6 +79,9 @@ python pregen_driver_agent.py \
 ### Optional runtime execution switches
 
 - `--patch-candidates N`: request N patch candidates from LLM (default `1`)
+- `--affected-func-signal-mode {kernel_only|kernel_plus_other_drivers}`:
+  - `kernel_only`: strictly kernel-side evidence; excludes all `drivers/` commits from migration hint mining.
+  - `kernel_plus_other_drivers` (default): allows migration hints from non-target drivers; target module path is still excluded.
 - `--enable-qemu`: allow validation stage to execute suite commands that invoke `kunit.py run` / `qemu-system-*`
 - `--qemu-timeout-sec SEC`: timeout for suite/qemu commands (default `3600`)
 - `--cleanup-worktrees`: remove temporary old/new git worktrees after validation
@@ -126,3 +129,39 @@ runs/pregen/<case_id>/<timestamp>/
 - The patch line fixer repairs hunk counts and attempts line-number alignment from old module sources.
 - Validation currently uses `make defconfig + olddefconfig + modules_prepare` before module compile.
 - QEMU execution depends on generated suite commands; if none include qemu/kunit run, qemu stage is reported but not actively booted.
+
+## Spec Gap Evaluation Harness
+
+Use `tools/analyze_spec_gap.py` to audit FM-Agent-style spec/reasoning gaps on existing run artifacts.
+
+```bash
+python tools/analyze_spec_gap.py \
+  --runs-dir workflow/runs/pregen_small8_20260511_152828 \
+  --reference-root /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
+  --old-ref v6.19 \
+  --new-ref v7.0-rc1 \
+  --modules-file workflow/runs/pregen_small8_20260511_152828/modules.txt \
+  --out-dir workflow/runs/spec_gap_analysis_20260512_8cases \
+  --emit-8case-table
+```
+
+Outputs:
+- `spec_gap_cases.csv`
+- `spec_gap_summary.json`
+- `spec_gap_report.md`
+- `case_reports/<case_id>.md`
+- `8case_spec_gap_table.csv` (when `--emit-8case-table` is enabled)
+
+For targeted `AFFECTED_FUNCTION_MISS` tracing:
+
+```bash
+python tools/analyze_affected_miss.py \
+  --baseline-dir workflow/runs/spec_gap_analysis_20260512_8cases_v2 \
+  --out-dir workflow/runs/affected_miss_analysis_20260513_baseline
+```
+
+Outputs:
+- `affected_miss_root_cause.csv`
+- `affected_miss_root_cause_summary.json`
+- `affected_miss_report.md`
+- `case_reports/<case_id>_affected_miss.md`

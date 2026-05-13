@@ -40,12 +40,16 @@ def run_module_source_loader(
     *,
     module_path: str,
     extracted_dir: Path,
+    restrict_files_old: set[str] | None = None,
 ) -> ModuleSourceResult:
     ensure_dir(extracted_dir)
     old_exists = accessor.module_path_exists("old", module_path)
     new_exists = accessor.module_path_exists("new", module_path)
 
     files = accessor.list_module_files("old", module_path, extensions=SOURCE_EXTENSIONS) if old_exists else []
+    if restrict_files_old is not None:
+        allow = set(restrict_files_old)
+        files = [f for f in files if f in allow]
     headers = [f for f in files if Path(f).suffix.lower() in {".h", ".hpp", ".hh"}]
 
     copied_root = extracted_dir / "old_module_sources"
@@ -71,7 +75,11 @@ def run_module_source_loader(
         "source_files_old": files,
         "headers_old": headers,
         "module_loc_old": module_loc,
-        "note": "module path is user-provided; no buildable unit inference performed",
+        "note": (
+            "module path is user-provided; no buildable unit inference performed"
+            if restrict_files_old is None
+            else "module path is user-provided; old files restricted by caller filter"
+        ),
     }
     write_json(extracted_dir / "module_source.json", payload)
 

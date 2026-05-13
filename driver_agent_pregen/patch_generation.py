@@ -45,6 +45,28 @@ def _list_touched_files_from_patch(patch_text: str) -> list[str]:
     return out
 
 
+def _has_effective_changes(patch_text: str) -> bool:
+    removed: list[str] = []
+    added: list[str] = []
+    for line in (patch_text or "").splitlines():
+        if line.startswith("+++ ") or line.startswith("--- "):
+            continue
+        if line.startswith("@@") or line.startswith("diff --git ") or line.startswith("index "):
+            continue
+        if line.startswith("-"):
+            removed.append(line[1:])
+            continue
+        if line.startswith("+"):
+            added.append(line[1:])
+            continue
+    if not removed and not added:
+        return False
+    # A frequent LLM artifact is emitting equal +/- lines (net zero change).
+    if len(removed) == len(added) and removed == added:
+        return False
+    return True
+
+
 def _normalize_patch_semantics(patch_text: str) -> tuple[str, list[str]]:
     """
     Deterministic post-fix for known migration-sensitive idioms.
@@ -108,6 +130,19 @@ def _collect_file_contents(extracted_dir: Path, paths: Iterable[str]) -> dict[st
         p = base / rel
         if p.exists() and p.is_file():
             out[rel] = read_text(p)
+    return out
+
+
+def _list_module_source_paths(extracted_dir: Path, module_path: str) -> list[str]:
+    root = extracted_dir / "old_module_sources" / module_path
+    if not root.exists():
+        return []
+    out: list[str] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(extracted_dir / "old_module_sources").as_posix()
+        out.append(rel)
     return out
 
 
@@ -186,6 +221,54 @@ def _heuristic_patch_from_guidance(
     }
 
 
+def _extract_raw_candidates(llm_output: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = llm_output.get("patch_candidates", [])
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+
+    parsed = llm_output.get("parsed_json")
+    if isinstance(parsed, dict):
+        nested = parsed.get("patch_candidates", [])
+        if isinstance(nested, dict):
+            return [nested]
+        if isinstance(nested, list):
+            return [x for x in nested if isinstance(x, dict)]
+
+    direct_patch = (
+        llm_output.get("patch_diff")
+        or llm_output.get("patch_text")
+        or llm_output.get("diff")
+        or llm_output.get("patch")
+        or ""
+    )
+    if isinstance(direct_patch, str) and direct_patch.strip():
+        return [{"candidate_id": "CAND-001", "patch_diff": direct_patch}]
+    return []
+
+
+def _should_emit_auto_noop(
+    *,
+    pre_reasoning: dict[str, Any],
+    compatibility_obligations: dict[str, Any],
+    impact_graph: dict[str, Any],
+) -> bool:
+    verdict = str(pre_reasoning.get("overall_verdict", "")).strip().upper()
+    if verdict != "MATCH":
+        return False
+
+    obligations = compatibility_obligations.get("obligations", [])
+    if obligations:
+        return False
+
+    affected = impact_graph.get("affected_functions", [])
+    if affected:
+        return False
+
+    return True
+
+
 def run_patch_generation_agent(
     *,
     llm_client: LLMClient,
@@ -203,6 +286,8 @@ def run_patch_generation_agent(
 ) -> dict[str, Any]:
     stage_dir = llm_calls_dir / "03_patch_generation"
     stage_dir.mkdir(parents=True, exist_ok=True)
+    patch_runs_dir = run_dir / "patch_runs"
+    patch_runs_dir.mkdir(parents=True, exist_ok=True)
 
     old_sources = _load_old_module_sources(extracted_dir, module_path)
     input_payload = {
@@ -231,18 +316,35 @@ def run_patch_generation_agent(
         "module_level_notes": ["dry-run or no-provider placeholder"],
     }
 
-    llm_output = llm_client.call_json(
-        stage_dir=stage_dir,
-        prompt_text=prompt,
-        input_payload=input_payload,
-        dry_run=dry_run,
-        default_output=default_output,
+    deterministic_noop = _should_emit_auto_noop(
+        pre_reasoning=pre_reasoning,
+        compatibility_obligations=compatibility_obligations,
+        impact_graph=impact_graph,
     )
+    if deterministic_noop:
+        write_text(stage_dir / "prompt.md", prompt)
+        write_json(stage_dir / "input.json", input_payload)
+        write_text(stage_dir / "raw_output.txt", "")
+        llm_output = {
+            "case_id": case_id,
+            "stage": "patch_generation",
+            "patch_candidates": [],
+            "module_level_notes": [
+                "deterministic_noop_short_circuit: pre_reasoning=MATCH and both obligations/affected_functions are empty"
+            ],
+            "parse_status": "skipped_auto_noop",
+        }
+        write_json(stage_dir / "parsed_output.json", llm_output)
+    else:
+        llm_output = llm_client.call_json(
+            stage_dir=stage_dir,
+            prompt_text=prompt,
+            input_payload=input_payload,
+            dry_run=dry_run,
+            default_output=default_output,
+        )
 
-    patch_runs_dir = run_dir / "patch_runs"
-    patch_runs_dir.mkdir(parents=True, exist_ok=True)
-
-    raw_candidates = llm_output.get("patch_candidates", [])
+    raw_candidates = _extract_raw_candidates(llm_output)
     normalized: list[dict[str, Any]] = []
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
@@ -250,18 +352,37 @@ def run_patch_generation_agent(
         cdir = patch_runs_dir / cid.lower().replace("/", "_")
         cdir.mkdir(parents=True, exist_ok=True)
 
-        raw_diff = _extract_diff_text(cand.get("patch_diff", ""))
+        raw_patch_blob = (
+            cand.get("patch_diff")
+            or cand.get("patch_text")
+            or cand.get("diff")
+            or cand.get("patch")
+            or ""
+        )
+        raw_diff = _extract_diff_text(raw_patch_blob)
         raw_path = cdir / "01_raw_patch.diff"
         write_text(raw_path, raw_diff)
 
         touched = cand.get("touched_files") or _list_touched_files_from_patch(raw_diff)
         file_map = _collect_file_contents(extracted_dir, touched)
         fixed_ok, fixed_text, fix_msgs = fix_patch_line_numbers(raw_diff, file_contents=file_map)
-        fixed_text, sem_msgs = _normalize_patch_semantics(fixed_text if fixed_text else raw_diff)
+        normalized_input = fixed_text if fixed_text else raw_diff
+        fixed_text, sem_msgs = _normalize_patch_semantics(normalized_input)
         fix_msgs.extend(sem_msgs)
 
+        candidate_patch = fixed_text if fixed_text else raw_diff
+        no_op_candidate = not _has_effective_changes(candidate_patch)
+        if no_op_candidate:
+            # Keep touched_files for downstream staging of old sources, but avoid emitting invalid no-op hunks.
+            candidate_patch = ""
+            fix_msgs.append("detected_no_effective_diff; normalized_to_noop_candidate")
+        elif not fixed_ok and _has_effective_changes(raw_diff):
+            # If line-fix validation fails, prefer original raw patch text as a conservative fallback.
+            candidate_patch = raw_diff
+            fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
+
         fixed_path = cdir / "02_fixed_patch.diff"
-        write_text(fixed_path, fixed_text if fixed_text else raw_diff)
+        write_text(fixed_path, candidate_patch)
 
         fix_report = {
             "candidate_id": cid,
@@ -269,6 +390,7 @@ def run_patch_generation_agent(
             "line_fix_ok": fixed_ok,
             "messages": fix_msgs,
             "touched_files": touched,
+            "no_op_candidate": no_op_candidate,
         }
         write_json(cdir / "patch_fix_report.json", fix_report)
 
@@ -284,6 +406,7 @@ def run_patch_generation_agent(
                 "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
                 "line_fix_ok": fixed_ok,
                 "line_fix_messages": fix_msgs,
+                "no_op_candidate": no_op_candidate,
             }
         )
 
@@ -304,10 +427,19 @@ def run_patch_generation_agent(
             touched = heur.get("touched_files", [])
             file_map = _collect_file_contents(extracted_dir, touched)
             fixed_ok, fixed_text, fix_msgs = fix_patch_line_numbers(raw_patch, file_contents=file_map)
-            fixed_text, sem_msgs = _normalize_patch_semantics(fixed_text if fixed_text else raw_patch)
+            normalized_input = fixed_text if fixed_text else raw_patch
+            fixed_text, sem_msgs = _normalize_patch_semantics(normalized_input)
             fix_msgs.extend(sem_msgs)
+            candidate_patch = fixed_text if fixed_text else raw_patch
+            no_op_candidate = not _has_effective_changes(candidate_patch)
+            if no_op_candidate:
+                candidate_patch = ""
+                fix_msgs.append("detected_no_effective_diff; normalized_to_noop_candidate")
+            elif not fixed_ok and _has_effective_changes(raw_patch):
+                candidate_patch = raw_patch
+                fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
             fixed_path = cdir / "02_fixed_patch.diff"
-            write_text(fixed_path, fixed_text if fixed_text else raw_patch)
+            write_text(fixed_path, candidate_patch)
 
             fix_report = {
                 "candidate_id": cid,
@@ -316,6 +448,7 @@ def run_patch_generation_agent(
                 "messages": fix_msgs,
                 "touched_files": touched,
                 "fallback_reason": heur.get("reason", ""),
+                "no_op_candidate": no_op_candidate,
             }
             write_json(cdir / "patch_fix_report.json", fix_report)
 
@@ -331,8 +464,49 @@ def run_patch_generation_agent(
                     "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
                     "line_fix_ok": fixed_ok,
                     "line_fix_messages": fix_msgs,
+                    "no_op_candidate": no_op_candidate,
                 }
             )
+
+    if not normalized and deterministic_noop:
+        cid = "CAND-AUTO-NOOP-001"
+        cdir = patch_runs_dir / cid.lower()
+        cdir.mkdir(parents=True, exist_ok=True)
+        raw_path = cdir / "01_raw_patch.diff"
+        fixed_path = cdir / "02_fixed_patch.diff"
+        write_text(raw_path, "")
+        write_text(fixed_path, "")
+        touched = _list_module_source_paths(extracted_dir, module_path)
+        fix_report = {
+            "candidate_id": cid,
+            "raw_patch_nonempty": False,
+            "line_fix_ok": True,
+            "messages": ["auto_noop_from_match_without_obligations_or_affected_functions"],
+            "touched_files": touched,
+            "no_op_candidate": True,
+        }
+        write_json(cdir / "patch_fix_report.json", fix_report)
+        normalized.append(
+            {
+                "candidate_id": cid,
+                "strategy": "auto_noop_fallback",
+                "rationale": "No patch candidate available; pre_reasoning MATCH with empty obligations and no affected functions.",
+                "evidence": [
+                    f"pre_reasoning.overall_verdict={pre_reasoning.get('overall_verdict', '')}",
+                    "compatibility_obligations.obligations is empty",
+                    "impact_graph.affected_functions is empty",
+                ],
+                "open_questions": [
+                    "LLM patch generation produced no usable candidate; auto no-op fallback used for compile/runtime validation continuity."
+                ],
+                "touched_files": touched,
+                "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
+                "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
+                "line_fix_ok": True,
+                "line_fix_messages": ["auto_noop_from_match_without_obligations_or_affected_functions"],
+                "no_op_candidate": True,
+            }
+        )
 
     out = {
         "case_id": case_id,

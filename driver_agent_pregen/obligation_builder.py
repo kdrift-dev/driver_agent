@@ -40,6 +40,9 @@ def _checks_for_change(change_type: str, old_missing_new: bool) -> tuple[list[st
     elif change_type == "include_dependency":
         hard.append("required header should be directly included when needed")
         seed = "fix include dependency and verify build visibility"
+    elif change_type == "api_migration_signal":
+        semantic.append("evaluate in-tree migration pattern and adopt replacement API if semantics match")
+        seed = "inspect migration signal and update callsite if replacement is required"
     else:
         semantic.append("re-check usage against new kernel definition")
         seed = "inspect changed contract and align call site behavior"
@@ -48,6 +51,8 @@ def _checks_for_change(change_type: str, old_missing_new: bool) -> tuple[list[st
 
 
 def _confidence_from_diff(item: dict) -> str:
+    if item.get("migration_signal"):
+        return "medium"
     if item.get("confidence") == "high":
         return "high"
     if item.get("definition_changed"):
@@ -75,13 +80,14 @@ def run_obligation_builder(
 
         missing_new = any("missing in new_ref" in q for q in item.get("open_questions", []))
         definition_changed = bool(item.get("definition_changed"))
+        migration_signal = bool(item.get("migration_signal"))
         change_type = item.get("change_type_guess", "unknown")
         affected_fns = sorted(affected_map.get(sym_key, set()))
 
         # Keep obligations focused on concrete migration deltas.
-        if not definition_changed and not missing_new:
+        if not definition_changed and not missing_new and not migration_signal:
             continue
-        if change_type == "unknown" and not missing_new:
+        if change_type == "unknown" and not missing_new and not migration_signal:
             continue
         if not affected_fns:
             # Skip noisy symbols not linked to any affected function slice.
@@ -118,6 +124,8 @@ def run_obligation_builder(
                 "confidence": _confidence_from_diff(item),
                 "open_questions": item.get("open_questions", []),
                 "patch_guidance_seed": seed,
+                "migration_signal": migration_signal,
+                "replacement_candidates": item.get("replacement_candidates", []),
             }
         )
         idx += 1

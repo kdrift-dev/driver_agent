@@ -1,0 +1,7 @@
+diff --git a/drivers/ata/pata_parport/pata_parport.c b/drivers/ata/pata_parport/pata_parport.c
+--- a/drivers/ata/pata_parport/pata_parport.c
++++ b/drivers/ata/pata_parport/pata_parport.c
+@@ -1,2 +1,2 @@
+-// SPDX-License-Identifier: GPL-2.0-only
++// SPDX-License-Identifier: GPL-2.0-only
+ /* no functional change: all APIs confirmed ABI-stable v6.19->v7.0-rc1 */

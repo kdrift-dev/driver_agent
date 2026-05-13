@@ -2,11 +2,48 @@ from __future__ import annotations
 
 import os
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
 from .utils import CommandError, run_cmd, tool_available
+
+
+_SEARCH_CACHE_LOCK = threading.Lock()
+_SEARCH_CACHE: "OrderedDict[tuple, list['SearchHit']]" = OrderedDict()
+_SEARCH_CACHE_MAX = 12000
+
+
+def _search_cache_get(key: tuple) -> Optional[list["SearchHit"]]:
+    with _SEARCH_CACHE_LOCK:
+        val = _SEARCH_CACHE.get(key)
+        if val is None:
+            return None
+        _SEARCH_CACHE.move_to_end(key)
+        return [SearchHit(path=h.path, line=h.line, text=h.text, locator=h.locator) for h in val]
+
+
+def _search_cache_put(key: tuple, value: list["SearchHit"]) -> None:
+    with _SEARCH_CACHE_LOCK:
+        _SEARCH_CACHE[key] = [SearchHit(path=h.path, line=h.line, text=h.text, locator=h.locator) for h in value]
+        _SEARCH_CACHE.move_to_end(key)
+        while len(_SEARCH_CACHE) > _SEARCH_CACHE_MAX:
+            _SEARCH_CACHE.popitem(last=False)
+
+
+def _git_grep_threads() -> int | None:
+    raw = os.getenv("DRIVER_AGENT_GIT_GREP_THREADS", "").strip()
+    if not raw:
+        return None
+    try:
+        val = int(raw)
+    except ValueError:
+        return None
+    if val <= 0:
+        return None
+    return val
 
 
 @dataclass
@@ -187,9 +224,26 @@ class RepositoryAccessor:
         max_hits: int = 80,
     ) -> list[SearchHit]:
         pathspecs = list(pathspecs or [])
+        cache_key = (
+            self.mode,
+            str(self.repo) if self.repo else "",
+            str(self._side_to_ref_or_tree(side)),
+            pattern,
+            bool(regex),
+            bool(fixed),
+            tuple(pathspecs),
+            int(max_hits),
+        )
+        cached = _search_cache_get(cache_key)
+        if cached is not None:
+            return cached
+
         if self.mode == "git":
             ref = str(self._side_to_ref_or_tree(side))
             cmd = ["git", "-C", str(self.repo), "grep", "-n", "--full-name", "-I"]
+            grep_threads = _git_grep_threads()
+            if grep_threads:
+                cmd.append(f"--threads={grep_threads}")
             if fixed:
                 cmd.append("-F")
             elif regex:
@@ -210,6 +264,7 @@ class RepositoryAccessor:
                 hits.append(SearchHit(path=path, line=line, text=text, locator="regex"))
                 if len(hits) >= max_hits:
                     break
+            _search_cache_put(cache_key, hits)
             return hits
 
         tree = Path(self._side_to_ref_or_tree(side))
@@ -254,6 +309,7 @@ class RepositoryAccessor:
             hits.append(SearchHit(path=rel_path, line=line, text=text, locator="ripgrep" if tool_available("rg") else "regex"))
             if len(hits) >= max_hits:
                 break
+        _search_cache_put(cache_key, hits)
         return hits
 
     def file_excerpt(self, side: str, relative_path: str, line: int, context: int = 20) -> str:
@@ -294,9 +350,21 @@ class RepositoryAccessor:
             return text[:max_chars] + "\n...[truncated]"
         return text
 
-    def log_s(self, symbol: str, max_count: int = 8) -> list[CommitRecord]:
+    def log_s(
+        self,
+        symbol: str,
+        max_count: int = 8,
+        *,
+        exclude_path_prefixes: Optional[Iterable[str]] = None,
+    ) -> list[CommitRecord]:
         if self.mode != "git":
             return []
+        excludes: list[str] = []
+        for raw in (exclude_path_prefixes or []):
+            pref = self._normalize_prefix(raw)
+            if pref:
+                excludes.append(pref)
+        scan_limit = max(max_count * 12, max_count + 8)
         cmd = [
             "git",
             "-C",
@@ -304,12 +372,13 @@ class RepositoryAccessor:
             "log",
             f"{self.old_ref}..{self.new_ref}",
             "--pretty=format:%H%x01%s",
-            f"--max-count={max_count}",
+            f"--max-count={scan_limit}",
             "-S",
             symbol,
         ]
         proc = run_cmd(cmd, check=False)
         records = self._parse_commit_records(proc.stdout)
+        records = self._filter_records_excluding_paths(records, excludes, max_count=max_count)
         if records:
             return records
 
@@ -322,12 +391,13 @@ class RepositoryAccessor:
             "log",
             f"{self.old_ref}..{self.new_ref}",
             "--pretty=format:%H%x01%s",
-            f"--max-count={max_count}",
+            f"--max-count={scan_limit}",
             "-G",
             safe,
         ]
         proc_g = run_cmd(cmd_g, check=False)
-        return self._parse_commit_records(proc_g.stdout)
+        records_g = self._parse_commit_records(proc_g.stdout)
+        return self._filter_records_excluding_paths(records_g, excludes, max_count=max_count)
 
     @staticmethod
     def _parse_commit_records(text: str) -> list[CommitRecord]:
@@ -402,3 +472,51 @@ class RepositoryAccessor:
             "changed_files": changed_files,
             "diff_excerpt": diff_excerpt,
         }
+
+    @staticmethod
+    def _normalize_prefix(path: str) -> str:
+        p = (path or "").strip().strip("/")
+        return f"{p}/" if p else ""
+
+    def _commit_touches_prefixes(self, commit: str, prefixes: list[str]) -> bool:
+        if not prefixes:
+            return False
+        proc = run_cmd(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                commit,
+            ],
+            check=False,
+        )
+        for raw in proc.stdout.splitlines():
+            path = raw.strip()
+            if not path:
+                continue
+            for pref in prefixes:
+                if path.startswith(pref):
+                    return True
+        return False
+
+    def _filter_records_excluding_paths(
+        self,
+        records: list[CommitRecord],
+        prefixes: list[str],
+        *,
+        max_count: int,
+    ) -> list[CommitRecord]:
+        if not records:
+            return []
+        out: list[CommitRecord] = []
+        for rec in records:
+            if prefixes and self._commit_touches_prefixes(rec.commit, prefixes):
+                continue
+            out.append(rec)
+            if len(out) >= max_count:
+                break
+        return out

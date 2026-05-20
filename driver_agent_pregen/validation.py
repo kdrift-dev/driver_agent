@@ -511,6 +511,13 @@ def _best_failure_reason(stderr_text: str, stdout_text: str, fallback: str) -> s
     return line or fallback
 
 
+def _run_has_timeout_hint(run: dict[str, Any]) -> bool:
+    stderr_text = str(run.get("stderr", "") or "")
+    stdout_text = str(run.get("stdout", "") or "")
+    hay = (stderr_text + "\n" + stdout_text).lower()
+    return "timed out after" in hay
+
+
 def _stage_summary_lines(stage_results: list[dict[str, Any]]) -> list[str]:
     lines = []
     for item in stage_results:
@@ -552,6 +559,7 @@ def run_validation_agent(
     jobs: int,
     enable_qemu: bool,
     qemu_timeout_sec: int,
+    skip_system_test_generation: bool,
     keep_worktrees: bool,
 ) -> dict[str, Any]:
     stage_results = _init_stage_results()
@@ -790,120 +798,163 @@ def run_validation_agent(
 
     out["compile"] = compile_result
 
-    test_gen = _generate_system_tests(
-        llm_client=llm_client,
-        llm_calls_dir=llm_calls_dir,
-        case_id=case_id,
-        module_path=module_path,
-        context_packet=context_packet,
-        impact_graph=impact_graph,
-        compile_result=compile_result,
-        dry_run=dry_run,
-    )
-    out["test_generation"] = test_gen
-    tg_status = "passed" if str(test_gen.get("parse_status", "")) == "ok" else "failed"
-    tg_reason = "llm test generation parsed" if tg_status == "passed" else (test_gen.get("error") or f"parse_status={test_gen.get('parse_status')}")
-    _set_stage_result(stage_results, "test_generation", tg_status, tg_reason)
+    if skip_system_test_generation:
+        test_gen = {
+            "case_id": case_id,
+            "stage": "system_test_generation",
+            "parse_status": "skipped_by_flag",
+            "test_cases": [],
+            "suite_commands": [],
+            "notes": ["skipped by --skip-system-test-generation"],
+        }
+        out["test_generation"] = test_gen
+        _set_stage_result(stage_results, "test_generation", "skipped", "skipped by flag")
 
-    test_bundle = _write_test_bundle(run_dir, test_gen)
-    out["test_bundle"] = test_bundle
+        test_bundle = {
+            "manifest_path": "",
+            "runner_script_path": "",
+            "test_case_count": 0,
+            "suite_command_count": 0,
+            "skipped": True,
+        }
+        out["test_bundle"] = test_bundle
 
-    suite_exec = _run_suite_commands(new_tree, test_gen.get("suite_commands", []), timeout_sec=qemu_timeout_sec)
-    out["suite_execution"] = suite_exec
-    suite_runs = suite_exec.get("runs", [])
-    all_skipped = bool(suite_runs) and all(bool(r.get("skipped")) for r in suite_runs)
-    if suite_exec.get("success"):
-        if not suite_runs:
-            _set_stage_result(stage_results, "suite_execution", "skipped", "no_suite_commands_generated")
-        elif all_skipped:
-            _set_stage_result(
-                stage_results,
-                "suite_execution",
-                "skipped",
-                _summarize_skip_reason(suite_runs, "all_suite_commands_skipped"),
-            )
-        else:
-            _set_stage_result(stage_results, "suite_execution", "passed", f"runs={len(suite_runs)}")
+        suite_exec = {"success": True, "runs": [], "skipped": True, "reason": "skipped_by_flag"}
+        out["suite_execution"] = suite_exec
+        _set_stage_result(stage_results, "suite_execution", "skipped", "skipped by flag")
+
+        out["qemu"] = {
+            "enabled": enable_qemu,
+            "detected_qemu_runs": 0,
+            "runs": [],
+            "success": False,
+            "note": "skipped because system-test generation was disabled",
+        }
+        _set_stage_result(stage_results, "qemu_execution", "skipped", "skipped by flag")
+        suite_runs = []
+        all_skipped = True
     else:
-        first_fail = next((r for r in suite_runs if not r.get("ok")), {})
-        reason = _best_failure_reason(
-            first_fail.get("stderr", ""),
-            first_fail.get("stdout", ""),
-            first_fail.get("reason", "suite_command_failed"),
+        test_gen = _generate_system_tests(
+            llm_client=llm_client,
+            llm_calls_dir=llm_calls_dir,
+            case_id=case_id,
+            module_path=module_path,
+            context_packet=context_packet,
+            impact_graph=impact_graph,
+            compile_result=compile_result,
+            dry_run=dry_run,
         )
-        _set_stage_result(stage_results, "suite_execution", "failed", reason)
+        out["test_generation"] = test_gen
+        tg_status = "passed" if str(test_gen.get("parse_status", "")) == "ok" else "failed"
+        tg_reason = "llm test generation parsed" if tg_status == "passed" else (test_gen.get("error") or f"parse_status={test_gen.get('parse_status')}")
+        _set_stage_result(stage_results, "test_generation", tg_status, tg_reason)
 
-    qemu_runs = []
-    suite_cmds = test_gen.get("suite_commands", [])
-    qemu_hint = any(("kunit.py run" in (line or "") or "qemu-system-" in (line or "")) for line in suite_cmds)
-    if enable_qemu:
-        for item in suite_exec.get("runs", []):
-            cmd = item.get("cmd", "")
-            if "kunit.py run" in cmd or "qemu-system-" in cmd:
-                qemu_runs.append(item)
-            elif item.get("script_mode") and qemu_hint:
-                qemu_runs.append(item)
-        if not qemu_runs:
-            fallback_cfg = run_dir / "generated_tests" / "fallback.kunitconfig"
-            fallback_cfg.parent.mkdir(parents=True, exist_ok=True)
-            fallback_cfg.write_text(
-                "\n".join(
-                    [
-                        "CONFIG_KUNIT=y",
-                        "CONFIG_KUNIT_TEST=y",
-                        "CONFIG_ACPI=y",
-                        "CONFIG_SMP=y",
-                        "CONFIG_NUMA=y",
-                        "CONFIG_PCI=y",
-                        "CONFIG_ACPI_NUMA=y",
-                        "CONFIG_X86_64_ACPI_NUMA=y",
-                        "CONFIG_ACPI_HMAT=y",
-                        "CONFIG_EFI=y",
-                        "CONFIG_EFI_STUB=y",
-                        "CONFIG_EFI_SOFT_RESERVE=y",
-                        "CONFIG_TRANSPARENT_HUGEPAGE=y",
-                        "CONFIG_DAX=y",
-                        "CONFIG_DEV_DAX=y",
-                        "CONFIG_DEV_DAX_HMEM=y",
-                    ]
+        test_bundle = _write_test_bundle(run_dir, test_gen)
+        out["test_bundle"] = test_bundle
+
+        suite_exec = _run_suite_commands(new_tree, test_gen.get("suite_commands", []), timeout_sec=qemu_timeout_sec)
+        out["suite_execution"] = suite_exec
+        suite_runs = suite_exec.get("runs", [])
+        all_skipped = bool(suite_runs) and all(bool(r.get("skipped")) for r in suite_runs)
+        if suite_exec.get("success"):
+            if not suite_runs:
+                _set_stage_result(stage_results, "suite_execution", "skipped", "no_suite_commands_generated")
+            elif all_skipped:
+                _set_stage_result(
+                    stage_results,
+                    "suite_execution",
+                    "skipped",
+                    _summarize_skip_reason(suite_runs, "all_suite_commands_skipped"),
                 )
-                + "\n",
-                encoding="utf-8",
+            else:
+                _set_stage_result(stage_results, "suite_execution", "passed", f"runs={len(suite_runs)}")
+        else:
+            first_fail = next((r for r in suite_runs if not r.get("ok")), {})
+            reason = _best_failure_reason(
+                first_fail.get("stderr", ""),
+                first_fail.get("stdout", ""),
+                first_fail.get("reason", "suite_command_failed"),
             )
-            # KUnit requires a clean source tree for out-of-tree builds.
-            clean_run = _run_cmd(["make", "ARCH=x86_64", "mrproper"], cwd=new_tree, timeout=2400)
-            clean_run["stdout"] = _truncate(clean_run.get("stdout", ""))
-            clean_run["stderr"] = _truncate(clean_run.get("stderr", ""))
-            timeout = min(max(120, qemu_timeout_sec), 1200)
-            fallback_cmd = (
-                "python3 tools/testing/kunit/kunit.py run "
-                f"--arch x86_64 --kunitconfig {fallback_cfg.as_posix()} "
-                "--summary "
-                f"--timeout {timeout}"
-            )
-            fallback_run = _run_cmd(["bash", "-lc", fallback_cmd], cwd=new_tree, timeout=timeout + 900)
-            fallback_run["stdout"] = _truncate(fallback_run.get("stdout", ""))
-            fallback_run["stderr"] = _truncate(fallback_run.get("stderr", ""))
-            fallback_run["fallback_qemu"] = True
-            fallback_run["pre_clean"] = clean_run
-            qemu_runs.append(fallback_run)
-    out["qemu"] = {
-        "enabled": enable_qemu,
-        "detected_qemu_runs": len(qemu_runs),
-        "runs": qemu_runs,
-        "success": all(r.get("ok") for r in qemu_runs) if qemu_runs else False,
-        "note": "qemu stage uses suite_commands that invoke kunit.py run or qemu-system-*",
-    }
-    if not enable_qemu:
-        _set_stage_result(stage_results, "qemu_execution", "skipped", "qemu disabled by flag")
-    elif not qemu_runs:
-        _set_stage_result(stage_results, "qemu_execution", "failed", "qemu enabled but no qemu run detected")
-    elif all(r.get("ok") for r in qemu_runs):
-        _set_stage_result(stage_results, "qemu_execution", "passed", f"runs={len(qemu_runs)}")
-    else:
-        first_fail = next((r for r in qemu_runs if not r.get("ok")), {})
-        reason = _best_failure_reason(first_fail.get("stderr", ""), first_fail.get("stdout", ""), "qemu_run_failed")
-        _set_stage_result(stage_results, "qemu_execution", "failed", reason)
+            _set_stage_result(stage_results, "suite_execution", "failed", reason)
+
+        qemu_runs = []
+        suite_cmds = test_gen.get("suite_commands", [])
+        qemu_hint = any(("kunit.py run" in (line or "") or "qemu-system-" in (line or "")) for line in suite_cmds)
+        if enable_qemu:
+            for item in suite_exec.get("runs", []):
+                cmd = item.get("cmd", "")
+                if "kunit.py run" in cmd or "qemu-system-" in cmd:
+                    qemu_runs.append(item)
+                elif item.get("script_mode") and qemu_hint:
+                    qemu_runs.append(item)
+            if not qemu_runs:
+                fallback_cfg = run_dir / "generated_tests" / "fallback.kunitconfig"
+                fallback_cfg.parent.mkdir(parents=True, exist_ok=True)
+                fallback_cfg.write_text(
+                    "\n".join(
+                        [
+                            "CONFIG_KUNIT=y",
+                            "CONFIG_KUNIT_TEST=y",
+                            "CONFIG_ACPI=y",
+                            "CONFIG_SMP=y",
+                            "CONFIG_NUMA=y",
+                            "CONFIG_PCI=y",
+                            "CONFIG_ACPI_NUMA=y",
+                            "CONFIG_X86_64_ACPI_NUMA=y",
+                            "CONFIG_ACPI_HMAT=y",
+                            "CONFIG_EFI=y",
+                            "CONFIG_EFI_STUB=y",
+                            "CONFIG_EFI_SOFT_RESERVE=y",
+                            "CONFIG_TRANSPARENT_HUGEPAGE=y",
+                            "CONFIG_DAX=y",
+                            "CONFIG_DEV_DAX=y",
+                            "CONFIG_DEV_DAX_HMEM=y",
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                # KUnit requires a clean source tree for out-of-tree builds.
+                clean_run = _run_cmd(["make", "ARCH=x86_64", "mrproper"], cwd=new_tree, timeout=2400)
+                clean_run["stdout"] = _truncate(clean_run.get("stdout", ""))
+                clean_run["stderr"] = _truncate(clean_run.get("stderr", ""))
+                timeout = min(max(120, qemu_timeout_sec), 1200)
+                fallback_cmd = (
+                    "python3 tools/testing/kunit/kunit.py run "
+                    f"--arch x86_64 --kunitconfig {fallback_cfg.as_posix()} "
+                    "--summary "
+                    f"--timeout {timeout}"
+                )
+                fallback_run = _run_cmd(["bash", "-lc", fallback_cmd], cwd=new_tree, timeout=timeout + 900)
+                fallback_run["stdout"] = _truncate(fallback_run.get("stdout", ""))
+                fallback_run["stderr"] = _truncate(fallback_run.get("stderr", ""))
+                fallback_run["fallback_qemu"] = True
+                fallback_run["pre_clean"] = clean_run
+                qemu_runs.append(fallback_run)
+        out["qemu"] = {
+            "enabled": enable_qemu,
+            "detected_qemu_runs": len(qemu_runs),
+            "runs": qemu_runs,
+            "success": all(r.get("ok") for r in qemu_runs) if qemu_runs else False,
+            "note": "qemu stage uses suite_commands that invoke kunit.py run or qemu-system-*",
+        }
+        for run in qemu_runs:
+            if bool(run.get("ok")) and _run_has_timeout_hint(run):
+                run["ok"] = False
+                run["timeout_hint"] = True
+                if not run.get("reason"):
+                    run["reason"] = "timeout_detected_in_qemu_output"
+        out["qemu"]["success"] = all(r.get("ok") for r in qemu_runs) if qemu_runs else False
+        if not enable_qemu:
+            _set_stage_result(stage_results, "qemu_execution", "skipped", "qemu disabled by flag")
+        elif not qemu_runs:
+            _set_stage_result(stage_results, "qemu_execution", "failed", "qemu enabled but no qemu run detected")
+        elif all(r.get("ok") for r in qemu_runs):
+            _set_stage_result(stage_results, "qemu_execution", "passed", f"runs={len(qemu_runs)}")
+        else:
+            first_fail = next((r for r in qemu_runs if not r.get("ok")), {})
+            reason = _best_failure_reason(first_fail.get("stderr", ""), first_fail.get("stdout", ""), "qemu_run_failed")
+            _set_stage_result(stage_results, "qemu_execution", "failed", reason)
 
     patched_slices = _collect_patched_slices(new_tree, impact_graph)
     post_reasoning = run_post_reasoner_agent(
@@ -919,36 +970,45 @@ def run_validation_agent(
         dry_run=dry_run,
     )
     out["post_reasoning"] = post_reasoning
-    pr_status = "passed" if str(post_reasoning.get("parse_status", "")) == "ok" else "failed"
-    pr_reason = (
-        f"overall_verdict={post_reasoning.get('overall_verdict', 'UNKNOWN')}"
-        if pr_status == "passed"
-        else (post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}")
-    )
+    pr_parse_ok = str(post_reasoning.get("parse_status", "")) == "ok"
+    pr_verdict = str(post_reasoning.get("overall_verdict", "UNKNOWN")).upper()
+    if not pr_parse_ok:
+        pr_status = "failed"
+        pr_reason = post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}"
+    elif pr_verdict == "PASS":
+        pr_status = "passed"
+        pr_reason = f"overall_verdict={pr_verdict}"
+    else:
+        pr_status = "failed"
+        pr_reason = f"overall_verdict={pr_verdict}"
     _set_stage_result(stage_results, "post_reasoning", pr_status, pr_reason)
 
     test_gen_ok = str(test_gen.get("parse_status", "")) == "ok"
     suite_has_real_run = bool(suite_runs) and not all_skipped
+    tests_gate_ok = True if skip_system_test_generation else (test_gen_ok and suite_exec.get("success") and suite_has_real_run)
+    qemu_gate_ok = True if skip_system_test_generation else ((not enable_qemu) or out["qemu"].get("success"))
     overall_ok = bool(
         compile_result.get("success")
-        and test_gen_ok
-        and suite_exec.get("success")
-        and suite_has_real_run
-        and (not enable_qemu or out["qemu"].get("success"))
-        and str(post_reasoning.get("parse_status", "")) == "ok"
+        and tests_gate_ok
+        and qemu_gate_ok
+        and pr_parse_ok
+        and pr_verdict == "PASS"
     )
     if not compile_result.get("success"):
         out["open_questions"].append("compile_not_success")
-    if not test_gen_ok:
-        out["open_questions"].append("test_generation_not_success")
-    if not suite_exec.get("success"):
-        out["open_questions"].append("suite_execution_not_success")
-    elif not suite_has_real_run:
-        out["open_questions"].append("suite_execution_skipped_or_empty")
-    if enable_qemu and not out["qemu"].get("success"):
-        out["open_questions"].append("qemu_execution_not_success")
-    if str(post_reasoning.get("parse_status", "")) != "ok":
+    if not skip_system_test_generation:
+        if not test_gen_ok:
+            out["open_questions"].append("test_generation_not_success")
+        if not suite_exec.get("success"):
+            out["open_questions"].append("suite_execution_not_success")
+        elif not suite_has_real_run:
+            out["open_questions"].append("suite_execution_skipped_or_empty")
+        if enable_qemu and not out["qemu"].get("success"):
+            out["open_questions"].append("qemu_execution_not_success")
+    if not pr_parse_ok:
         out["open_questions"].append("post_reasoning_not_success")
+    elif pr_verdict != "PASS":
+        out["open_questions"].append(f"post_reasoning_verdict_{pr_verdict.lower()}")
 
     final_status = "ok" if overall_ok else "failed"
 

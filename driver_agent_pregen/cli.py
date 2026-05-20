@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -46,15 +48,46 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--patch-candidates", type=int, default=1, help="number of patch candidates to request from LLM")
     p.add_argument(
+        "--patch-prompt-strength",
+        type=str,
+        choices=["normal", "strict"],
+        default="strict",
+        help="patch-generation prompt strictness (strict forbids comment-only edits and pushes concrete semantic migration replacements)",
+    )
+    p.add_argument(
+        "--patch-source-mode",
+        type=str,
+        choices=["full_module", "focused"],
+        default="full_module",
+        help=(
+            "source payload mode for patch generation: "
+            "full_module (all old module sources) or focused "
+            "(affected functions and referencing callers/callback roots only)"
+        ),
+    )
+    p.set_defaults(patch_source_with_lineno=True)
+    p.add_argument(
+        "--patch-source-with-lineno",
+        dest="patch_source_with_lineno",
+        action="store_true",
+        help="include line-number prefixes (e.g., L123:) in patch-generation source snippets",
+    )
+    p.add_argument(
+        "--patch-source-no-lineno",
+        dest="patch_source_with_lineno",
+        action="store_false",
+        help="disable line-number prefixes in patch-generation source snippets",
+    )
+    p.add_argument(
         "--affected-func-signal-mode",
         type=str,
         choices=["kernel_only", "kernel_plus_other_drivers"],
-        default="kernel_plus_other_drivers",
+        default="kernel_only",
         help=(
             "affected-function signal source mode: "
-            "'kernel_only' uses strict kernel-side evidence only; "
-            "'kernel_plus_other_drivers' additionally allows migration hints from non-target drivers "
-            "(target module diff is still excluded)."
+            "'kernel_only' uses strict kernel-side evidence only (default); "
+            "'kernel_plus_other_drivers' is an opt-in ablation mode that additionally allows "
+            "migration hints from non-target drivers (target module diff is still excluded)."
         ),
     )
     p.add_argument(
@@ -77,6 +110,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable qemu/kunit runtime command execution",
     )
     p.add_argument("--qemu-timeout-sec", type=int, default=3600, help="timeout seconds for suite/qemu commands")
+    p.add_argument(
+        "--semantic-obligation-table",
+        type=str,
+        default=None,
+        help="optional semantic obligation table JSON path; queried to enrich kernel/driver semantic obligations",
+    )
+    p.add_argument(
+        "--skip-system-test-generation",
+        action="store_true",
+        help="skip LLM system-test generation and suite/qemu execution; keep patch apply/compile/post-reasoning",
+    )
     p.add_argument("--cleanup-worktrees", action="store_true", help="remove temporary worktrees after validation")
     return p
 
@@ -184,21 +228,54 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         "llm_provider": args.llm_provider,
         "llm_model": args.llm_model,
         "affected_func_signal_mode": args.affected_func_signal_mode,
+        "patch_prompt_strength": args.patch_prompt_strength,
+        "patch_source_mode": args.patch_source_mode,
+        "patch_source_with_lineno": bool(args.patch_source_with_lineno),
+        "semantic_obligation_table": args.semantic_obligation_table,
         "stages": [],
     }
     write_json(run_dir / "metadata.json", metadata)
 
+    pipeline_t0 = time.perf_counter()
+    semantic_obligation_table = (
+        args.semantic_obligation_table
+        if args.affected_func_signal_mode == "kernel_plus_other_drivers"
+        else None
+    )
+    if args.semantic_obligation_table and semantic_obligation_table is None:
+        metadata["semantic_obligation_table_ignored"] = {
+            "path": args.semantic_obligation_table,
+            "reason": "affected_func_signal_mode=kernel_only uses kernel-side evidence only",
+        }
+        metadata["semantic_obligation_table"] = None
+        write_json(run_dir / "metadata.json", metadata)
+
     def stage(name: str, fn):
+        t0 = time.perf_counter()
+        started_at = dt.datetime.now().isoformat(timespec="seconds")
         try:
             out = fn()
-            metadata["stages"].append({"name": name, "status": "ok"})
+            duration_sec = round(time.perf_counter() - t0, 3)
+            metadata["stages"].append(
+                {
+                    "name": name,
+                    "status": "ok",
+                    "started_at": started_at,
+                    "finished_at": dt.datetime.now().isoformat(timespec="seconds"),
+                    "duration_sec": duration_sec,
+                }
+            )
             write_json(run_dir / "metadata.json", metadata)
             return out
         except Exception as exc:
+            duration_sec = round(time.perf_counter() - t0, 3)
             metadata["stages"].append(
                 {
                     "name": name,
                     "status": "failed",
+                    "started_at": started_at,
+                    "finished_at": dt.datetime.now().isoformat(timespec="seconds"),
+                    "duration_sec": duration_sec,
                     "error": str(exc),
                     "traceback": traceback.format_exc(),
                 }
@@ -234,6 +311,9 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             locations_payload,
             args.module_path,
             affected_func_signal_mode=args.affected_func_signal_mode,
+            old_ref=args.old_ref,
+            new_ref=args.new_ref,
+            semantic_obligation_table=semantic_obligation_table,
         ),
     )
 
@@ -250,7 +330,15 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
 
     obligations = stage(
         "06_compatibility_obligation_builder",
-        lambda: run_obligation_builder(extracted_dir, kernel_diffs, impact_graph),
+        lambda: run_obligation_builder(
+            extracted_dir,
+            kernel_diffs,
+            impact_graph,
+            old_ref=args.old_ref,
+            new_ref=args.new_ref,
+            module_path=args.module_path,
+            semantic_obligation_table=semantic_obligation_table,
+        ),
     )
 
     llm_client = LLMClient(
@@ -330,6 +418,9 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             compatibility_obligations=obligations,
             dry_run=args.dry_run,
             max_candidates=max(1, args.patch_candidates),
+            prompt_strength=args.patch_prompt_strength,
+            source_mode=args.patch_source_mode,
+            source_with_line_numbers=bool(args.patch_source_with_lineno),
         ),
     )
 
@@ -362,6 +453,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             jobs=args.jobs,
             enable_qemu=args.enable_qemu,
             qemu_timeout_sec=args.qemu_timeout_sec,
+            skip_system_test_generation=args.skip_system_test_generation,
             keep_worktrees=not args.cleanup_worktrees,
         ),
     )
@@ -388,12 +480,25 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             context_packet=context_packet,
             patch_generation=patch_generation,
             validation=validation,
+            stage_timings=metadata.get("stages", []),
         ),
     )
 
     pipeline_ok = str(validation.get("status", "")).lower() == "ok"
     metadata["status"] = "ok" if pipeline_ok else "failed_validation"
+    metadata["total_duration_sec"] = round(time.perf_counter() - pipeline_t0, 3)
     write_json(run_dir / "metadata.json", metadata)
+
+    # Small standalone timing artifact for quick lookup.
+    write_json(
+        run_dir / "stage_timings.json",
+        {
+            "case_id": case_id,
+            "module_path": args.module_path,
+            "total_duration_sec": metadata["total_duration_sec"],
+            "stages": metadata.get("stages", []),
+        },
+    )
     return run_dir, pipeline_ok
 
 

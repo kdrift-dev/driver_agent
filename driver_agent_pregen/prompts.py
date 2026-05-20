@@ -46,6 +46,33 @@ Constraints:
 """.strip()
 
 
+PATCH_GEN_SOURCE_FULL_APPENDIX = """
+Patch source mode: full_module
+1. Input provides module-wide old sources. Treat non-affected files/functions as context, not edit targets.
+2. Prioritize edits within editable/affected functions from impact_graph unless evidence requires otherwise.
+3. Avoid opportunistic cleanup in unrelated functions.
+""".strip()
+
+
+PATCH_GEN_SOURCE_FOCUSED_APPENDIX = """
+Patch source mode: focused
+1. Input provides only focused code blocks (affected functions and code referencing them).
+2. Line prefixes like `L123:` are location hints and are NOT part of real source code.
+3. Do not emit line-prefix tokens inside the patch diff.
+4. Do not infer edits outside provided focused blocks unless evidence explicitly requires cross-function changes.
+""".strip()
+
+
+PATCH_GEN_STRICT_APPENDIX = """
+Strict mode constraints:
+1. Do not produce comment-only edits. If you cannot justify a code change, emit an explicit no-op candidate with empty patch_diff.
+2. Do not keep an old API call unchanged while only adding explanatory comments around it.
+3. If evidence includes a strong semantic migration signal with an explicit replacement candidate
+   (for example: kzalloc -> kzalloc_obj, kcalloc -> kzalloc_objs), prefer emitting a concrete callsite replacement patch.
+4. Separate required compatibility edits from optional modernization in rationale/evidence; optional does not mean comment-only diff.
+""".strip()
+
+
 POST_REASONER_INSTRUCTION = """
 You are a Linux driver migration post-patch reasoner.
 Task: evaluate whether patched code satisfies compatibility obligations and whether remaining risk exists.
@@ -160,7 +187,13 @@ def build_pre_reasoner_prompt(input_payload: dict[str, Any]) -> str:
     )
 
 
-def build_patch_generation_prompt(input_payload: dict[str, Any]) -> str:
+def build_patch_generation_prompt(
+    input_payload: dict[str, Any],
+    *,
+    strict_mode: bool = False,
+    source_mode: str = "full_module",
+    source_with_line_numbers: bool = False,
+) -> str:
     schema = {
         "case_id": "string",
         "stage": "patch_generation",
@@ -177,8 +210,18 @@ def build_patch_generation_prompt(input_payload: dict[str, Any]) -> str:
         ],
         "module_level_notes": ["string"],
     }
+    instruction = PATCH_GEN_INSTRUCTION
+    mode = str(source_mode or "full_module").strip().lower()
+    if mode == "focused":
+        instruction = instruction + "\n\n" + PATCH_GEN_SOURCE_FOCUSED_APPENDIX
+    else:
+        instruction = instruction + "\n\n" + PATCH_GEN_SOURCE_FULL_APPENDIX
+    if source_with_line_numbers:
+        instruction = instruction + "\n\nSource note: line-number prefixes are hints only; never include them in output patch."
+    if strict_mode:
+        instruction = instruction + "\n\n" + PATCH_GEN_STRICT_APPENDIX
     return (
-        PATCH_GEN_INSTRUCTION
+        instruction
         + "\n\nRequired output schema:\n```json\n"
         + json.dumps(schema, indent=2)
         + "\n```\n"

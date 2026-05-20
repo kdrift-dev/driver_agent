@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 import difflib
 import re
 from pathlib import Path
@@ -106,7 +107,20 @@ def _normalize_patch_semantics(patch_text: str) -> tuple[str, list[str]]:
     return normalized, msgs
 
 
-def _load_old_module_sources(extracted_dir: Path, module_path: str, max_chars_per_file: int = 20000) -> list[dict[str, Any]]:
+def _render_with_line_numbers(text: str, start_line: int = 1) -> str:
+    lines = text.splitlines()
+    if not lines:
+        return text
+    return "\n".join(f"L{start_line + i}: {line}" for i, line in enumerate(lines))
+
+
+def _load_old_module_sources(
+    extracted_dir: Path,
+    module_path: str,
+    *,
+    max_chars_per_file: int = 20000,
+    with_line_numbers: bool = False,
+) -> list[dict[str, Any]]:
     module_root = extracted_dir / "old_module_sources" / module_path
     if not module_root.exists():
         return []
@@ -119,8 +133,145 @@ def _load_old_module_sources(extracted_dir: Path, module_path: str, max_chars_pe
         txt = read_text(p)
         if len(txt) > max_chars_per_file:
             txt = txt[:max_chars_per_file] + "\n...[truncated]"
-        entries.append({"path": rel, "content": txt})
+        if with_line_numbers:
+            txt = _render_with_line_numbers(txt, start_line=1)
+        entries.append({"path": rel, "content": txt, "source_item_kind": "full_file"})
     return entries
+
+
+def _load_driver_function_index(extracted_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    payload = read_json(extracted_dir / "driver_functions.json", default={}) or {}
+    out: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for fn in payload.get("functions", []) or []:
+        name = str(fn.get("name", "")).strip()
+        if not name:
+            continue
+        out[name].append(fn)
+    return dict(out)
+
+
+def _extract_function_block(
+    *,
+    extracted_dir: Path,
+    fn_name: str,
+    rel_file: str,
+    start_line: int,
+    end_line: int,
+    roles: list[str],
+    with_line_numbers: bool,
+    max_chars_per_block: int,
+) -> dict[str, Any] | None:
+    src_path = extracted_dir / "old_module_sources" / rel_file
+    if not src_path.exists() or not src_path.is_file():
+        return None
+
+    lines = read_text(src_path).splitlines()
+    if not lines:
+        return None
+
+    start = max(1, int(start_line))
+    end = min(len(lines), int(end_line))
+    if end < start:
+        return None
+
+    raw_text = "\n".join(lines[start - 1 : end])
+    if len(raw_text) > max_chars_per_block:
+        raw_text = raw_text[:max_chars_per_block] + "\n...[truncated]"
+
+    content = _render_with_line_numbers(raw_text, start_line=start) if with_line_numbers else raw_text
+    return {
+        "path": rel_file,
+        "function": fn_name,
+        "start_line": start,
+        "end_line": end,
+        "roles": sorted(set(roles)),
+        "content": content,
+        "source_item_kind": "function_block",
+    }
+
+
+def _build_focused_old_sources(
+    *,
+    extracted_dir: Path,
+    module_path: str,
+    impact_graph: dict[str, Any],
+    with_line_numbers: bool,
+    max_chars_per_block: int = 12000,
+    max_blocks: int = 80,
+) -> list[dict[str, Any]]:
+    affected = list(impact_graph.get("affected_functions", []) or [])
+    if not affected:
+        return []
+
+    roles_by_fn: dict[str, set[str]] = defaultdict(set)
+    records_by_fn: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for af in affected:
+        fn = str(af.get("function", "")).strip()
+        if not fn:
+            continue
+        roles_by_fn[fn].add("affected")
+
+        file_rel = str(af.get("file", "")).strip()
+        if file_rel:
+            records_by_fn[fn].append(
+                {
+                    "name": fn,
+                    "file": file_rel,
+                    "start_line": int(af.get("start_line", 1)),
+                    "end_line": int(af.get("end_line", af.get("start_line", 1))),
+                }
+            )
+
+        for caller in af.get("ordinary_callers", []) or []:
+            c = str(caller or "").strip()
+            if c:
+                roles_by_fn[c].add("direct_caller")
+
+        for cb in af.get("callback_roots", []) or []:
+            root_fn = str((cb or {}).get("root_function", "")).strip()
+            if root_fn:
+                roles_by_fn[root_fn].add("callback_root")
+
+    fn_index = _load_driver_function_index(extracted_dir)
+    blocks: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, int, int]] = set()
+
+    for fn_name in sorted(roles_by_fn.keys()):
+        roles = sorted(roles_by_fn[fn_name])
+        candidates = list(records_by_fn.get(fn_name, []))
+        if fn_name in fn_index:
+            candidates.extend(fn_index[fn_name])
+        if not candidates:
+            continue
+
+        for rec in candidates:
+            rel_file = str(rec.get("file", "")).strip()
+            if not rel_file or not rel_file.startswith(module_path.rstrip("/") + "/"):
+                continue
+            start_line = int(rec.get("start_line", 1))
+            end_line = int(rec.get("end_line", start_line))
+            key = (fn_name, rel_file, start_line, end_line)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            block = _extract_function_block(
+                extracted_dir=extracted_dir,
+                fn_name=fn_name,
+                rel_file=rel_file,
+                start_line=start_line,
+                end_line=end_line,
+                roles=roles,
+                with_line_numbers=with_line_numbers,
+                max_chars_per_block=max_chars_per_block,
+            )
+            if not block:
+                continue
+            blocks.append(block)
+            if len(blocks) >= max_blocks:
+                return blocks
+
+    return blocks
 
 
 def _collect_file_contents(extracted_dir: Path, paths: Iterable[str]) -> dict[str, str]:
@@ -250,16 +401,14 @@ def _extract_raw_candidates(llm_output: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _should_emit_auto_noop(
     *,
-    pre_reasoning: dict[str, Any],
     compatibility_obligations: dict[str, Any],
     impact_graph: dict[str, Any],
 ) -> bool:
-    verdict = str(pre_reasoning.get("overall_verdict", "")).strip().upper()
-    if verdict != "MATCH":
-        return False
-
     obligations = compatibility_obligations.get("obligations", [])
+    sem_obligations = compatibility_obligations.get("semantic_obligations", [])
     if obligations:
+        return False
+    if sem_obligations:
         return False
 
     affected = impact_graph.get("affected_functions", [])
@@ -267,6 +416,13 @@ def _should_emit_auto_noop(
         return False
 
     return True
+
+
+def _has_strong_semantic_obligations(compatibility_obligations: dict[str, Any]) -> bool:
+    for item in compatibility_obligations.get("semantic_obligations", []):
+        if str(item.get("strength", "")).lower() == "strong":
+            return True
+    return False
 
 
 def run_patch_generation_agent(
@@ -283,17 +439,47 @@ def run_patch_generation_agent(
     compatibility_obligations: dict[str, Any],
     dry_run: bool,
     max_candidates: int = 1,
+    prompt_strength: str = "normal",
+    source_mode: str = "full_module",
+    source_with_line_numbers: bool = True,
 ) -> dict[str, Any]:
     stage_dir = llm_calls_dir / "03_patch_generation"
     stage_dir.mkdir(parents=True, exist_ok=True)
     patch_runs_dir = run_dir / "patch_runs"
     patch_runs_dir.mkdir(parents=True, exist_ok=True)
 
-    old_sources = _load_old_module_sources(extracted_dir, module_path)
+    mode = str(source_mode or "full_module").strip().lower()
+    if mode not in {"full_module", "focused"}:
+        mode = "full_module"
+
+    if mode == "focused":
+        old_sources = _build_focused_old_sources(
+            extracted_dir=extracted_dir,
+            module_path=module_path,
+            impact_graph=impact_graph,
+            with_line_numbers=bool(source_with_line_numbers),
+        )
+        # Defensive fallback: keep pipeline usable if focused extraction returns empty.
+        if not old_sources:
+            mode = "full_module"
+            old_sources = _load_old_module_sources(
+                extracted_dir,
+                module_path,
+                with_line_numbers=bool(source_with_line_numbers),
+            )
+    else:
+        old_sources = _load_old_module_sources(
+            extracted_dir,
+            module_path,
+            with_line_numbers=bool(source_with_line_numbers),
+        )
+
     input_payload = {
         "case_id": case_id,
         "module_path": module_path,
         "max_candidates": max_candidates,
+        "patch_source_mode": mode,
+        "patch_source_with_line_numbers": bool(source_with_line_numbers),
         "compatibility_obligations": compatibility_obligations,
         "impact_graph": impact_graph,
         "pre_reasoning": pre_reasoning,
@@ -308,7 +494,13 @@ def run_patch_generation_agent(
         "instruction": "Generate unified diff patch candidate(s) for migration. Keep patch minimal and evidence-grounded.",
     }
 
-    prompt = build_patch_generation_prompt(input_payload)
+    strict_mode = str(prompt_strength or "normal").strip().lower() == "strict"
+    prompt = build_patch_generation_prompt(
+        input_payload,
+        strict_mode=strict_mode,
+        source_mode=mode,
+        source_with_line_numbers=bool(source_with_line_numbers),
+    )
     default_output = {
         "case_id": case_id,
         "stage": "patch_generation",
@@ -317,7 +509,6 @@ def run_patch_generation_agent(
     }
 
     deterministic_noop = _should_emit_auto_noop(
-        pre_reasoning=pre_reasoning,
         compatibility_obligations=compatibility_obligations,
         impact_graph=impact_graph,
     )
@@ -346,6 +537,9 @@ def run_patch_generation_agent(
 
     raw_candidates = _extract_raw_candidates(llm_output)
     normalized: list[dict[str, Any]] = []
+    policy_rejections: list[dict[str, Any]] = []
+    rejected_noop_candidates: list[dict[str, Any]] = []
+    strong_semantic_required = _has_strong_semantic_obligations(compatibility_obligations)
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
         cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
@@ -376,6 +570,38 @@ def run_patch_generation_agent(
             # Keep touched_files for downstream staging of old sources, but avoid emitting invalid no-op hunks.
             candidate_patch = ""
             fix_msgs.append("detected_no_effective_diff; normalized_to_noop_candidate")
+            if strong_semantic_required:
+                fix_msgs.append("rejected_noop_due_to_strong_semantic_obligation")
+                fix_report = {
+                    "candidate_id": cid,
+                    "raw_patch_nonempty": bool(raw_diff.strip()),
+                    "line_fix_ok": fixed_ok,
+                    "messages": fix_msgs,
+                    "touched_files": touched,
+                    "no_op_candidate": True,
+                    "rejected_by_policy": True,
+                }
+                write_json(cdir / "patch_fix_report.json", fix_report)
+                policy_rejections.append(
+                    {
+                        "candidate_id": cid,
+                        "reason": "strong_semantic_obligation_disallows_noop_candidate",
+                    }
+                )
+                rejected_noop_candidates.append(
+                    {
+                        "candidate_id": cid,
+                        "strategy": cand.get("strategy", ""),
+                        "rationale": cand.get("rationale", ""),
+                        "evidence": cand.get("evidence", []),
+                        "open_questions": cand.get("open_questions", []),
+                        "touched_files": touched,
+                        "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
+                        "line_fix_ok": fixed_ok,
+                        "line_fix_messages": fix_msgs,
+                    }
+                )
+                continue
         elif not fixed_ok and _has_effective_changes(raw_diff):
             # If line-fix validation fails, prefer original raw patch text as a conservative fallback.
             candidate_patch = raw_diff
@@ -432,41 +658,77 @@ def run_patch_generation_agent(
             fix_msgs.extend(sem_msgs)
             candidate_patch = fixed_text if fixed_text else raw_patch
             no_op_candidate = not _has_effective_changes(candidate_patch)
+            reject_heur_candidate = False
             if no_op_candidate:
                 candidate_patch = ""
                 fix_msgs.append("detected_no_effective_diff; normalized_to_noop_candidate")
+                if strong_semantic_required:
+                    fix_msgs.append("rejected_noop_due_to_strong_semantic_obligation")
+                    fix_report = {
+                        "candidate_id": cid,
+                        "raw_patch_nonempty": bool(raw_patch.strip()),
+                        "line_fix_ok": fixed_ok,
+                        "messages": fix_msgs,
+                        "touched_files": touched,
+                        "fallback_reason": heur.get("reason", ""),
+                        "no_op_candidate": True,
+                        "rejected_by_policy": True,
+                    }
+                    write_json(cdir / "patch_fix_report.json", fix_report)
+                    policy_rejections.append(
+                        {
+                            "candidate_id": cid,
+                            "reason": "strong_semantic_obligation_disallows_noop_candidate",
+                            "fallback": "heuristic",
+                        }
+                    )
+                    rejected_noop_candidates.append(
+                        {
+                            "candidate_id": cid,
+                            "strategy": "heuristic_fallback",
+                            "rationale": heur.get("reason", ""),
+                            "evidence": ["pre_reasoning.patch_guidance"],
+                            "open_questions": [],
+                            "touched_files": touched,
+                            "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
+                            "line_fix_ok": fixed_ok,
+                            "line_fix_messages": fix_msgs,
+                        }
+                    )
+                    reject_heur_candidate = True
             elif not fixed_ok and _has_effective_changes(raw_patch):
                 candidate_patch = raw_patch
                 fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
-            fixed_path = cdir / "02_fixed_patch.diff"
-            write_text(fixed_path, candidate_patch)
+            if not reject_heur_candidate:
+                fixed_path = cdir / "02_fixed_patch.diff"
+                write_text(fixed_path, candidate_patch)
 
-            fix_report = {
-                "candidate_id": cid,
-                "raw_patch_nonempty": bool(raw_patch.strip()),
-                "line_fix_ok": fixed_ok,
-                "messages": fix_msgs,
-                "touched_files": touched,
-                "fallback_reason": heur.get("reason", ""),
-                "no_op_candidate": no_op_candidate,
-            }
-            write_json(cdir / "patch_fix_report.json", fix_report)
-
-            normalized.append(
-                {
+                fix_report = {
                     "candidate_id": cid,
-                    "strategy": "heuristic_fallback",
-                    "rationale": heur.get("reason", ""),
-                    "evidence": ["pre_reasoning.patch_guidance"],
-                    "open_questions": [],
-                    "touched_files": touched,
-                    "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
-                    "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
+                    "raw_patch_nonempty": bool(raw_patch.strip()),
                     "line_fix_ok": fixed_ok,
-                    "line_fix_messages": fix_msgs,
+                    "messages": fix_msgs,
+                    "touched_files": touched,
+                    "fallback_reason": heur.get("reason", ""),
                     "no_op_candidate": no_op_candidate,
                 }
-            )
+                write_json(cdir / "patch_fix_report.json", fix_report)
+
+                normalized.append(
+                    {
+                        "candidate_id": cid,
+                        "strategy": "heuristic_fallback",
+                        "rationale": heur.get("reason", ""),
+                        "evidence": ["pre_reasoning.patch_guidance"],
+                        "open_questions": [],
+                        "touched_files": touched,
+                        "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
+                        "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
+                        "line_fix_ok": fixed_ok,
+                        "line_fix_messages": fix_msgs,
+                        "no_op_candidate": no_op_candidate,
+                    }
+                )
 
     if not normalized and deterministic_noop:
         cid = "CAND-AUTO-NOOP-001"
@@ -508,13 +770,46 @@ def run_patch_generation_agent(
             }
         )
 
+    # Validation continuity fallback:
+    # if all candidates are rejected only because strong-semantic policy blocks no-op,
+    # keep one explicit no-op candidate so compile/test validation can still run.
+    if not normalized and rejected_noop_candidates:
+        keep = rejected_noop_candidates[0]
+        cid = keep.get("candidate_id") or "CAND-POLICY-FALLBACK-NOOP-001"
+        cdir = patch_runs_dir / str(cid).lower().replace("/", "_")
+        cdir.mkdir(parents=True, exist_ok=True)
+        fixed_path = cdir / "02_fixed_patch.diff"
+        write_text(fixed_path, "")
+        line_fix_messages = list(keep.get("line_fix_messages") or [])
+        line_fix_messages.append("policy_fallback_keep_noop_candidate_for_validation")
+        normalized.append(
+            {
+                "candidate_id": cid,
+                "strategy": keep.get("strategy") or "policy_fallback_noop",
+                "rationale": keep.get("rationale", ""),
+                "evidence": keep.get("evidence", []),
+                "open_questions": keep.get("open_questions", []),
+                "touched_files": keep.get("touched_files", []),
+                "raw_patch_path": keep.get("raw_patch_path", ""),
+                "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
+                "line_fix_ok": bool(keep.get("line_fix_ok", True)),
+                "line_fix_messages": line_fix_messages,
+                "no_op_candidate": True,
+                "policy_fallback": True,
+            }
+        )
+
     out = {
         "case_id": case_id,
         "stage": "patch_generation",
+        "patch_source_mode": mode,
+        "patch_source_with_line_numbers": bool(source_with_line_numbers),
         "parse_status": llm_output.get("parse_status", "unknown"),
         "module_level_notes": llm_output.get("module_level_notes", []),
         "patch_candidates": normalized,
         "selected_candidate_id": normalized[0]["candidate_id"] if normalized else None,
+        "policy_rejections": policy_rejections,
+        "strong_semantic_required": strong_semantic_required,
     }
 
     write_json(run_dir / "patch_generation.json", out)

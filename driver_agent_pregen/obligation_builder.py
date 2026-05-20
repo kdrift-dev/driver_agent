@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from .utils import write_json
+from .utils import read_json, write_json
 
 
 def _checks_for_change(change_type: str, old_missing_new: bool) -> tuple[list[str], list[str], str]:
@@ -60,11 +61,177 @@ def _confidence_from_diff(item: dict) -> str:
     return "low"
 
 
+def _semantic_obligation_kind(item: dict) -> str | None:
+    if item.get("migration_signal"):
+        return "source_compatible_semantic_migration"
+    ct = item.get("change_type_guess", "unknown")
+    if ct in {"return_value_change", "ownership_change", "locking_change"}:
+        return ct
+    return None
+
+
+def _semantic_strength(item: dict) -> str:
+    if item.get("migration_signal") and item.get("replacement_candidates"):
+        return "strong"
+    if item.get("migration_signal"):
+        return "medium"
+    if item.get("confidence") == "high":
+        return "strong"
+    return "medium"
+
+
+def _build_semantic_statement(item: dict, sym_key: str) -> str:
+    if item.get("migration_signal"):
+        reps = [c.get("symbol") for c in item.get("replacement_candidates", []) if c.get("symbol")]
+        if reps:
+            return (
+                f"{sym_key} appears source-compatible but has migration evidence; "
+                f"evaluate replacement usage ({', '.join(reps[:3])}) for semantic alignment."
+            )
+        return f"{sym_key} has migration signal; verify old usage semantics and migrate if required by evidence."
+
+    ct = item.get("change_type_guess", "unknown")
+    if ct == "return_value_change":
+        return f"{sym_key} return-value handling should align with new semantic convention."
+    if ct == "ownership_change":
+        return f"{sym_key} ownership/lifetime handling must preserve resource pairing on all paths."
+    if ct == "locking_change":
+        return f"{sym_key} call-context locking requirements should be re-validated."
+    return f"{sym_key} requires semantic-level compatibility validation."
+
+
+def _strength_score(level: str) -> int:
+    lv = str(level or "").lower()
+    if lv == "strong":
+        return 3
+    if lv == "medium":
+        return 2
+    if lv == "low":
+        return 1
+    return 0
+
+
+def _load_semantic_obligation_table(table_path: str | None) -> dict[str, Any]:
+    if not table_path:
+        return {}
+    p = Path(table_path).expanduser().resolve()
+    if not p.exists():
+        return {}
+    data = read_json(p, default={}) or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _lookup_table_rows(
+    *,
+    table: dict[str, Any],
+    old_ref: str | None,
+    new_ref: str | None,
+    symbol: str,
+    kind: str,
+) -> list[dict[str, Any]]:
+    rows = list(table.get("kernel_evidence_rows", []) or table.get("kernel_symbol_rows", []) or [])
+    if not rows:
+        return []
+
+    # Fast path via optional prebuilt index.
+    idx = table.get("indexes", {}).get("by_ref_symbol", {})
+    key = f"{old_ref or ''}|{new_ref or ''}|{symbol}|{kind}"
+    id_to_row = {str(r.get("row_id")): r for r in rows if isinstance(r, dict) and r.get("row_id")}
+    if isinstance(idx, dict) and key in idx:
+        out = []
+        for rid in idx.get(key, []) or []:
+            row = id_to_row.get(str(rid))
+            if row:
+                out.append(row)
+        if out:
+            return out
+
+    # Fallback scan.
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("symbol", "")) != symbol:
+            continue
+        if str(row.get("kind", "unknown")) != kind:
+            continue
+        if old_ref and str(row.get("old_ref", "")) != old_ref:
+            continue
+        if new_ref and str(row.get("new_ref", "")) != new_ref:
+            continue
+        out.append(row)
+    return out
+
+
+def _derive_from_table_hits(
+    *,
+    table_hits: list[dict[str, Any]],
+    current_strength: str,
+    current_replacement_candidates: list[dict[str, Any]],
+) -> tuple[bool, str, list[dict[str, Any]], list[dict[str, Any]]]:
+    if not table_hits:
+        return False, current_strength, current_replacement_candidates, []
+
+    derived_migration = False
+    best_strength = current_strength
+    repl_map: dict[str, dict[str, Any]] = {}
+    hit_evidence: list[dict[str, Any]] = []
+
+    for c in current_replacement_candidates or []:
+        sym = str(c.get("symbol", "")).strip()
+        if sym:
+            repl_map[sym] = c
+
+    for hit in table_hits:
+        sem_kind = str(hit.get("semantic_kind", "")).strip()
+        if sem_kind == "source_compatible_semantic_migration":
+            derived_migration = True
+        hit_strength = str(hit.get("strength", "")).lower()
+        if _strength_score(hit_strength) > _strength_score(best_strength):
+            best_strength = hit_strength
+
+        for c in hit.get("replacement_candidates", []) or []:
+            sym = str(c.get("symbol", "")).strip()
+            if not sym:
+                continue
+            if sym in repl_map:
+                continue
+            repl_map[sym] = {
+                "symbol": sym,
+                "score": c.get("score", 1),
+                "evidence": c.get("evidence", ["semantic_obligation_table"]),
+            }
+
+        hit_evidence.append(
+            {
+                "type": "obligation_table_hit",
+                "row_id": hit.get("row_id"),
+                "semantic_kind": hit.get("semantic_kind"),
+                "strength": hit.get("strength"),
+                "source_case_count": hit.get("source_case_count"),
+                "source_module_count": hit.get("source_module_count"),
+                "sample_modules": hit.get("sample_modules", [])[:5],
+            }
+        )
+
+    return derived_migration, best_strength, list(repl_map.values()), hit_evidence
+
+
 def run_obligation_builder(
     extracted_dir,
     kernel_diffs: dict[str, Any],
     impact_graph: dict[str, Any],
+    *,
+    old_ref: str | None = None,
+    new_ref: str | None = None,
+    module_path: str | None = None,
+    semantic_obligation_table: str | None = None,
 ) -> dict[str, Any]:
+    if kernel_diffs.get("affected_func_signal_mode") == "kernel_only":
+        semantic_obligation_table = None
+
     affected_map = {}
     for afn in impact_graph.get("affected_functions", []):
         fn = afn.get("function")
@@ -72,7 +239,11 @@ def run_obligation_builder(
             affected_map.setdefault(sym, set()).add(fn)
 
     obligations = []
+    semantic_obligations = []
+    table = _load_semantic_obligation_table(semantic_obligation_table)
+    table_hits_summary: list[dict[str, Any]] = []
     idx = 1
+    sidx = 1
     for item in kernel_diffs.get("items", []):
         symbol = item.get("symbol")
         kind = item.get("kind", "unknown")
@@ -83,17 +254,43 @@ def run_obligation_builder(
         migration_signal = bool(item.get("migration_signal"))
         change_type = item.get("change_type_guess", "unknown")
         affected_fns = sorted(affected_map.get(sym_key, set()))
+        replacement_candidates = list(item.get("replacement_candidates", []) or [])
+        table_hits = _lookup_table_rows(
+            table=table,
+            old_ref=old_ref,
+            new_ref=new_ref,
+            symbol=str(symbol),
+            kind=str(kind),
+        )
+        table_migration, table_strength, replacement_candidates, table_evidence = _derive_from_table_hits(
+            table_hits=table_hits,
+            current_strength=_semantic_strength(item),
+            current_replacement_candidates=replacement_candidates,
+        )
+        effective_migration_signal = bool(migration_signal or table_migration)
+        effective_change_type = change_type
+        if effective_change_type == "unknown" and effective_migration_signal:
+            effective_change_type = "api_migration_signal"
+        if table_hits:
+            table_hits_summary.append(
+                {
+                    "symbol": str(symbol),
+                    "kind": str(kind),
+                    "rows": [h.get("row_id") for h in table_hits if h.get("row_id")],
+                    "module_path": module_path,
+                }
+            )
 
         # Keep obligations focused on concrete migration deltas.
-        if not definition_changed and not missing_new and not migration_signal:
+        if not definition_changed and not missing_new and not effective_migration_signal:
             continue
-        if change_type == "unknown" and not missing_new and not migration_signal:
+        if effective_change_type == "unknown" and not missing_new and not effective_migration_signal:
             continue
         if not affected_fns:
             # Skip noisy symbols not linked to any affected function slice.
             continue
 
-        hard, semantic, seed = _checks_for_change(change_type, missing_new)
+        hard, semantic, seed = _checks_for_change(effective_change_type, missing_new)
 
         evidence = [
             {
@@ -101,6 +298,7 @@ def run_obligation_builder(
                 "value": item.get("definition_diff", "")[:4000],
             }
         ]
+        evidence.extend(table_evidence)
         for c in item.get("commits", [])[:4]:
             evidence.append(
                 {
@@ -124,12 +322,66 @@ def run_obligation_builder(
                 "confidence": _confidence_from_diff(item),
                 "open_questions": item.get("open_questions", []),
                 "patch_guidance_seed": seed,
-                "migration_signal": migration_signal,
-                "replacement_candidates": item.get("replacement_candidates", []),
+                "migration_signal": effective_migration_signal,
+                "replacement_candidates": replacement_candidates,
+                "table_hit_rows": [h.get("row_id") for h in table_hits if h.get("row_id")],
             }
         )
         idx += 1
 
-    payload = {"obligations": obligations}
+        sem_kind = _semantic_obligation_kind(item)
+        if not sem_kind and effective_migration_signal:
+            sem_kind = "source_compatible_semantic_migration"
+        if sem_kind and affected_fns:
+            sem_evidence = []
+            if effective_migration_signal:
+                sem_evidence.append(
+                    {
+                        "type": "migration_signal",
+                        "replacement_candidates": replacement_candidates,
+                        "open_questions": item.get("open_questions", []),
+                    }
+                )
+            sem_evidence.extend(table_evidence)
+            for c in item.get("commits", [])[:3]:
+                sem_evidence.append(
+                    {
+                        "type": "commit",
+                        "hash": c.get("hash"),
+                        "subject": c.get("subject"),
+                    }
+                )
+            semantic_obligations.append(
+                {
+                    "id": f"SOBL-{sidx:03d}",
+                    "kind": sem_kind,
+                    "strength": table_strength,
+                    "affected_kernel_symbol": sym_key,
+                    "affected_driver_functions": affected_fns,
+                    "statement": _build_semantic_statement(item, sym_key),
+                    "recommended_action": "treat as semantic-level required change when strong evidence is present",
+                    "evidence": sem_evidence,
+                    "replacement_candidates": replacement_candidates,
+                    "confidence": _confidence_from_diff(item),
+                    "table_hit_rows": [h.get("row_id") for h in table_hits if h.get("row_id")],
+                }
+            )
+            sidx += 1
+
+    payload = {
+        "obligations": obligations,
+        "semantic_obligations": semantic_obligations,
+        "semantic_obligation_summary": {
+            "count": len(semantic_obligations),
+            "strong_count": sum(1 for x in semantic_obligations if x.get("strength") == "strong"),
+            "kinds": sorted({x.get("kind") for x in semantic_obligations if x.get("kind")}),
+        },
+        "semantic_obligation_table": {
+            "path": semantic_obligation_table or "",
+            "loaded": bool(table),
+            "matched_symbol_count": len(table_hits_summary),
+            "matches": table_hits_summary[:200],
+        },
+    }
     write_json(extracted_dir / "compatibility_obligations.json", payload)
     return payload

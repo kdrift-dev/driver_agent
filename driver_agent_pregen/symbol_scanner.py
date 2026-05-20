@@ -53,6 +53,13 @@ FILE_SCOPE_MACRO_HINTS = {
     "IS_MODULE",
 }
 
+GLOBAL_SYMBOL_HINTS = {
+    "system_wq",
+    "system_percpu_wq",
+    "system_unbound_wq",
+    "system_freezable_wq",
+    "system_highpri_wq",
+}
 
 @dataclass
 class FunctionDef:
@@ -346,6 +353,33 @@ def _extract_fnptr_arg_refs(body: str, local_function_names: set[str]) -> list[s
     return refs
 
 
+def _extract_high_value_global_refs(
+    body: str,
+    *,
+    local_function_names: set[str],
+    param_names: set[str],
+) -> list[str]:
+    """
+    Extract a conservative set of global-like identifiers used in function bodies.
+    We intentionally focus on high-value migration families (e.g., *_wq) to
+    avoid polluting symbol sets with arbitrary local variables.
+    """
+    clean = _strip_comments_and_strings(body)
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\b", clean):
+        tok = m.group(1)
+        if tok in CONTROL_KEYWORDS:
+            continue
+        if tok in local_function_names or tok in param_names:
+            continue
+        if tok in GLOBAL_SYMBOL_HINTS or tok.endswith("_wq"):
+            if tok not in seen:
+                seen.add(tok)
+                out.append(tok)
+    return out
+
+
 def _extract_ops_table_callbacks(text: str, rel_file: str) -> tuple[list[dict], list[dict]]:
     callbacks = []
     symbols = []
@@ -633,6 +667,11 @@ def run_symbol_scanner(module_result: ModuleSourceResult, extracted_dir: Path) -
         enums = _extract_enum_constants_from_body(body_only)
         param_names = _extract_parameter_identifiers(fn.signature)
         fnptr_arg_local_refs = _extract_fnptr_arg_refs(body_only, local_function_names)
+        global_refs = _extract_high_value_global_refs(
+            body_only,
+            local_function_names=local_function_names,
+            param_names=param_names,
+        )
 
         start_line = fn.start_line
 
@@ -714,6 +753,22 @@ def run_symbol_scanner(module_result: ModuleSourceResult, extracted_dir: Path) -
                 {
                     "name": en,
                     "kind": "enum",
+                    "file": fn.file,
+                    "line": start_line,
+                    "code": fn.signature,
+                    "enclosing_function": fn.name,
+                    "is_driver_local": False,
+                    "definition_location_old": None,
+                    "definition_location_new": None,
+                    "locator": "regex",
+                }
+            )
+
+        for g in global_refs:
+            used_symbols.append(
+                {
+                    "name": g,
+                    "kind": "global",
                     "file": fn.file,
                     "line": start_line,
                     "code": fn.signature,

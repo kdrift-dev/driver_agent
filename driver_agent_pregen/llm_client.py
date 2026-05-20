@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
 import os
 import re
+import signal
 import time
 import urllib.error
 import urllib.request
@@ -195,8 +197,10 @@ class LLMClient:
             write_json(stage_dir / "parsed_output.json", parsed)
             return parsed
 
+        timeout_sec = max(30, int(self.config.timeout_sec or 300))
+
         try:
-            raw = self._provider.complete(prompt_text)
+            raw = self._complete_with_hard_timeout(prompt_text, timeout_sec=timeout_sec)
         except Exception as exc:
             raw = ""
             failed = dict(default_output)
@@ -254,6 +258,59 @@ class LLMClient:
                 pass
 
         return None
+
+    def _complete_with_hard_timeout(self, prompt_text: str, *, timeout_sec: int) -> str:
+        if not self._provider:
+            raise RuntimeError("LLM provider not configured")
+
+        # OpenRouter occasionally hangs deep in HTTP stack; isolate into subprocess and enforce wall-clock timeout.
+        if isinstance(self._provider, OpenRouterProvider) and hasattr(mp, "get_context"):
+            try:
+                ctx = mp.get_context("fork")
+                q = ctx.Queue(maxsize=1)
+                p = ctx.Process(target=_provider_complete_worker, args=(self._provider, prompt_text, q))
+                p.start()
+                p.join(float(timeout_sec))
+                if p.is_alive():
+                    p.kill()
+                    p.join()
+                    raise TimeoutError(f"hard_timeout_after_{timeout_sec}s")
+                if q.empty():
+                    raise RuntimeError("provider_subprocess_no_output")
+                status, payload = q.get_nowait()
+                if status == "ok":
+                    return str(payload)
+                raise RuntimeError(str(payload))
+            except TimeoutError:
+                raise
+            except Exception:
+                # Fall back to in-process timeout path below.
+                pass
+
+        # Best-effort hard timeout guard to avoid indefinite hangs in provider HTTP stacks.
+        if hasattr(signal, "SIGALRM"):
+            def _raise_timeout(signum, frame):  # type: ignore[no-untyped-def]
+                raise TimeoutError(f"hard_timeout_after_{timeout_sec}s")
+
+            prev_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _raise_timeout)
+            signal.setitimer(signal.ITIMER_REAL, float(timeout_sec))
+            try:
+                return self._provider.complete(prompt_text)
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+                signal.signal(signal.SIGALRM, prev_handler)
+
+        # Non-POSIX fallback.
+        return self._provider.complete(prompt_text)
+
+
+def _provider_complete_worker(provider: Provider, prompt_text: str, q) -> None:  # type: ignore[no-untyped-def]
+    try:
+        out = provider.complete(prompt_text)
+        q.put(("ok", out))
+    except Exception as exc:  # pragma: no cover - defensive path for subprocess boundary
+        q.put(("err", str(exc)))
 
 
 def _read_kv_like_config_key(path: Path, key_name: str) -> Optional[str]:

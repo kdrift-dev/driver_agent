@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -26,6 +27,7 @@ from driver_agent_pregen.repo_utils import RepositoryAccessor
 from driver_agent_pregen.symbol_scanner import (  # private helpers reused intentionally
     _extract_c_like_functions,
     _extract_rust_functions,
+    _strip_comments,
     run_symbol_scanner,
 )
 from driver_agent_pregen.utils import now_timestamp, slugify, write_json
@@ -39,10 +41,12 @@ class CaseResult:
     module_path: str
     status: str
     affected: set[tuple[str, str]]
+    modified_non_global_raw: set[tuple[str, str]]
     modified_non_global: set[tuple[str, str]]
     modified_global_files: set[str]
     missing: set[tuple[str, str]]
     extra: set[tuple[str, str]]
+    filtered_comment_only: set[tuple[str, str]]
     error: str = ""
 
 
@@ -57,6 +61,8 @@ class EvalConfig:
     affected_func_signal_mode: str
     allowed_symbol_kinds: Optional[set[str]]
     scan_changed_files_only: bool
+    semantic_obligation_table: Optional[str]
+    ignore_comment_only_function_changes: bool
 
 
 def _parse_diff_changed_lines(diff_text: str) -> dict[str, dict[str, set[int]]]:
@@ -149,6 +155,52 @@ def _extract_functions(text: str, rel_file: str) -> list[tuple[str, int, int]]:
     return out
 
 
+def _normalize_semantic_text(code: str) -> str:
+    code = _strip_comments(code)
+    code = re.sub(r"\s+", "", code)
+    return code
+
+
+def _extract_function_semantic_map(text: str, rel_file: str) -> dict[str, set[str]]:
+    suffix = Path(rel_file).suffix.lower()
+    if suffix == ".rs":
+        funcs = _extract_rust_functions(text, rel_file)
+    elif suffix in SOURCE_SUFFIXES:
+        funcs = _extract_c_like_functions(text, rel_file)
+    else:
+        return {}
+
+    out: dict[str, set[str]] = {}
+    for fn in funcs:
+        norm = _normalize_semantic_text(fn.body)
+        out.setdefault(fn.name, set()).add(norm)
+    return out
+
+
+def _is_comment_only_function_change(
+    rel_file: str,
+    fn_name: str,
+    old_text: Optional[str],
+    new_text: Optional[str],
+    old_sem_cache: dict[str, dict[str, set[str]]],
+    new_sem_cache: dict[str, dict[str, set[str]]],
+) -> bool:
+    if old_text is None or new_text is None:
+        return False
+
+    if rel_file not in old_sem_cache:
+        old_sem_cache[rel_file] = _extract_function_semantic_map(old_text, rel_file)
+    if rel_file not in new_sem_cache:
+        new_sem_cache[rel_file] = _extract_function_semantic_map(new_text, rel_file)
+
+    old_sigs = old_sem_cache.get(rel_file, {}).get(fn_name)
+    new_sigs = new_sem_cache.get(rel_file, {}).get(fn_name)
+    if not old_sigs or not new_sigs:
+        return False
+
+    return old_sigs == new_sigs
+
+
 def _map_lines_to_functions(
     line_set: set[int],
     funcs: list[tuple[str, int, int]],
@@ -210,10 +262,12 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
                 module_path=module_path,
                 status="skipped_no_source_file_change",
                 affected=set(),
+                modified_non_global_raw=set(),
                 modified_non_global=set(),
                 modified_global_files=set(),
                 missing=set(),
                 extra=set(),
+                filtered_comment_only=set(),
             )
 
         restrict_files = set(changed_source_files) if cfg.scan_changed_files_only else None
@@ -229,10 +283,12 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
                 module_path=module_path,
                 status="skipped_no_old_sources",
                 affected=set(),
+                modified_non_global_raw=set(),
                 modified_non_global=set(),
                 modified_global_files=set(),
                 missing=set(),
                 extra=set(),
+                filtered_comment_only=set(),
             )
 
         scan_payload = run_symbol_scanner(module_result, extracted_dir)
@@ -250,6 +306,9 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
             module_path,
             collect_commits=cfg.collect_commit_evidence,
             affected_func_signal_mode=cfg.affected_func_signal_mode,
+            old_ref=cfg.old_ref,
+            new_ref=cfg.new_ref,
+            semantic_obligation_table=cfg.semantic_obligation_table,
         )
         impact = run_impact_graph_builder(module_result, extracted_dir, scan_payload, kernel_diffs)
 
@@ -262,6 +321,10 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
 
         modified_non_global: set[tuple[str, str]] = set()
         modified_global_files: set[str] = set()
+        old_text_cache: dict[str, Optional[str]] = {}
+        new_text_cache: dict[str, Optional[str]] = {}
+        old_sem_cache: dict[str, dict[str, set[str]]] = {}
+        new_sem_cache: dict[str, dict[str, set[str]]] = {}
 
         for rel_file, lines in changed.items():
             old_lines = lines.get("old", set())
@@ -269,6 +332,7 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
 
             if old_lines and accessor.path_exists("old", rel_file):
                 old_text = accessor.read_file("old", rel_file)
+                old_text_cache[rel_file] = old_text
                 old_funcs = _extract_functions(old_text, rel_file)
                 fn_hits, has_global = _map_lines_to_functions(old_lines, old_funcs)
                 for fn in fn_hits:
@@ -276,10 +340,12 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
                 if has_global:
                     modified_global_files.add(rel_file)
             elif old_lines:
+                old_text_cache[rel_file] = None
                 modified_global_files.add(rel_file)
 
             if new_lines and accessor.path_exists("new", rel_file):
                 new_text = accessor.read_file("new", rel_file)
+                new_text_cache[rel_file] = new_text
                 new_funcs = _extract_functions(new_text, rel_file)
                 fn_hits, has_global = _map_lines_to_functions(new_lines, new_funcs)
                 for fn in fn_hits:
@@ -287,7 +353,32 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
                 if has_global:
                     modified_global_files.add(rel_file)
             elif new_lines:
+                new_text_cache[rel_file] = None
                 modified_global_files.add(rel_file)
+
+        filtered_comment_only: set[tuple[str, str]] = set()
+        if cfg.ignore_comment_only_function_changes and modified_non_global:
+            for rel_file, fn_name in sorted(modified_non_global):
+                old_text = old_text_cache.get(rel_file)
+                new_text = new_text_cache.get(rel_file)
+                if old_text is None and accessor.path_exists("old", rel_file):
+                    old_text = accessor.read_file("old", rel_file)
+                    old_text_cache[rel_file] = old_text
+                if new_text is None and accessor.path_exists("new", rel_file):
+                    new_text = accessor.read_file("new", rel_file)
+                    new_text_cache[rel_file] = new_text
+                if _is_comment_only_function_change(
+                    rel_file,
+                    fn_name,
+                    old_text,
+                    new_text,
+                    old_sem_cache,
+                    new_sem_cache,
+                ):
+                    filtered_comment_only.add((rel_file, fn_name))
+            if filtered_comment_only:
+                modified_non_global -= filtered_comment_only
+        modified_non_global_raw = modified_non_global | filtered_comment_only
 
         missing = modified_non_global - affected
         extra = affected - modified_non_global
@@ -297,10 +388,12 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
             module_path=module_path,
             status="ok",
             affected=affected,
+            modified_non_global_raw=modified_non_global_raw,
             modified_non_global=modified_non_global,
             modified_global_files=modified_global_files,
             missing=missing,
             extra=extra,
+            filtered_comment_only=filtered_comment_only,
         )
 
     except Exception as exc:
@@ -309,10 +402,12 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
             module_path=module_path,
             status="failed",
             affected=set(),
+            modified_non_global_raw=set(),
             modified_non_global=set(),
             modified_global_files=set(),
             missing=set(),
             extra=set(),
+            filtered_comment_only=set(),
             error=f"{exc}\n{traceback.format_exc()}",
         )
     finally:
@@ -383,12 +478,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--affected-func-signal-mode",
         type=str,
         choices=["kernel_only", "kernel_plus_other_drivers"],
-        default="kernel_plus_other_drivers",
+        default="kernel_only",
         help=(
             "signal source mode for affected-functions: "
-            "kernel_only (strict kernel-side) or "
-            "kernel_plus_other_drivers (allow non-target drivers hints)"
+            "kernel_only (strict kernel-side, default) or "
+            "kernel_plus_other_drivers (opt-in, allow non-target drivers hints)"
         ),
+    )
+    p.add_argument(
+        "--semantic-obligation-table",
+        default=None,
+        help="optional semantic table JSON to enrich kernel diff evidence for affected-function detection",
+    )
+    p.set_defaults(ignore_comment_only_function_changes=True)
+    p.add_argument(
+        "--ignore-comment-only-function-changes",
+        dest="ignore_comment_only_function_changes",
+        action="store_true",
+        help="exclude function-level changes that are comments/whitespace only (default: enabled)",
+    )
+    p.add_argument(
+        "--no-ignore-comment-only-function-changes",
+        dest="ignore_comment_only_function_changes",
+        action="store_false",
+        help="count comment-only function changes in modified function set",
     )
     return p
 
@@ -461,6 +574,11 @@ def main(argv: list[str] | None = None) -> int:
     }
     allowed_symbol_kinds: Optional[set[str]] = parsed_symbol_kinds or None
     symbol_kinds_meta = sorted(allowed_symbol_kinds) if allowed_symbol_kinds else ["ALL"]
+    semantic_obligation_table = (
+        args.semantic_obligation_table
+        if args.affected_func_signal_mode == "kernel_plus_other_drivers"
+        else None
+    )
 
     meta = {
         "csv": str(csv_path),
@@ -472,11 +590,21 @@ def main(argv: list[str] | None = None) -> int:
         "git_grep_threads": git_grep_threads,
         "collect_commit_evidence": bool(args.collect_commit_evidence),
         "affected_func_signal_mode": args.affected_func_signal_mode,
+        "semantic_obligation_table": semantic_obligation_table,
+        "semantic_obligation_table_ignored": (
+            {
+                "path": args.semantic_obligation_table,
+                "reason": "affected_func_signal_mode=kernel_only uses kernel-side evidence only",
+            }
+            if args.semantic_obligation_table and semantic_obligation_table is None
+            else None
+        ),
         "allowed_symbol_kinds": symbol_kinds_meta,
         "scan_changed_files_only": bool(args.scan_changed_files_only),
         "total_csv_rows": len(rows),
         "selected_cases": len(filtered),
         "only_changed": bool(args.only_changed and not args.include_unchanged),
+        "ignore_comment_only_function_changes": bool(args.ignore_comment_only_function_changes),
     }
     write_json(run_dir / "meta.json", meta)
     print(
@@ -495,12 +623,15 @@ def main(argv: list[str] | None = None) -> int:
                 "module_path",
                 "status",
                 "affected_count",
+                "modified_non_global_raw_count",
                 "modified_non_global_count",
                 "modified_global_file_count",
                 "overlap_count",
                 "missing_count",
                 "extra_count",
                 "coverage_all_modified_non_global",
+                "filtered_comment_only_count",
+                "filtered_comment_only_functions",
                 "missing_functions",
                 "extra_functions",
                 "error",
@@ -518,6 +649,8 @@ def main(argv: list[str] | None = None) -> int:
             affected_func_signal_mode=str(args.affected_func_signal_mode),
             allowed_symbol_kinds=allowed_symbol_kinds,
             scan_changed_files_only=bool(args.scan_changed_files_only),
+            semantic_obligation_table=semantic_obligation_table,
+            ignore_comment_only_function_changes=bool(args.ignore_comment_only_function_changes),
         )
 
         t0 = time.time()
@@ -529,10 +662,12 @@ def main(argv: list[str] | None = None) -> int:
             "cases_with_modified_non_global": 0,
             "cases_fully_covered_non_global": 0,
             "total_affected_functions": 0,
+            "total_modified_non_global_raw_functions": 0,
             "total_modified_non_global_functions": 0,
             "total_missing_non_global_functions": 0,
             "total_extra_affected_functions": 0,
             "total_modified_global_files": 0,
+            "total_filtered_comment_only_functions": 0,
         }
 
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as ex:
@@ -548,10 +683,12 @@ def main(argv: list[str] | None = None) -> int:
                 if res.status == "ok":
                     agg["ok_cases"] += 1
                     agg["total_affected_functions"] += len(res.affected)
+                    agg["total_modified_non_global_raw_functions"] += len(res.modified_non_global_raw)
                     agg["total_modified_non_global_functions"] += len(res.modified_non_global)
                     agg["total_missing_non_global_functions"] += len(res.missing)
                     agg["total_extra_affected_functions"] += len(res.extra)
                     agg["total_modified_global_files"] += len(res.modified_global_files)
+                    agg["total_filtered_comment_only_functions"] += len(res.filtered_comment_only)
                     if res.modified_non_global:
                         agg["cases_with_modified_non_global"] += 1
                         if coverage:
@@ -567,12 +704,15 @@ def main(argv: list[str] | None = None) -> int:
                         "module_path": res.module_path,
                         "status": res.status,
                         "affected_count": len(res.affected),
+                        "modified_non_global_raw_count": len(res.modified_non_global_raw),
                         "modified_non_global_count": len(res.modified_non_global),
                         "modified_global_file_count": len(res.modified_global_files),
                         "overlap_count": overlap,
                         "missing_count": len(res.missing),
                         "extra_count": len(res.extra),
                         "coverage_all_modified_non_global": str(coverage).lower(),
+                        "filtered_comment_only_count": len(res.filtered_comment_only),
+                        "filtered_comment_only_functions": _set_to_json_array(res.filtered_comment_only),
                         "missing_functions": _set_to_json_array(res.missing),
                         "extra_functions": _set_to_json_array(res.extra),
                         "error": res.error[:2000],

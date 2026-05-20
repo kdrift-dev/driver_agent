@@ -79,11 +79,19 @@ python pregen_driver_agent.py \
 ### Optional runtime execution switches
 
 - `--patch-candidates N`: request N patch candidates from LLM (default `1`)
+- `--patch-source-mode {full_module|focused}`:
+  - `full_module` (default): provide full old-module source files to patch generation.
+  - `focused`: provide only affected functions and code that references them (direct callers / callback roots).
+- `--patch-source-with-lineno` / `--patch-source-no-lineno`:
+  - control whether patch-generation source snippets include `L<line>:` prefixes for location hints.
+- `--semantic-obligation-table <path>`: query a prebuilt semantic-obligation table to enrich obligation evidence/strength during stage 6.
 - `--affected-func-signal-mode {kernel_only|kernel_plus_other_drivers}`:
-  - `kernel_only`: strictly kernel-side evidence; excludes all `drivers/` commits from migration hint mining.
-  - `kernel_plus_other_drivers` (default): allows migration hints from non-target drivers; target module path is still excluded.
+  - `kernel_only` (default): strictly kernel-side evidence; excludes driver-tree diffs from migration hint mining.
+  - `kernel_plus_other_drivers`: opt-in ablation/debug mode that allows migration hints from non-target drivers; target module path is still excluded.
+  - In `kernel_only` mode, `--semantic-obligation-table` is ignored so affected-function detection is not enriched by prior driver-side semantic tables.
 - `--enable-qemu`: allow validation stage to execute suite commands that invoke `kunit.py run` / `qemu-system-*`
 - `--qemu-timeout-sec SEC`: timeout for suite/qemu commands (default `3600`)
+- `--skip-system-test-generation`: skip LLM system-test generation and suite/qemu execution (still runs patch apply/compile/post-reasoning)
 - `--cleanup-worktrees`: remove temporary old/new git worktrees after validation
 
 ## Output Tree
@@ -165,3 +173,23 @@ Outputs:
 - `affected_miss_root_cause_summary.json`
 - `affected_miss_report.md`
 - `case_reports/<case_id>_affected_miss.md`
+
+## Experimental Semantic Obligation Table Builder
+
+This is an opt-in experiment helper. The default pipeline uses `kernel_only`
+affected-function detection and does not query this table.
+
+Build reusable kernel-side + driver-side semantic obligation tables from existing run artifacts:
+
+```bash
+python tools/build_semantic_obligation_table.py \
+  --runs-dir workflow/runs/pregen_fixcycle_20260513_e_152948 \
+  --out-dir workflow/runs/semantic_obligation_table_20260514 \
+  --old-ref v6.19 \
+  --new-ref v7.0-rc1
+```
+
+Outputs:
+- `semantic_obligation_table.json`
+- `kernel_semantic_obligation_table.csv`
+- `driver_semantic_obligation_table.csv`

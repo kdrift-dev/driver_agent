@@ -364,6 +364,7 @@ class RepositoryAccessor:
             pref = self._normalize_prefix(raw)
             if pref:
                 excludes.append(pref)
+        pathspecs = self._exclude_pathspecs(excludes)
         scan_limit = max(max_count * 12, max_count + 8)
         cmd = [
             "git",
@@ -376,9 +377,11 @@ class RepositoryAccessor:
             "-S",
             symbol,
         ]
+        if pathspecs:
+            cmd.extend(["--", ".", *pathspecs])
         proc = run_cmd(cmd, check=False)
         records = self._parse_commit_records(proc.stdout)
-        records = self._filter_records_excluding_paths(records, excludes, max_count=max_count)
+        records = records[:max_count]
         if records:
             return records
 
@@ -395,9 +398,11 @@ class RepositoryAccessor:
             "-G",
             safe,
         ]
+        if pathspecs:
+            cmd_g.extend(["--", ".", *pathspecs])
         proc_g = run_cmd(cmd_g, check=False)
         records_g = self._parse_commit_records(proc_g.stdout)
-        return self._filter_records_excluding_paths(records_g, excludes, max_count=max_count)
+        return records_g[:max_count]
 
     @staticmethod
     def _parse_commit_records(text: str) -> list[CommitRecord]:
@@ -411,7 +416,13 @@ class RepositoryAccessor:
             out.append(CommitRecord(commit=commit.strip(), subject=subject.strip()))
         return out
 
-    def commit_details(self, commit: str, max_diff_chars: int = 8000) -> dict:
+    def commit_details(
+        self,
+        commit: str,
+        max_diff_chars: int = 8000,
+        *,
+        exclude_path_prefixes: Optional[Iterable[str]] = None,
+    ) -> dict:
         if self.mode != "git":
             return {
                 "hash": commit,
@@ -420,6 +431,12 @@ class RepositoryAccessor:
                 "changed_files": [],
                 "diff_excerpt": "",
             }
+        excludes: list[str] = []
+        for raw in (exclude_path_prefixes or []):
+            pref = self._normalize_prefix(raw)
+            if pref:
+                excludes.append(pref)
+        pathspecs = self._exclude_pathspecs(excludes)
 
         msg_proc = run_cmd(
             [
@@ -455,12 +472,16 @@ class RepositoryAccessor:
             ],
             check=False,
         )
-        changed_files = [line.strip() for line in files_proc.stdout.splitlines() if line.strip()]
+        changed_files = [
+            line.strip()
+            for line in files_proc.stdout.splitlines()
+            if line.strip() and not self._path_matches_prefixes(line.strip(), excludes)
+        ]
 
-        diff_proc = run_cmd(
-            ["git", "-C", str(self.repo), "show", "--no-color", "--unified=3", "--pretty=format:", commit],
-            check=False,
-        )
+        diff_cmd = ["git", "-C", str(self.repo), "show", "--no-color", "--unified=3", "--pretty=format:", commit]
+        if pathspecs:
+            diff_cmd.extend(["--", ".", *pathspecs])
+        diff_proc = run_cmd(diff_cmd, check=False)
         diff_excerpt = diff_proc.stdout
         if len(diff_excerpt) > max_diff_chars:
             diff_excerpt = diff_excerpt[:max_diff_chars] + "\n...[truncated]"
@@ -477,6 +498,21 @@ class RepositoryAccessor:
     def _normalize_prefix(path: str) -> str:
         p = (path or "").strip().strip("/")
         return f"{p}/" if p else ""
+
+    @staticmethod
+    def _exclude_pathspecs(prefixes: list[str]) -> list[str]:
+        out: list[str] = []
+        for pref in prefixes:
+            p = (pref or "").strip().strip("/")
+            if not p:
+                continue
+            out.append(f":(exclude){p}/**")
+        return out
+
+    @staticmethod
+    def _path_matches_prefixes(path: str, prefixes: list[str]) -> bool:
+        p = (path or "").strip()
+        return any(p.startswith(pref) for pref in prefixes)
 
     def _commit_touches_prefixes(self, commit: str, prefixes: list[str]) -> bool:
         if not prefixes:

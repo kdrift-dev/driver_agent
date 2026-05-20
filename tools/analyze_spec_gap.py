@@ -15,7 +15,7 @@ WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
-from driver_agent_pregen.symbol_scanner import _extract_c_like_functions, _extract_rust_functions
+from driver_agent_pregen.symbol_scanner import _extract_c_like_functions, _extract_rust_functions, _strip_comments
 from driver_agent_pregen.utils import now_timestamp, slugify, write_json, write_text
 
 SOURCE_SUFFIXES = {".c", ".h", ".rs", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".S", ".s"}
@@ -49,6 +49,7 @@ class CaseSummary:
     qemu_status: str
     runtime_validation_available: bool
     reference_changed_functions: set[tuple[str, str]]
+    reference_comment_only_functions: set[tuple[str, str]]
     generated_changed_functions: set[tuple[str, str]]
     missing_reference_functions: set[tuple[str, str]]
     extra_generated_functions: set[tuple[str, str]]
@@ -197,6 +198,26 @@ def _extract_functions(text: str, rel_file: str) -> list[tuple[str, int, int]]:
     return out
 
 
+def _normalize_semantic_text(code: str) -> str:
+    code = _strip_comments(code)
+    code = re.sub(r"\s+", "", code)
+    return code
+
+
+def _extract_function_semantic_map(text: str, rel_file: str) -> dict[str, set[str]]:
+    suffix = Path(rel_file).suffix.lower()
+    if suffix == ".rs":
+        funcs = _extract_rust_functions(text, rel_file)
+    elif suffix in SOURCE_SUFFIXES:
+        funcs = _extract_c_like_functions(text, rel_file)
+    else:
+        return {}
+    out: dict[str, set[str]] = {}
+    for fn in funcs:
+        out.setdefault(fn.name, set()).add(_normalize_semantic_text(fn.body))
+    return out
+
+
 def _map_lines_to_functions(line_set: set[int], funcs: list[tuple[str, int, int]]) -> set[str]:
     hits: set[str] = set()
     for ln in line_set:
@@ -208,10 +229,18 @@ def _map_lines_to_functions(line_set: set[int], funcs: list[tuple[str, int, int]
 
 
 class ReferenceRepo:
-    def __init__(self, repo_root: Path, old_ref: str, new_ref: str) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        old_ref: str,
+        new_ref: str,
+        *,
+        ignore_comment_only_function_changes: bool = True,
+    ) -> None:
         self.repo_root = repo_root
         self.old_ref = old_ref
         self.new_ref = new_ref
+        self.ignore_comment_only_function_changes = ignore_comment_only_function_changes
         self._file_cache: dict[tuple[str, str], Optional[str]] = {}
 
     def module_diff(self, module_path: str) -> str:
@@ -255,10 +284,10 @@ class ReferenceRepo:
         self._file_cache[key] = proc.stdout
         return proc.stdout
 
-    def changed_functions_for_module(self, module_path: str) -> set[tuple[str, str]]:
+    def changed_functions_for_module(self, module_path: str) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
         diff_text = self.module_diff(module_path)
         changed = _parse_diff_changed_lines(diff_text)
-        out: set[tuple[str, str]] = set()
+        out_raw: set[tuple[str, str]] = set()
         for rel_file, lines in changed.items():
             old_lines = lines.get("old", set())
             new_lines = lines.get("new", set())
@@ -267,14 +296,38 @@ class ReferenceRepo:
                 if old_text is not None:
                     old_funcs = _extract_functions(old_text, rel_file)
                     for fn in _map_lines_to_functions(old_lines, old_funcs):
-                        out.add((rel_file, fn))
+                        out_raw.add((rel_file, fn))
             if new_lines:
                 new_text = self.read_file(self.new_ref, rel_file)
                 if new_text is not None:
                     new_funcs = _extract_functions(new_text, rel_file)
                     for fn in _map_lines_to_functions(new_lines, new_funcs):
-                        out.add((rel_file, fn))
-        return out
+                        out_raw.add((rel_file, fn))
+
+        if not self.ignore_comment_only_function_changes:
+            return out_raw, set()
+
+        semantic_changed: set[tuple[str, str]] = set()
+        comment_only: set[tuple[str, str]] = set()
+        sem_old_cache: dict[str, dict[str, set[str]]] = {}
+        sem_new_cache: dict[str, dict[str, set[str]]] = {}
+        for rel_file, fn_name in sorted(out_raw):
+            old_text = self.read_file(self.old_ref, rel_file)
+            new_text = self.read_file(self.new_ref, rel_file)
+            if old_text is None or new_text is None:
+                semantic_changed.add((rel_file, fn_name))
+                continue
+            if rel_file not in sem_old_cache:
+                sem_old_cache[rel_file] = _extract_function_semantic_map(old_text, rel_file)
+            if rel_file not in sem_new_cache:
+                sem_new_cache[rel_file] = _extract_function_semantic_map(new_text, rel_file)
+            old_sigs = sem_old_cache.get(rel_file, {}).get(fn_name)
+            new_sigs = sem_new_cache.get(rel_file, {}).get(fn_name)
+            if old_sigs and new_sigs and old_sigs == new_sigs:
+                comment_only.add((rel_file, fn_name))
+            else:
+                semantic_changed.add((rel_file, fn_name))
+        return semantic_changed, comment_only
 
 
 def _parse_function_pairs_json(text: str) -> set[tuple[str, str]]:
@@ -548,6 +601,10 @@ def _case_markdown(case: CaseSummary, case_dir: Path) -> str:
     md.append("")
     md.append("7. Did the patch match the upstream/reference diff at function level?")
     md.append(f"- patch_matches_reference_behavior: `{case.patch_matches_reference_behavior}`")
+    if case.reference_comment_only_functions:
+        md.append("- Reference comment-only function changes (tracked, ignored in correctness matching):")
+        for p, f in sorted(case.reference_comment_only_functions):
+            md.append(f"- `{p}:{f}`")
     if case.missing_reference_functions:
         md.append("- Missing reference functions:")
         for p, f in sorted(case.missing_reference_functions):
@@ -617,7 +674,7 @@ def _build_case_summary(case_dir: Path, ref: ReferenceRepo) -> Optional[CaseSumm
     post_verdict = str(post_reason.get("overall_verdict", "UNKNOWN")).upper()
 
     affected = _affected_functions(case_dir)
-    reference_changed = ref.changed_functions_for_module(module_path)
+    reference_changed, reference_comment_only = ref.changed_functions_for_module(module_path)
     generated_changed = _generated_changed_functions(case_dir, ref)
     missing_ref = reference_changed - generated_changed
     extra_gen = generated_changed - reference_changed
@@ -671,6 +728,7 @@ def _build_case_summary(case_dir: Path, ref: ReferenceRepo) -> Optional[CaseSumm
         qemu_status=qemu_status,
         runtime_validation_available=runtime_validation_available,
         reference_changed_functions=reference_changed,
+        reference_comment_only_functions=reference_comment_only,
         generated_changed_functions=generated_changed,
         missing_reference_functions=missing_ref,
         extra_generated_functions=extra_gen,
@@ -694,6 +752,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-latest-per-module", dest="latest_per_module", action="store_false")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--emit-8case-table", action="store_true", help="also emit 8case_spec_gap_table.csv")
+    p.set_defaults(ignore_comment_only_function_changes=True)
+    p.add_argument(
+        "--ignore-comment-only-function-changes",
+        dest="ignore_comment_only_function_changes",
+        action="store_true",
+        help="ignore comment/whitespace-only function changes in reference when judging patch correctness (default: enabled)",
+    )
+    p.add_argument(
+        "--no-ignore-comment-only-function-changes",
+        dest="ignore_comment_only_function_changes",
+        action="store_false",
+        help="treat comment/whitespace-only function changes as regular changed functions",
+    )
     return p
 
 
@@ -727,7 +798,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit and args.limit > 0:
         case_dirs = case_dirs[: args.limit]
 
-    ref = ReferenceRepo(ref_root, args.old_ref, args.new_ref)
+    ref = ReferenceRepo(
+        ref_root,
+        args.old_ref,
+        args.new_ref,
+        ignore_comment_only_function_changes=bool(args.ignore_comment_only_function_changes),
+    )
     summaries: list[CaseSummary] = []
     for case_dir in case_dirs:
         cs = _build_case_summary(case_dir, ref)
@@ -754,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
                 "qemu_status",
                 "runtime_validation_available",
                 "reference_changed_functions",
+                "reference_comment_only_functions",
                 "generated_patch_changed_functions",
                 "unnecessary_modified_functions",
                 "missing_modified_functions",
@@ -781,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
                     "qemu_status": c.qemu_status,
                     "runtime_validation_available": c.runtime_validation_available,
                     "reference_changed_functions": _format_fn_set(c.reference_changed_functions),
+                    "reference_comment_only_functions": _format_fn_set(c.reference_comment_only_functions),
                     "generated_patch_changed_functions": _format_fn_set(c.generated_changed_functions),
                     "unnecessary_modified_functions": _format_fn_set(c.extra_generated_functions),
                     "missing_modified_functions": _format_fn_set(c.missing_reference_functions),
@@ -806,8 +884,10 @@ def main(argv: list[str] | None = None) -> int:
         "reference_root": ref_root.as_posix(),
         "old_ref": args.old_ref,
         "new_ref": args.new_ref,
+        "ignore_comment_only_function_changes": bool(args.ignore_comment_only_function_changes),
         "selected_case_dirs": [p.as_posix() for p in case_dirs],
         "analyzed_cases": len(summaries),
+        "total_reference_comment_only_functions": sum(len(c.reference_comment_only_functions) for c in summaries),
         "label_counts": label_counts,
         "post_match_but_patch_wrong": [
             c.case_id for c in summaries if c.post_match_or_pass and c.patch_matches_reference_behavior is False

@@ -3,10 +3,11 @@ from __future__ import annotations
 import difflib
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 from .repo_utils import RepositoryAccessor
-from .utils import truncate_text, write_json, write_text
+from .utils import read_json, truncate_text, write_json, write_text
 
 
 KEYWORDS_PRIORITY = [
@@ -37,17 +38,28 @@ MIGRATION_SUBJECT_HINTS = [
 ]
 
 ALLOC_FAMILY_REPLACEMENTS = {
-    "kmalloc": "kmalloc_obj",
-    "kzalloc": "kzalloc_obj",
-    "kvmalloc": "kvmalloc_obj",
-    "vzalloc": "vzalloc_obj",
-    "kmalloc_array": "kmalloc_objs",
-    "kvmalloc_array": "kvmalloc_objs",
-    "kcalloc": "kzalloc_objs",
-    "kvcalloc": "kvzalloc_objs",
+    "kmalloc": ["kmalloc_obj", "kmalloc_flex"],
+    "kzalloc": ["kzalloc_obj", "kzalloc_flex"],
+    "kvmalloc": ["kvmalloc_obj"],
+    "vzalloc": ["vzalloc_obj"],
+    "kmalloc_array": ["kmalloc_objs"],
+    "kvmalloc_array": ["kvmalloc_objs"],
+    "kcalloc": ["kzalloc_objs"],
+    "kvcalloc": ["kvzalloc_objs"],
+}
+
+SYMBOL_REPLACEMENT_HINTS = {
+    "sprintf": ["sysfs_emit", "scnprintf"],
+    "snprintf": ["scnprintf", "sysfs_emit", "sysfs_emit_at"],
+    "scnprintf": ["sysfs_emit", "sysfs_emit_at"],
+    "system_wq": ["system_percpu_wq", "system_unbound_wq"],
 }
 
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def _is_diff_metadata_line(line: str) -> bool:
+    return line.startswith(("+++", "---", "diff --git ", "index ", "@@"))
 
 
 def _choose_location(locations: list[dict], module_path: str) -> dict | None:
@@ -115,6 +127,163 @@ def _confidence(old_def: str, new_def: str, old_exists: bool, new_exists: bool, 
     return "low"
 
 
+def _confidence_rank(level: str) -> int:
+    lv = str(level or "").lower()
+    if lv == "high":
+        return 3
+    if lv == "medium":
+        return 2
+    if lv == "low":
+        return 1
+    return 0
+
+
+def _max_conf(a: str, b: str) -> str:
+    return a if _confidence_rank(a) >= _confidence_rank(b) else b
+
+
+def _strength_rank(level: str) -> int:
+    lv = str(level or "").lower()
+    if lv == "strong":
+        return 3
+    if lv == "medium":
+        return 2
+    if lv == "low":
+        return 1
+    return 0
+
+
+def _load_semantic_obligation_table(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return {}
+    data = read_json(p, default={}) or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _table_kernel_rows(table: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = list(table.get("kernel_evidence_rows", []) or [])
+    if rows:
+        return [r for r in rows if isinstance(r, dict)]
+    rows = list(table.get("kernel_symbol_rows", []) or [])
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _lookup_table_rows(
+    *,
+    table: dict[str, Any],
+    old_ref: str | None,
+    new_ref: str | None,
+    symbol: str,
+    kind: str,
+) -> list[dict[str, Any]]:
+    rows = _table_kernel_rows(table)
+    if not rows:
+        return []
+
+    idx = table.get("indexes", {}).get("by_ref_symbol", {})
+    key = f"{old_ref or ''}|{new_ref or ''}|{symbol}|{kind}"
+    id_to_row = {str(r.get("row_id")): r for r in rows if r.get("row_id")}
+    if isinstance(idx, dict) and key in idx:
+        out = []
+        for rid in idx.get(key, []) or []:
+            row = id_to_row.get(str(rid))
+            if row:
+                out.append(row)
+        if out:
+            return out
+
+    out = []
+    for row in rows:
+        if str(row.get("symbol", "")) != symbol:
+            continue
+        if str(row.get("kind", "unknown")) != kind:
+            continue
+        if old_ref and str(row.get("old_ref", "")) != old_ref:
+            continue
+        if new_ref and str(row.get("new_ref", "")) != new_ref:
+            continue
+        out.append(row)
+    return out
+
+
+def _merge_replacement_candidates(
+    base: list[dict[str, Any]],
+    second: list[dict[str, Any]],
+    *,
+    second_source: str = "table",
+    max_candidates: int = 8,
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+
+    def add_one(item: dict[str, Any], source: str) -> None:
+        sym = str(item.get("symbol", "")).strip()
+        if not sym:
+            return
+        score = int(item.get("score", 1) or 1)
+        ev = [str(x) for x in (item.get("evidence", []) or []) if str(x).strip()]
+        if source == "table":
+            ev = ["semantic_obligation_table"] + ev
+        rec = merged.get(sym)
+        if not rec:
+            merged[sym] = {
+                "symbol": sym,
+                "score": score,
+                "evidence": dedupe_list(ev)[:8],
+            }
+            return
+        rec["score"] = max(int(rec.get("score", 1) or 1), score)
+        rec["evidence"] = dedupe_list(list(rec.get("evidence", [])) + ev)[:8]
+
+    for c in base or []:
+        add_one(c, "base")
+    for c in second or []:
+        add_one(c, second_source)
+
+    out = list(merged.values())
+    out.sort(key=lambda x: (-int(x.get("score", 1) or 1), str(x.get("symbol", ""))))
+    return out[:max_candidates]
+
+
+def _table_row_votes(table_hits: list[dict[str, Any]]) -> tuple[bool, str, list[dict[str, Any]], list[str], str]:
+    migration = False
+    best_change_type = "unknown"
+    best_strength = "low"
+    replacements: list[dict[str, Any]] = []
+    row_ids: list[str] = []
+
+    for hit in table_hits:
+        if hit.get("migration_signal") or str(hit.get("semantic_kind", "")) == "source_compatible_semantic_migration":
+            migration = True
+        ct = str(hit.get("change_type_guess", "unknown"))
+        if best_change_type == "unknown" and ct != "unknown":
+            best_change_type = ct
+        st = str(hit.get("strength", "low"))
+        if _strength_rank(st) > _strength_rank(best_strength):
+            best_strength = st
+        replacements.extend(list(hit.get("replacement_candidates", []) or []))
+        rid = str(hit.get("row_id", "")).strip()
+        if rid:
+            row_ids.append(rid)
+
+    return migration, best_change_type, replacements, dedupe_list(row_ids), best_strength
+
+
+def _confidence_with_table(base_conf: str, table_hits: list[dict[str, Any]], table_strength: str) -> str:
+    out = base_conf
+    if any(bool(h.get("definition_changed")) for h in table_hits):
+        out = _max_conf(out, "medium")
+    if _strength_rank(table_strength) >= _strength_rank("medium"):
+        out = _max_conf(out, "medium")
+    if _strength_rank(table_strength) >= _strength_rank("strong"):
+        out = _max_conf(out, "high")
+    return out
+
+
 def run_kernel_diff_builder(
     accessor: RepositoryAccessor,
     extracted_dir,
@@ -122,7 +291,10 @@ def run_kernel_diff_builder(
     module_path: str,
     *,
     collect_commits: bool = True,
-    affected_func_signal_mode: str = "kernel_plus_other_drivers",
+    affected_func_signal_mode: str = "kernel_only",
+    old_ref: str | None = None,
+    new_ref: str | None = None,
+    semantic_obligation_table: str | None = None,
 ) -> dict[str, Any]:
     if affected_func_signal_mode not in {"kernel_only", "kernel_plus_other_drivers"}:
         raise ValueError(
@@ -134,7 +306,9 @@ def run_kernel_diff_builder(
     if affected_func_signal_mode == "kernel_only":
         # Strict mode: do not use any driver-tree migration evidence.
         exclude_prefixes.append("drivers")
+        semantic_obligation_table = None
 
+    semantic_table = _load_semantic_obligation_table(semantic_obligation_table)
     items_out = []
     patch_chunks = []
 
@@ -142,6 +316,13 @@ def run_kernel_diff_builder(
         symbol = item.get("symbol")
         kind = item.get("kind", "unknown")
         context_lines = _context_for_kind(kind)
+        table_hits = _lookup_table_rows(
+            table=semantic_table,
+            old_ref=old_ref,
+            new_ref=new_ref,
+            symbol=str(symbol or ""),
+            kind=str(kind or "unknown"),
+        )
 
         old_loc = _choose_location(item.get("old_locations", []), module_path)
         new_loc = _choose_location(item.get("new_locations", []), module_path)
@@ -197,7 +378,7 @@ def run_kernel_diff_builder(
                 exclude_path_prefixes=exclude_prefixes,
             )
             for rec in commit_records:
-                commits.append(accessor.commit_details(rec.commit))
+                commits.append(accessor.commit_details(rec.commit, exclude_path_prefixes=exclude_prefixes))
 
         migration_signal, replacement_candidates, migration_reasons = _detect_migration_signal(
             symbol=symbol or "",
@@ -207,9 +388,16 @@ def run_kernel_diff_builder(
             new_exists=new_exists,
             commits=commits,
         )
+        table_migration, table_change_type, table_repls, table_row_ids, table_strength = _table_row_votes(table_hits)
+        migration_signal = bool(migration_signal or table_migration)
+        replacement_candidates = _merge_replacement_candidates(replacement_candidates, table_repls)
 
         commit_blob = "\n".join([c.get("subject", "") + "\n" + c.get("message", "") for c in commits])
         change_type = _guess_change_type(kind, definition_changed, old_exists, new_exists, diff_text)
+        # Conservative: table should mainly reinforce migration semantics (replacement signals),
+        # not broaden generic change-type noise.
+        if change_type == "unknown" and table_change_type != "unknown" and (table_migration or bool(table_repls)):
+            change_type = table_change_type
         if migration_signal and change_type == "unknown":
             change_type = "api_migration_signal"
 
@@ -221,12 +409,16 @@ def run_kernel_diff_builder(
             if replacement_candidates:
                 repl = ", ".join(c["symbol"] for c in replacement_candidates[:5])
                 open_questions.append(f"candidate replacement symbols from in-tree migrations: {repl}")
+        if table_row_ids:
+            open_questions.append(f"semantic obligation table hits: {', '.join(table_row_ids[:8])}")
 
         for kw in KEYWORDS_PRIORITY:
             if kw in f"{diff_text}\n{commit_blob}".lower():
                 open_questions.append(f"high-priority keyword observed: {kw}")
 
         confidence = _confidence(old_def, new_def, old_exists, new_exists, change_type)
+        if table_migration or table_repls:
+            confidence = _confidence_with_table(confidence, table_hits, table_strength)
 
         out_item = {
             "symbol": symbol,
@@ -240,6 +432,7 @@ def run_kernel_diff_builder(
             "commits": commits,
             "migration_signal": migration_signal,
             "replacement_candidates": replacement_candidates,
+            "semantic_table_hit_rows": table_row_ids,
             "confidence": confidence,
             "open_questions": dedupe_list(open_questions),
         }
@@ -258,6 +451,7 @@ def run_kernel_diff_builder(
     payload = {
         "affected_func_signal_mode": affected_func_signal_mode,
         "commit_exclude_prefixes": exclude_prefixes,
+        "semantic_obligation_table": semantic_obligation_table,
         "items": items_out,
     }
     write_json(extracted_dir / "kernel_definition_diffs.json", payload)
@@ -287,7 +481,7 @@ def _context_for_kind(kind: str) -> int:
 
 
 def _likely_migration_symbol(symbol: str, kind: str) -> bool:
-    if kind not in {"function", "macro"}:
+    if kind not in {"function", "macro", "global", "unknown"}:
         return False
     low = (symbol or "").lower()
     if "alloc" in low:
@@ -298,6 +492,10 @@ def _likely_migration_symbol(symbol: str, kind: str) -> bool:
         return True
     if low in {"system_wq", "system_freezable_wq", "system_highpri_wq"}:
         return True
+    if low.endswith("_wq"):
+        return True
+    if low in SYMBOL_REPLACEMENT_HINTS:
+        return True
     return False
 
 
@@ -306,6 +504,10 @@ def _is_plausible_replacement(old_symbol: str, new_symbol: str) -> bool:
         return False
     old = old_symbol.lower()
     new = new_symbol.lower()
+
+    hints = SYMBOL_REPLACEMENT_HINTS.get(old, [])
+    if new in hints:
+        return True
 
     if old in new or new in old:
         return True
@@ -345,6 +547,8 @@ def _collect_replacement_candidates(symbol: str, commits: list[dict[str, Any]], 
             continue
         lines = diff_text.splitlines()
         for i, line in enumerate(lines):
+            if _is_diff_metadata_line(line):
+                continue
             if not line.startswith("-"):
                 continue
             old_line = line[1:]
@@ -355,6 +559,8 @@ def _collect_replacement_candidates(symbol: str, commits: list[dict[str, Any]], 
             start = max(0, i - 4)
             end = min(len(lines), i + 5)
             for cand_line in lines[start:end]:
+                if _is_diff_metadata_line(cand_line):
+                    continue
                 if not cand_line.startswith("+"):
                     continue
                 text = cand_line[1:]
@@ -381,6 +587,134 @@ def _collect_replacement_candidates(symbol: str, commits: list[dict[str, Any]], 
     return out
 
 
+def _collect_noncall_replacement_candidates(symbol: str, commits: list[dict[str, Any]], max_candidates: int = 6) -> list[dict[str, Any]]:
+    old_tok = re.compile(rf"\b{re.escape(symbol)}\b")
+    counts: Counter[str] = Counter()
+    evidence: dict[str, list[str]] = {}
+    skip_tokens = {
+        "if",
+        "for",
+        "while",
+        "switch",
+        "return",
+        "sizeof",
+        "struct",
+        "static",
+        "const",
+        "unsigned",
+        "int",
+        "long",
+        "void",
+    }
+
+    for commit in commits:
+        diff_text = commit.get("diff_excerpt", "")
+        if not diff_text:
+            continue
+        lines = diff_text.splitlines()
+        for i, line in enumerate(lines):
+            if _is_diff_metadata_line(line):
+                continue
+            if not line.startswith("-"):
+                continue
+            old_line = line[1:]
+            if not old_tok.search(old_line):
+                continue
+
+            start = max(0, i - 6)
+            end = min(len(lines), i + 7)
+            for cand_line in lines[start:end]:
+                if _is_diff_metadata_line(cand_line):
+                    continue
+                if not cand_line.startswith("+"):
+                    continue
+                text = cand_line[1:]
+                for cand in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", text):
+                    if cand == symbol or cand in skip_tokens:
+                        continue
+                    if not _is_plausible_replacement(symbol, cand):
+                        continue
+                    counts[cand] += 1
+                    evidence.setdefault(cand, []).append(f"{commit.get('hash', '')[:12]}:{text.strip()[:180]}")
+
+    out: list[dict[str, Any]] = []
+    for cand, score in counts.most_common(max_candidates):
+        out.append(
+            {
+                "symbol": cand,
+                "score": int(score),
+                "evidence": evidence.get(cand, [])[:6],
+            }
+        )
+    return out
+
+
+def _add_synthetic_allocator_candidates(
+    *,
+    candidates: list[dict[str, Any]],
+    symbol: str,
+    commit: dict[str, Any],
+) -> list[dict[str, Any]]:
+    low_sym = (symbol or "").strip().lower()
+    repls = ALLOC_FAMILY_REPLACEMENTS.get(low_sym, [])
+    if not repls:
+        return candidates
+
+    existing = {str(c.get("symbol", "")).strip() for c in candidates if str(c.get("symbol", "")).strip()}
+    out = list(candidates)
+    for repl in repls:
+        if repl in existing:
+            continue
+        out.append(
+            {
+                "symbol": repl,
+                "score": 1,
+                "evidence": [
+                    f"{commit.get('hash', '')[:12]}:{(commit.get('subject', '') or '').strip()[:180]}",
+                    "synthetic_candidate_from_kernel_side_coccinelle_allocator_migration",
+                ],
+            }
+        )
+    return out
+
+
+def _add_symbol_hint_candidates(
+    *,
+    candidates: list[dict[str, Any]],
+    symbol: str,
+    commits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    low_sym = (symbol or "").strip().lower()
+    hints = SYMBOL_REPLACEMENT_HINTS.get(low_sym, [])
+    if not hints:
+        return candidates
+
+    blob = "\n".join(
+        f"{c.get('subject', '')}\n{c.get('message', '')}\n{c.get('diff_excerpt', '')}" for c in commits
+    ).lower()
+    if low_sym not in blob:
+        return candidates
+
+    existing = {str(c.get("symbol", "")).strip() for c in candidates if str(c.get("symbol", "")).strip()}
+    out = list(candidates)
+    for repl in hints:
+        if repl in existing:
+            continue
+        if repl.lower() not in blob:
+            continue
+        out.append(
+            {
+                "symbol": repl,
+                "score": 1,
+                "evidence": [
+                    "synthetic_candidate_from_symbol_replacement_hints",
+                    f"symbol_hint:{low_sym}->{repl}",
+                ],
+            }
+        )
+    return out
+
+
 def _detect_migration_signal(
     *,
     symbol: str,
@@ -392,7 +726,7 @@ def _detect_migration_signal(
 ) -> tuple[bool, list[dict[str, Any]], list[str]]:
     if definition_changed or (old_exists and not new_exists):
         return False, [], []
-    if kind not in {"function", "macro"}:
+    if kind not in {"function", "macro", "global", "unknown"}:
         return False, [], []
     if not commits:
         return False, [], []
@@ -404,28 +738,22 @@ def _detect_migration_signal(
             reasons.append(f"commit subject hint: {hint}")
 
     candidates = _collect_replacement_candidates(symbol, commits)
+    noncall_candidates = _collect_noncall_replacement_candidates(symbol, commits)
+    candidates = _merge_replacement_candidates(candidates, noncall_candidates, second_source="base")
 
     # Kernel-side scripted migration hints (e.g., scripts/coccinelle/api/kmalloc_objs.cocci)
     # can encode allocator-family replacements without showing literal old symbol calls
     # in commit hunks. Preserve deterministic evidence by emitting synthetic candidates.
     low_sym = (symbol or "").strip().lower()
-    if not candidates and low_sym in ALLOC_FAMILY_REPLACEMENTS:
+    if low_sym in ALLOC_FAMILY_REPLACEMENTS:
         for c in commits:
             text = f"{c.get('subject', '')}\n{c.get('message', '')}\n{c.get('diff_excerpt', '')}".lower()
             if "kmalloc_objs.cocci" in text or "alloc_obj" in text or "alloc_objs" in text:
-                repl = ALLOC_FAMILY_REPLACEMENTS[low_sym]
-                candidates = [
-                    {
-                        "symbol": repl,
-                        "score": 1,
-                        "evidence": [
-                            f"{c.get('hash', '')[:12]}:{(c.get('subject', '') or '').strip()[:180]}",
-                            "synthetic_candidate_from_kernel_side_coccinelle_allocator_migration",
-                        ],
-                    }
-                ]
+                candidates = _add_synthetic_allocator_candidates(candidates=candidates, symbol=low_sym, commit=c)
                 reasons.append("allocator-family migration hinted by kernel-side coccinelle script evidence")
                 break
+
+    candidates = _add_symbol_hint_candidates(candidates=candidates, symbol=symbol, commits=commits)
 
     if candidates:
         reasons.append("replacement-like call additions observed near removed old callsites")

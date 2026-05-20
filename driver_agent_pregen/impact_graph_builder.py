@@ -54,12 +54,26 @@ def _migration_callsite_gate(local_slice: str, symbol_name: str, symbol_meta: di
 
     old = symbol_name
     text = local_slice or ""
-    if not re.search(rf"\b{re.escape(old)}\s*\(", text):
+    # Slices are persisted with "<lineno>: <code>" prefixes; strip them before
+    # call-shape regex checks to avoid false negatives on wrapped callsites.
+    text = re.sub(r"^\s*\d+:\s?", "", text, flags=re.M)
+    # For non-call symbols (e.g., system_wq), gate by token presence.
+    old_token_seen = bool(re.search(rf"\b{re.escape(old)}\b", text))
+    old_call_seen = bool(re.search(rf"\b{re.escape(old)}\s*\(", text))
+    if not old_token_seen:
         return False
 
     cand_objs = any(c.endswith("_objs") for c in candidates)
     cand_obj = any(c.endswith("_obj") for c in candidates)
     cand_flex = any(c.endswith("_flex") for c in candidates)
+
+    # Non-allocator migration signals: token-level hit is enough once replacement
+    # candidates are evidenced by kernel-side commits.
+    if old.lower() not in ALLOC_FAMILY:
+        return True
+
+    if not old_call_seen:
+        return False
 
     if cand_flex and re.search(rf"\b{re.escape(old)}\s*\(\s*struct_size\s*\(", text):
         return True
@@ -160,6 +174,58 @@ def _function_alloc_signal(trigger_reasons: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _select_function_record(candidates: list[dict[str, Any]], triggers: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    use_sites: list[tuple[str, int]] = []
+    for trig in triggers:
+        us = trig.get("use_site") if isinstance(trig, dict) else None
+        if not isinstance(us, dict):
+            continue
+        file_rel = str(us.get("file", "")).strip()
+        line = _to_int(us.get("line"), default=0)
+        if file_rel:
+            use_sites.append((file_rel, line))
+
+    def score(rec: dict[str, Any]) -> tuple[int, int]:
+        file_rel = str(rec.get("file", "")).strip()
+        start = _to_int(rec.get("start_line"), default=1)
+        end = _to_int(rec.get("end_line"), default=start)
+        span = max(1, end - start + 1)
+        ext = Path(file_rel).suffix.lower()
+
+        s = 0
+        # Prefer concrete source definitions over inline header stubs when ambiguous.
+        if ext in {".c", ".cc", ".cpp", ".cxx", ".rs"}:
+            s += 40
+        elif ext in {".h", ".hpp", ".hh"}:
+            s += 8
+
+        if span <= 6 and ext in {".h", ".hpp", ".hh"}:
+            s -= 10
+
+        for uf, ul in use_sites:
+            if uf == file_rel:
+                s += 100
+                if ul > 0 and start <= ul <= end:
+                    s += 200
+
+        # Tie-breaker: larger function bodies are more likely real implementations.
+        return (s, span)
+
+    return max(candidates, key=score)
+
+
 def run_impact_graph_builder(
     module_result: ModuleSourceResult,
     extracted_dir: Path,
@@ -191,7 +257,11 @@ def run_impact_graph_builder(
         if item.get("change_type_guess"):
             reasons.add(f"change_type:{item.get('change_type_guess')}")
 
-    fn_index = {f["name"]: f for f in functions}
+    fn_index: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for f in functions:
+        name = f.get("name")
+        if name:
+            fn_index[str(name)].append(f)
     callers_map = defaultdict(list)
     callees_map = defaultdict(list)
     for e in call_edges:
@@ -248,7 +318,7 @@ def run_impact_graph_builder(
     callback_roots_by_fn: dict[str, list[dict[str, Any]]] = {}
 
     for fn_name, symbols in sorted(fn_to_changed.items()):
-        f = fn_index.get(fn_name)
+        f = _select_function_record(fn_index.get(fn_name, []), fn_to_reasons.get(fn_name, []))
         if not f:
             continue
 
@@ -421,7 +491,7 @@ def run_impact_graph_builder(
 
     # Build context function records with slices.
     for fn_name, info in sorted(context_reason_map.items()):
-        f = fn_index.get(fn_name)
+        f = _select_function_record(fn_index.get(fn_name, []), fn_to_reasons.get(fn_name, []))
         if not f:
             continue
         file_rel = f.get("file")

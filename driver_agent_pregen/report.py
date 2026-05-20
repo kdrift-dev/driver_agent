@@ -22,6 +22,7 @@ def run_final_report_builder(
     context_packet: dict[str, Any],
     patch_generation: Optional[dict[str, Any]] = None,
     validation: Optional[dict[str, Any]] = None,
+    stage_timings: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     reports_dir = out_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -46,11 +47,13 @@ def run_final_report_builder(
             "reachable": callback_graph.get("reachable", {}),
         },
         "compatibility_obligations": obligations.get("obligations", []),
+        "semantic_obligations": obligations.get("semantic_obligations", []),
         "pre_patch_specs": pre_specs,
         "pre_patch_reasoner_verdict": pre_reasoning,
         "patch_guidance": context_packet.get("patch_generation_guidance", []),
         "patch_generation": patch_generation or {},
         "validation": validation or {},
+        "stage_timings": stage_timings or [],
         "known_uncertainty": context_packet.get("open_questions", []),
         "recommended_next_step": "Use patch_generation candidate + validation outputs to iterate until compile/runtime checks pass.",
     }
@@ -91,6 +94,18 @@ def run_final_report_builder(
         md.append("- none")
     md.append("")
 
+    md.append("## Semantic obligations")
+    sem_obls = obligations.get("semantic_obligations", [])
+    if sem_obls:
+        for so in sem_obls[:80]:
+            md.append(
+                f"- {so.get('id')} {so.get('affected_kernel_symbol')} "
+                f"[{so.get('kind')}, strength={so.get('strength')}]: {so.get('statement')}"
+            )
+    else:
+        md.append("- none")
+    md.append("")
+
     md.append("## Pre-patch reasoner verdict")
     md.append(f"- overall_verdict: {pre_reasoning.get('overall_verdict', 'UNKNOWN')}")
     for fr in pre_reasoning.get("function_results", [])[:40]:
@@ -118,6 +133,18 @@ def run_final_report_builder(
         md.append(f"- post_reasoning_verdict: {post.get('overall_verdict', 'UNKNOWN')}")
     else:
         md.append("- not executed")
+    md.append("")
+
+    md.append("## Stage Timings")
+    if stage_timings:
+        total = 0.0
+        for st in stage_timings:
+            dur = float(st.get("duration_sec", 0.0) or 0.0)
+            total += dur
+            md.append(f"- {st.get('name')}: {st.get('status')} ({dur:.3f}s)")
+        md.append(f"- total(stage sum): {total:.3f}s")
+    else:
+        md.append("- unavailable")
     md.append("")
 
     md.append("## Known uncertainty")

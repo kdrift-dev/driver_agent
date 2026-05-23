@@ -175,6 +175,24 @@ def build_parser() -> argparse.ArgumentParser:
     oot.add_argument("--oot-qemu-write-data", type=str, default="qemu-ok", help="data written by OOT QEMU smoke")
     oot.add_argument("--oot-qemu-expect-data", type=str, default="qemu-ok", help="data expected by OOT QEMU smoke")
     oot.add_argument("--oot-qemu-check-script", type=str, default=None, help="custom OOT QEMU init check script")
+    oot.add_argument(
+        "--oot-qemu-test-mode",
+        type=str,
+        choices=["auto", "custom", "llm", "default"],
+        default="auto",
+        help=(
+            "OOT integrated QEMU script selection: custom uses --oot-qemu-check-script, "
+            "llm generates an in-guest script, default uses deterministic load/interface smoke, "
+            "auto prefers custom, then LLM when enabled, then default"
+        ),
+    )
+    oot.add_argument(
+        "--oot-qemu-test-level",
+        type=str,
+        choices=["load_unload", "interface_smoke", "semantic_scenario"],
+        default="interface_smoke",
+        help="requested depth for generated OOT in-QEMU validation script",
+    )
     oot.add_argument("--oot-max-patch-iterations", type=int, default=1, help="max OOT LLM patch/build repair iterations")
     oot.add_argument(
         "--oot-make-extra-arg",
@@ -700,6 +718,8 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
                 enable_qemu=args.enable_qemu,
                 qemu_timeout_sec=args.qemu_timeout_sec,
                 qemu_check_script=args.oot_qemu_check_script,
+                qemu_test_mode=args.oot_qemu_test_mode,
+                qemu_test_level=args.oot_qemu_test_level,
                 qemu_device_node=args.oot_device_node,
                 qemu_write_data=args.oot_qemu_write_data,
                 qemu_expect_data=args.oot_qemu_expect_data,

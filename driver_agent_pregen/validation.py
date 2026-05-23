@@ -204,13 +204,164 @@ def _generate_system_tests(
         "notes": ["dry-run or no-provider placeholder"],
     }
 
-    return llm_client.call_json(
+    generated = llm_client.call_json(
         stage_dir=stage_dir,
         prompt_text=prompt,
         input_payload=input_payload,
         dry_run=dry_run,
         default_output=default_output,
     )
+    if str(generated.get("parse_status", "")) == "ok" and generated.get("suite_commands"):
+        return generated
+
+    fallback = _deterministic_system_tests(case_id=case_id, module_path=module_path)
+    if fallback:
+        fallback["llm_fallback_reason"] = generated.get("error") or f"parse_status={generated.get('parse_status')}"
+        fallback["llm_output_parse_status"] = generated.get("parse_status")
+        write_json(stage_dir / "parsed_output.json", fallback)
+        return fallback
+
+    return generated
+
+
+def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, Any] | None:
+    """Known-good runtime test hooks that do not depend on LLM generation.
+
+    These commands are conservative: only KUnit paths are executed by default,
+    because they run in the generated kernel test environment rather than
+    mutating the host. kselftest targets are recorded as guidance but are not
+    auto-run unless a later runner provides an isolated QEMU guest.
+    """
+    cases: list[dict[str, Any]]
+    cmds: list[str]
+    notes: list[str]
+
+    if module_path == "drivers/iio/test":
+        cfg = ".kunitconfig.driver_agent_iio_test"
+        cmd = (
+            "printf '%s\\n' "
+            "'CONFIG_KUNIT=y' "
+            "'CONFIG_IIO=y' "
+            "'CONFIG_IIO_RESCALE=y' "
+            "'CONFIG_IIO_GTS_KUNIT_TEST=y' "
+            "'CONFIG_IIO_FORMAT_KUNIT_TEST=y' "
+            "'CONFIG_IIO_MULTIPLY_KUNIT_TEST=y' "
+            "'CONFIG_IIO_RESCALE_KUNIT_TEST=y' "
+            f"> {cfg} && make ARCH=um mrproper >/dev/null 2>&1 || true; ./tools/testing/kunit/kunit.py run --kunitconfig={cfg}"
+        )
+        cases = [
+            {
+                "id": "DET-KUNIT-IIO-001",
+                "name": "IIO KUnit tests",
+                "entry_kind": "boot",
+                "intent": "Run synthetic IIO KUnit tests without physical IIO hardware.",
+                "preconditions": ["KUnit can build in the prepared kernel tree."],
+                "steps": [{"cmd": cmd, "why": "Exercises IIO test modules in an isolated KUnit run."}],
+                "assertions": ["kunit.py exits successfully"],
+                "timeout_sec": 600,
+                "skip_if": ["KUnit/UML tooling unavailable"],
+                "artifacts": ["KUnit stdout/stderr"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic KUnit fallback for drivers/iio/test"]
+    elif module_path == "drivers/gpu/drm/ttm/tests":
+        cmd = "make ARCH=um mrproper >/dev/null 2>&1 || true; ./tools/testing/kunit/kunit.py run --kunitconfig=drivers/gpu/drm/ttm/tests"
+        cases = [
+            {
+                "id": "DET-KUNIT-TTM-001",
+                "name": "DRM TTM KUnit tests",
+                "entry_kind": "boot",
+                "intent": "Run DRM TTM KUnit tests without real GPU hardware.",
+                "preconditions": ["drivers/gpu/drm/ttm/tests/.kunitconfig exists."],
+                "steps": [{"cmd": cmd, "why": "Uses the in-tree TTM KUnit configuration."}],
+                "assertions": ["kunit.py exits successfully"],
+                "timeout_sec": 600,
+                "skip_if": ["KUnit/UML tooling unavailable"],
+                "artifacts": ["KUnit stdout/stderr"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic KUnit fallback for drivers/gpu/drm/ttm/tests"]
+    elif module_path == "drivers/gpu/drm/vkms":
+        cmd = "make ARCH=um mrproper >/dev/null 2>&1 || true; ./tools/testing/kunit/kunit.py run --kunitconfig=drivers/gpu/drm/vkms/tests"
+        cases = [
+            {
+                "id": "DET-KUNIT-VKMS-001",
+                "name": "VKMS KUnit tests",
+                "entry_kind": "boot",
+                "intent": "Run VKMS KUnit tests for the virtual KMS driver.",
+                "preconditions": ["drivers/gpu/drm/vkms/tests/.kunitconfig exists."],
+                "steps": [{"cmd": cmd, "why": "Uses the in-tree VKMS KUnit configuration."}],
+                "assertions": ["kunit.py exits successfully"],
+                "timeout_sec": 600,
+                "skip_if": ["KUnit/UML tooling unavailable"],
+                "artifacts": ["KUnit stdout/stderr"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic KUnit fallback for drivers/gpu/drm/vkms"]
+    else:
+        runner = (Path(__file__).resolve().parents[1] / "tools" / "run_intree_kselftest_qemu.py").as_posix()
+        if module_path == "drivers/dma-buf/heaps":
+            cmd = (
+                f"python {shlex.quote(runner)} "
+                "--kernel-tree . "
+                "--target dmabuf-heaps "
+                "--out-dir ../kselftest_qemu/dmabuf-heaps "
+                "--jobs 8 "
+                "--timeout-sec 600"
+            )
+            cases = [
+                {
+                    "id": "DET-QEMU-KSELFTEST-DMABUF-001",
+                    "name": "DMA-BUF heaps kselftest in QEMU",
+                    "entry_kind": "boot",
+                    "intent": "Build and run dmabuf-heaps kselftest inside an isolated QEMU guest.",
+                    "preconditions": ["qemu-system-x86_64, busybox, cpio, and gcc are available on the host."],
+                    "steps": [{"cmd": cmd, "why": "Executes the selftest in a generated initramfs instead of on the host."}],
+                    "assertions": ["runner exits successfully and prints DRIVER_AGENT_QEMU_KSELFTEST_PASS"],
+                    "timeout_sec": 600,
+                    "skip_if": ["QEMU or required host build tools unavailable"],
+                    "artifacts": ["worktrees/kselftest_qemu/dmabuf-heaps/result.json", "worktrees/kselftest_qemu/dmabuf-heaps/qemu_output.txt"],
+                }
+            ]
+            cmds = [cmd]
+            notes = ["deterministic isolated-QEMU kselftest runner for drivers/dma-buf/heaps"]
+        else:
+            known_kselftests = {
+                "drivers/net/wireguard": "tools/testing/selftests/wireguard",
+                "drivers/net/netdevsim": "tools/testing/selftests/drivers/net/netdevsim",
+            }
+            target = known_kselftests.get(module_path)
+            if not target:
+                return None
+            cases = [
+                {
+                    "id": "DET-KSELFTEST-INFO-001",
+                    "name": f"{module_path} kselftest target",
+                    "entry_kind": "unknown",
+                    "intent": "Record the relevant in-tree kselftest target; not auto-run until a target-specific isolated QEMU runner is available.",
+                    "preconditions": ["An isolated guest runner is available for this target."],
+                    "steps": [{"cmd": f"make -C tools/testing/selftests TARGETS={target.split('/')[-1]} run_tests", "why": "kselftest target is software-visible but host execution is disabled by default."}],
+                    "assertions": ["target-specific selftest exits successfully"],
+                    "timeout_sec": 600,
+                    "skip_if": ["no target-specific isolated QEMU guest runner"],
+                    "artifacts": ["kselftest output"],
+                }
+            ]
+            cmds = []
+            notes = [f"deterministic kselftest target recorded for {module_path}; no command auto-run without target-specific guest isolation"]
+
+    return {
+        "case_id": case_id,
+        "stage": "system_test_generation",
+        "parse_status": "ok",
+        "test_cases": cases,
+        "suite_commands": cmds,
+        "notes": notes,
+        "generator": "deterministic_fallback",
+    }
 
 
 def _write_test_bundle(out_dir: Path, test_gen: dict[str, Any]) -> dict[str, Any]:
@@ -436,7 +587,7 @@ def _qemu_or_kunit_commands(suite_commands: list[str]) -> list[str]:
         cmd = (raw or "").strip()
         if not cmd or cmd.startswith("#"):
             continue
-        if "kunit.py run" not in cmd and "qemu-system-" not in cmd:
+        if "kunit.py run" not in cmd and "qemu-system-" not in cmd and "run_intree_kselftest_qemu.py" not in cmd:
             continue
         if not _safe_command_for_exec(cmd):
             continue
@@ -878,7 +1029,14 @@ def run_validation_agent(
         )
         out["test_generation"] = test_gen
         tg_status = "passed" if str(test_gen.get("parse_status", "")) == "ok" else "failed"
-        tg_reason = "llm test generation parsed" if tg_status == "passed" else (test_gen.get("error") or f"parse_status={test_gen.get('parse_status')}")
+        if tg_status == "passed":
+            generator = str(test_gen.get("generator") or "")
+            if generator == "deterministic_fallback":
+                tg_reason = "deterministic system test generated"
+            else:
+                tg_reason = "llm test generation parsed"
+        else:
+            tg_reason = test_gen.get("error") or f"parse_status={test_gen.get('parse_status')}"
         _set_stage_result(stage_results, "test_generation", tg_status, tg_reason)
 
         test_bundle = _write_test_bundle(run_dir, test_gen)

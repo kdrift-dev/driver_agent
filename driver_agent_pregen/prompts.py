@@ -144,6 +144,23 @@ Constraints:
 """.strip()
 
 
+OOT_QEMU_TEST_GEN_INSTRUCTION = """
+You are generating an in-QEMU shell smoke test for an out-of-tree Linux driver.
+Task: produce a shell script body that will run inside the generated initramfs after /proc, /sys, and /dev are mounted.
+Constraints:
+1. Use only BusyBox-compatible /bin/sh commands: insmod, rmmod, cat, grep, awk, find, test, ls, head, tail, wc, cut, sort, uniq, printf, echo, sleep, dmesg, uname, poweroff.
+2. The runner exports DRIVER_AGENT_MODULE_KO and DRIVER_AGENT_MODULE_NAME.
+3. Do not use host paths, package managers, network access, systemd, udev, modprobe, Python, Perl, or bash-only syntax.
+4. Do not use `set -e`; handle command failures explicitly.
+5. Prefer real interface checks: sysfs/procfs/debugfs/device-node read/write if visible in source.
+6. If no functional interface is evident, generate a load/unload smoke test and say so.
+7. On success, the script MUST print DRIVER_AGENT_QEMU_SMOKE_PASS before poweroff.
+8. On failure, print a DRIVER_AGENT_*_FAIL marker before poweroff.
+9. On unavailable optional interface/hardware, prefer a clear SKIP marker only when module load itself succeeds.
+10. Output MUST be strict JSON matching the required schema.
+""".strip()
+
+
 def build_pre_spec_prompt(input_payload: dict[str, Any]) -> str:
     schema = {
         "case_id": "string",
@@ -385,6 +402,31 @@ def build_system_test_generation_prompt(input_payload: dict[str, Any]) -> str:
     }
     return (
         SYSTEM_TEST_GEN_INSTRUCTION
+        + "\n\nRequired output schema:\n```json\n"
+        + json.dumps(schema, indent=2)
+        + "\n```\n"
+        + "\nInput payload:\n```json\n"
+        + json.dumps(input_payload, indent=2)
+        + "\n```\n"
+    )
+
+
+def build_oot_qemu_test_generation_prompt(input_payload: dict[str, Any]) -> str:
+    schema = {
+        "case_id": "string",
+        "stage": "oot_qemu_test_generation",
+        "test_level": "load_unload|interface_smoke|semantic_scenario|unknown",
+        "script": "shell script body, no markdown fences",
+        "expected_markers": ["DRIVER_AGENT_QEMU_SMOKE_PASS"],
+        "preconditions": ["string"],
+        "assertions": ["string"],
+        "skip_conditions": ["string"],
+        "notes": ["string"],
+        "unsupported_assumptions": ["string"],
+        "confidence": "high|medium|low",
+    }
+    return (
+        OOT_QEMU_TEST_GEN_INSTRUCTION
         + "\n\nRequired output schema:\n```json\n"
         + json.dumps(schema, indent=2)
         + "\n```\n"

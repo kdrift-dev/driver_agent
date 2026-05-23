@@ -338,7 +338,31 @@ def make_initramfs(
         (root / d).mkdir(parents=True, exist_ok=True)
     shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
     shutil.copy2(module_ko, root / module_ko.name)
-    for app in ["sh", "mount", "cat", "grep", "awk", "mknod", "insmod", "rmmod", "poweroff", "echo", "sleep", "find", "test", "ls"]:
+    for app in [
+        "sh",
+        "mount",
+        "cat",
+        "grep",
+        "awk",
+        "mknod",
+        "insmod",
+        "rmmod",
+        "poweroff",
+        "echo",
+        "sleep",
+        "find",
+        "test",
+        "ls",
+        "head",
+        "tail",
+        "wc",
+        "cut",
+        "sort",
+        "uniq",
+        "printf",
+        "dmesg",
+        "uname",
+    ]:
         target = root / "bin" / app
         if not target.exists():
             target.symlink_to("busybox")

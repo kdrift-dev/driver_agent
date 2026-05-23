@@ -110,6 +110,36 @@ Report metrics separately:
 - kselftest/QEMU result when available.
 - Manual verdict for curated mini dataset cases.
 
+## QEMU Dynamic Validation Scope
+
+QEMU-based dynamic validation is strong evidence only when the driver exposes
+the migrated behavior through virtual or software-visible interfaces.
+
+For virtual or software-only drivers, Driver-Agent can generate and execute
+in-guest QEMU tests against sysfs, procfs, debugfs, configfs, character-device,
+netdev, block-device, or kselftest-visible interfaces. In that setting, a QEMU
+test can provide strong functional evidence for the exercised interface.
+
+For hardware-dependent drivers, QEMU validation usually provides only smoke
+evidence, such as load/unload, dmesg regression scanning, or basic sysfs
+existence checks. It does not prove that MMIO, DMA, IRQ, firmware, power
+management, display/media/audio paths, or board-specific Device Tree behavior
+are correct.
+
+Report QEMU evidence by scope:
+
+- `qemu_sufficient`: virtual/software-only driver or path with a meaningful
+  software-visible interface or kselftest/KUnit target that can be exercised in
+  QEMU.
+- `qemu_partial`: driver can be built and maybe loaded in QEMU, but core
+  behavior depends on unavailable hardware; QEMU provides smoke evidence only.
+- `hardware_required`: meaningful validation requires real hardware,
+  subsystem CI, or a dedicated simulator.
+
+`PASSED_CORE_EVIDENCE_NOT_PROVEN` remains the global default for generic driver
+migration unless the report names the exercised QEMU interface and explains why
+that interface covers the migrated behavior.
+
 ## Deferred Semantic Modernization Policy
 
 Source-compatible semantic or idiomatic migrations are out of scope for the default workflow.
@@ -210,3 +240,4 @@ Unsafe claims until further evidence exists:
 
 - 2026-05-22: Source-compatible semantic modernization is documented as future work and excluded from the default required-repair workflow.
 - 2026-05-22: Default policy set to no kernel commit information. Commit info is now an explicit private/debug ablation via `--include-kernel-commit-info`.
+- 2026-05-23: QEMU dynamic validation scope documented as strong only for virtual/software-visible interfaces; hardware-dependent drivers remain smoke-only or hardware-required.

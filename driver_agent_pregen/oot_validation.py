@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .llm_client import LLMClient
+from .prompts import build_oot_qemu_test_generation_prompt
 from .reasoner_agent import run_post_reasoner_agent
 from .repo_utils import RepositoryAccessor
 from .utils import read_text, write_json, write_text
@@ -278,6 +279,319 @@ def _collect_oot_patched_slices(source_patched: Path, module_path: str, impact_g
     return out
 
 
+def _collect_oot_source_for_test_generation(source_root: Path, *, max_files: int = 12, max_chars_per_file: int = 12000) -> list[dict[str, Any]]:
+    suffixes = {".c", ".h", ".rs", ".cpp", ".cc", ".hpp"}
+    out: list[dict[str, Any]] = []
+    for path in sorted(source_root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(source_root).as_posix()
+        if path.name.startswith(".") or "/." in f"/{rel}":
+            continue
+        if path.name.endswith(".mod.c") or path.name in {"Module.symvers", "modules.order"}:
+            continue
+        if path.suffix not in suffixes and path.name not in {"Makefile", "Kbuild"}:
+            continue
+        text = read_text(path)
+        out.append(
+            {
+                "path": rel,
+                "content": text[:max_chars_per_file] + ("\n...[truncated]\n" if len(text) > max_chars_per_file else ""),
+            }
+        )
+        if len(out) >= max_files:
+            break
+    return out
+
+
+def _default_oot_qemu_script(
+    *,
+    module_name: str,
+    device_node: str,
+    write_data: str,
+    expect_data: str,
+    level: str,
+) -> str:
+    if device_node and device_node != "/dev/none" and level != "load_unload":
+        return f"""echo DRIVER_AGENT_QEMU_TEST_BEGIN
+insmod "$DRIVER_AGENT_MODULE_KO" || {{ echo DRIVER_AGENT_INSMOD_FAIL; poweroff -f; }}
+if [ ! -e {device_node} ]; then
+  echo DRIVER_AGENT_DEVICE_NODE_MISSING {device_node}
+  rmmod "$DRIVER_AGENT_MODULE_NAME" 2>/dev/null || true
+  poweroff -f
+fi
+exec 3<> {device_node} || {{ echo DRIVER_AGENT_OPEN_FAIL; rmmod "$DRIVER_AGENT_MODULE_NAME" 2>/dev/null || true; poweroff -f; }}
+echo -n {write_data!r} >&3 || {{ echo DRIVER_AGENT_WRITE_FAIL; exec 3>&-; rmmod "$DRIVER_AGENT_MODULE_NAME" 2>/dev/null || true; poweroff -f; }}
+cat <&3 | grep {expect_data!r} || {{ echo DRIVER_AGENT_READBACK_FAIL; exec 3>&-; rmmod "$DRIVER_AGENT_MODULE_NAME" 2>/dev/null || true; poweroff -f; }}
+exec 3>&-
+rmmod "$DRIVER_AGENT_MODULE_NAME" || {{ echo DRIVER_AGENT_RMMOD_FAIL; poweroff -f; }}
+echo DRIVER_AGENT_QEMU_SMOKE_PASS
+poweroff -f
+"""
+    return """echo DRIVER_AGENT_QEMU_TEST_BEGIN
+insmod "$DRIVER_AGENT_MODULE_KO" || { echo DRIVER_AGENT_INSMOD_FAIL; poweroff -f; }
+sleep 1
+rmmod "$DRIVER_AGENT_MODULE_NAME" || { echo DRIVER_AGENT_RMMOD_FAIL; poweroff -f; }
+echo DRIVER_AGENT_QEMU_SMOKE_PASS
+poweroff -f
+"""
+
+
+def _strip_fenced_script(text: str) -> str:
+    raw = str(text or "").strip()
+    m = re.search(r"```(?:sh|shell|bash)?\s*(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
+    if m:
+        return m.group(1).strip() + "\n"
+    return raw + ("\n" if raw else "")
+
+
+def _validate_oot_qemu_script(script: str) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    text = script or ""
+    if "DRIVER_AGENT_QEMU_SMOKE_PASS" not in text:
+        errors.append("missing_success_marker")
+    if "insmod" not in text:
+        errors.append("missing_insmod")
+    forbidden = ["sudo ", "apt ", "apt-get", "yum ", "dnf ", "curl ", "wget ", "python", "perl", "modprobe", "systemctl"]
+    for item in forbidden:
+        if item in text:
+            errors.append(f"forbidden_command:{item.strip()}")
+    if "set -e" in text:
+        errors.append("forbidden_set_e")
+    return not errors, errors
+
+
+def _generate_oot_qemu_test_script(
+    *,
+    llm_client: LLMClient,
+    llm_calls_dir: Path,
+    run_dir: Path,
+    case_id: str,
+    module_path: str,
+    source_patched: Path,
+    module_ko: str,
+    module_name: str,
+    device_node: str,
+    write_data: str,
+    expect_data: str,
+    qemu_check_script: str | None,
+    qemu_test_mode: str,
+    qemu_test_level: str,
+    context_packet: dict[str, Any],
+    impact_graph: dict[str, Any],
+    compatibility_obligations: dict[str, Any],
+    compile_result: dict[str, Any],
+    dry_run: bool,
+) -> tuple[dict[str, Any], Path | None]:
+    validation_dir = run_dir / "validation"
+    stage_dir = llm_calls_dir / "05_oot_qemu_test_generation"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    mode = qemu_test_mode
+    if mode == "auto":
+        if qemu_check_script:
+            mode = "custom"
+        elif llm_client.config.enabled and not dry_run:
+            mode = "llm"
+        else:
+            mode = "default"
+
+    if mode == "custom":
+        if not qemu_check_script:
+            payload = {
+                "case_id": case_id,
+                "stage": "oot_qemu_test_generation",
+                "parse_status": "failed",
+                "mode": "custom",
+                "error": "custom mode requires --oot-qemu-check-script",
+                "test_cases": [],
+                "suite_commands": [],
+            }
+            write_json(stage_dir / "parsed_output.json", payload)
+            return payload, None
+        script_path = Path(qemu_check_script).expanduser().resolve()
+        payload = {
+            "case_id": case_id,
+            "stage": "oot_qemu_test_generation",
+            "parse_status": "custom_script",
+            "mode": "custom",
+            "test_level": qemu_test_level,
+            "script_path": script_path.as_posix(),
+            "test_cases": [
+                {
+                    "id": "OOT-QEMU-CUSTOM-001",
+                    "name": "custom OOT QEMU smoke script",
+                    "entry_kind": "boot",
+                    "intent": "Run user-provided in-QEMU validation script.",
+                    "preconditions": ["patched OOT module compiled"],
+                    "steps": [{"cmd": script_path.as_posix(), "why": "custom user validation"}],
+                    "assertions": ["script prints DRIVER_AGENT_QEMU_SMOKE_PASS"],
+                    "timeout_sec": 120,
+                    "skip_if": [],
+                    "artifacts": [script_path.as_posix()],
+                }
+            ],
+            "suite_commands": ["qemu-system-x86_64 with custom initramfs script"],
+            "notes": ["custom script was supplied by --oot-qemu-check-script"],
+        }
+        write_json(stage_dir / "parsed_output.json", payload)
+        return payload, script_path
+
+    default_script = _default_oot_qemu_script(
+        module_name=module_name,
+        device_node=device_node,
+        write_data=write_data,
+        expect_data=expect_data,
+        level=qemu_test_level,
+    )
+    default_path = validation_dir / "oot_qemu_default_check.sh"
+
+    if mode == "llm":
+        input_payload = {
+            "case_id": case_id,
+            "module_path": module_path,
+            "module_ko": module_ko,
+            "module_name": module_name,
+            "device_node_hint": device_node,
+            "requested_test_level": qemu_test_level,
+            "runner_environment": {
+                "shell": "busybox /bin/sh inside initramfs",
+                "mounted_filesystems": ["/proc", "/sys", "/dev"],
+                "available_env": {
+                    "DRIVER_AGENT_MODULE_KO": f"/{module_ko}",
+                    "DRIVER_AGENT_MODULE_NAME": module_name,
+                },
+                "success_marker": "DRIVER_AGENT_QEMU_SMOKE_PASS",
+            },
+            "patched_oot_sources": _collect_oot_source_for_test_generation(source_patched),
+            "impact_graph": {
+                "editable_functions": impact_graph.get("editable_functions", []),
+                "edit_scope_counts": impact_graph.get("edit_scope_counts", {}),
+            },
+            "compatibility_obligations": {
+                "obligations": compatibility_obligations.get("obligations", [])[:12],
+                "semantic_obligations": compatibility_obligations.get("semantic_obligations", [])[:8],
+            },
+            "context_packet_summary": {
+                "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
+                "hard_validation_plan": context_packet.get("hard_validation_plan", []),
+                "semantic_validation_plan": context_packet.get("semantic_validation_plan", []),
+            },
+            "compile_result": compile_result.get("oot_expected_transition", {}),
+            "instruction": "Generate an in-QEMU shell script body for runtime smoke validation of this patched OOT module.",
+        }
+        default_output = {
+            "case_id": case_id,
+            "stage": "oot_qemu_test_generation",
+            "test_level": "unknown",
+            "script": "",
+            "expected_markers": ["DRIVER_AGENT_QEMU_SMOKE_PASS"],
+            "preconditions": [],
+            "assertions": [],
+            "skip_conditions": [],
+            "notes": ["LLM not executed"],
+            "unsupported_assumptions": [],
+            "confidence": "low",
+        }
+        parsed = llm_client.call_json(
+            stage_dir=stage_dir,
+            prompt_text=build_oot_qemu_test_generation_prompt(input_payload),
+            input_payload=input_payload,
+            dry_run=dry_run,
+            default_output=default_output,
+        )
+        script = _strip_fenced_script(str(parsed.get("script", "") or ""))
+        valid, errors = _validate_oot_qemu_script(script)
+        if valid:
+            script_path = validation_dir / "oot_qemu_generated_check.sh"
+            write_text(script_path, script)
+            parsed.update(
+                {
+                    "parse_status": parsed.get("parse_status", "ok"),
+                    "mode": "llm",
+                    "script_path": script_path.as_posix(),
+                    "test_cases": [
+                        {
+                            "id": "OOT-QEMU-LLM-001",
+                            "name": "LLM-generated OOT QEMU smoke script",
+                            "entry_kind": "boot",
+                            "intent": "Run generated in-QEMU validation script.",
+                            "preconditions": parsed.get("preconditions", []),
+                            "steps": [{"cmd": script_path.as_posix(), "why": "generated in-guest script"}],
+                            "assertions": parsed.get("assertions", []),
+                            "timeout_sec": 120,
+                            "skip_if": parsed.get("skip_conditions", []),
+                            "artifacts": [script_path.as_posix()],
+                        }
+                    ],
+                    "suite_commands": ["qemu-system-x86_64 with LLM-generated initramfs script"],
+                }
+            )
+            write_json(stage_dir / "parsed_output.json", parsed)
+            return parsed, script_path
+
+        script_path = default_path
+        write_text(script_path, default_script)
+        parsed.update(
+            {
+                "parse_status": "fallback_default",
+                "mode": "llm",
+                "fallback_used": True,
+                "fallback_reason": "invalid_generated_script",
+                "script_validation_errors": errors,
+                "script_path": script_path.as_posix(),
+                "notes": list(parsed.get("notes", []) or []) + ["LLM script failed validation; deterministic default smoke script used."],
+                "test_cases": [
+                    {
+                        "id": "OOT-QEMU-DEFAULT-001",
+                        "name": "deterministic OOT QEMU load/interface smoke",
+                        "entry_kind": "boot",
+                        "intent": "Fallback load/unload or device-node smoke validation.",
+                        "preconditions": ["patched OOT module compiled"],
+                        "steps": [{"cmd": script_path.as_posix(), "why": "fallback deterministic validation"}],
+                        "assertions": ["script prints DRIVER_AGENT_QEMU_SMOKE_PASS"],
+                        "timeout_sec": 120,
+                        "skip_if": [],
+                        "artifacts": [script_path.as_posix()],
+                    }
+                ],
+                "suite_commands": ["qemu-system-x86_64 with deterministic initramfs script"],
+            }
+        )
+        write_json(stage_dir / "parsed_output.json", parsed)
+        return parsed, script_path
+
+    script_path = default_path
+    write_text(script_path, default_script)
+    payload = {
+        "case_id": case_id,
+        "stage": "oot_qemu_test_generation",
+        "parse_status": "deterministic_default",
+        "mode": "default",
+        "test_level": qemu_test_level,
+        "script_path": script_path.as_posix(),
+        "expected_markers": ["DRIVER_AGENT_QEMU_SMOKE_PASS"],
+        "test_cases": [
+            {
+                "id": "OOT-QEMU-DEFAULT-001",
+                "name": "deterministic OOT QEMU load/interface smoke",
+                "entry_kind": "boot",
+                "intent": "Run deterministic in-QEMU load/unload or device-node smoke validation.",
+                "preconditions": ["patched OOT module compiled"],
+                "steps": [{"cmd": script_path.as_posix(), "why": "deterministic validation"}],
+                "assertions": ["script prints DRIVER_AGENT_QEMU_SMOKE_PASS"],
+                "timeout_sec": 120,
+                "skip_if": [],
+                "artifacts": [script_path.as_posix()],
+            }
+        ],
+        "suite_commands": ["qemu-system-x86_64 with deterministic initramfs script"],
+        "notes": ["deterministic fallback script used"],
+    }
+    write_json(stage_dir / "parsed_output.json", payload)
+    return payload, script_path
+
+
 def run_oot_integrated_validation_agent(
     *,
     accessor: RepositoryAccessor,
@@ -298,6 +612,8 @@ def run_oot_integrated_validation_agent(
     enable_qemu: bool,
     qemu_timeout_sec: int,
     qemu_check_script: str | None,
+    qemu_test_mode: str,
+    qemu_test_level: str,
     qemu_device_node: str,
     qemu_write_data: str,
     qemu_expect_data: str,
@@ -319,13 +635,13 @@ def run_oot_integrated_validation_agent(
         "compile": {},
         "test_generation": {
             "case_id": case_id,
-            "stage": "system_test_generation",
-            "parse_status": "skipped_for_oot_custom_qemu",
+            "stage": "oot_qemu_test_generation",
+            "parse_status": "not_run",
             "test_cases": [],
             "suite_commands": [],
-            "notes": ["OOT integrated validation uses explicit qemu_check_script instead of LLM-generated suite commands."],
+            "notes": [],
         },
-        "suite_execution": {"success": True, "runs": [], "skipped": True, "reason": "oot_custom_qemu_path"},
+        "suite_execution": {"success": True, "runs": [], "skipped": True, "reason": "oot_qemu_script_runs_inside_qemu"},
         "qemu": {},
         "post_reasoning": {},
         "validation_stage_results": stage_results,
@@ -450,8 +766,39 @@ def run_oot_integrated_validation_agent(
     else:
         _set_stage(stage_results, "compile_modules", "passed", f"compiled OOT module: {module_ko}")
 
-    _set_stage(stage_results, "test_generation", "skipped", "OOT integrated validation uses explicit qemu_check_script")
-    _set_stage(stage_results, "suite_execution", "skipped", "OOT integrated validation uses explicit qemu_check_script")
+    qemu_script_path: Path | None = None
+    if enable_qemu and post_build.get("ok"):
+        test_generation, qemu_script_path = _generate_oot_qemu_test_script(
+            llm_client=llm_client,
+            llm_calls_dir=llm_calls_dir,
+            run_dir=run_dir,
+            case_id=case_id,
+            module_path=module_path,
+            source_patched=source_patched,
+            module_ko=module_ko,
+            module_name=module_name,
+            device_node=qemu_device_node,
+            write_data=qemu_write_data,
+            expect_data=qemu_expect_data,
+            qemu_check_script=qemu_check_script,
+            qemu_test_mode=qemu_test_mode,
+            qemu_test_level=qemu_test_level,
+            context_packet=context_packet,
+            impact_graph=impact_graph,
+            compatibility_obligations=compatibility_obligations,
+            compile_result=out["compile"],
+            dry_run=dry_run,
+        )
+        out["test_generation"] = test_generation
+        if qemu_script_path and qemu_script_path.exists():
+            _set_stage(stage_results, "test_generation", "passed", f"qemu_script={qemu_script_path.as_posix()}")
+        else:
+            _set_stage(stage_results, "test_generation", "failed", "qemu_script_generation_failed")
+    elif enable_qemu:
+        _set_stage(stage_results, "test_generation", "skipped", "compile failed or module missing")
+    else:
+        _set_stage(stage_results, "test_generation", "skipped", "qemu disabled by flag")
+    _set_stage(stage_results, "suite_execution", "skipped", "OOT in-guest script is executed by qemu_execution")
 
     qemu_run = None
     if enable_qemu and post_build.get("ok"):
@@ -466,7 +813,7 @@ def run_oot_integrated_validation_agent(
             device_node=qemu_device_node,
             write_data=qemu_write_data,
             expect_data=qemu_expect_data,
-            qemu_check_script=Path(qemu_check_script) if qemu_check_script else None,
+            qemu_check_script=qemu_script_path,
         )
         qemu_detail = qemu_run.get("qemu") if isinstance(qemu_run, dict) else None
         qemu_runs = [_truncate_run(qemu_detail)] if isinstance(qemu_detail, dict) else [_truncate_run(qemu_run)]
@@ -476,7 +823,9 @@ def run_oot_integrated_validation_agent(
             "runs": qemu_runs,
             "success": bool(qemu_run.get("ok")),
             "reason": qemu_run.get("reason"),
-            "note": "OOT custom QEMU smoke check",
+            "note": "OOT in-guest QEMU smoke check",
+            "check_script_path": qemu_script_path.as_posix() if qemu_script_path else None,
+            "test_generation": out.get("test_generation", {}),
         }
         if qemu_run.get("ok"):
             _set_stage(stage_results, "qemu_execution", "passed", "runs=1")

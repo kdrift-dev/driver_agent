@@ -1,0 +1,14 @@
+{
+  "required_added_symbols": [
+    "kzalloc_obj",
+    "kmalloc_objs",
+    "clear_page",
+    "__GFP_ACCOUNT"
+  ],
+  "expected_removed_patterns": [
+    "kzalloc(sizeof",
+    "kmalloc_array",
+    "memset(vaddr, 0, PAGE_SIZE)"
+  ],
+  "notes": "Semantic keys are evaluation metrics, not exact patch equality requirements."
+}

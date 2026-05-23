@@ -1,0 +1,67 @@
+{
+  "module_path": "drivers/dma-buf/heaps",
+  "category": "allocator_and_memory_semantics_migration",
+  "driver_change_summary": "kzalloc_obj/kmalloc_objs conversions plus clear_page and GFP accounting adjustment",
+  "kernel_cause_summary": "object-aware allocator helpers are introduced; memory zeroing/accounting semantics are adjusted in heap allocation paths.",
+  "why_kernel_evolution_driven": "The patch combines allocator helper migration with memory-management semantic updates in dma-buf heap allocation code.",
+  "workflow_focus": "kselftest-friendly multi-edit case; tests can exercise dma-buf heap allocation paths.",
+  "kernel_symbols": [
+    "kzalloc",
+    "kzalloc_obj",
+    "kmalloc_array",
+    "kmalloc_objs",
+    "clear_page",
+    "__GFP_ACCOUNT"
+  ],
+  "required_added_symbols": [
+    "kzalloc_obj",
+    "kmalloc_objs",
+    "clear_page",
+    "__GFP_ACCOUNT"
+  ],
+  "expected_removed_patterns": [
+    "kzalloc(sizeof",
+    "kmalloc_array",
+    "memset(vaddr, 0, PAGE_SIZE)"
+  ],
+  "kselftest_targets": [
+    "dmabuf-heaps",
+    "drivers/dma-buf"
+  ],
+  "case_id": "drivers_dma-buf_heaps__v6.19__v7.0-rc1",
+  "old_ref": "v6.19",
+  "new_ref": "v7.0-rc1",
+  "evaluation_only": true,
+  "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+  "include_kernel_commit_info": false,
+  "metadata_from_candidate_csv": {
+    "from_ref": "v6.19",
+    "to_ref": "v7.0-rc1",
+    "module_path": "drivers/dma-buf/heaps",
+    "status": "existing",
+    "marker_files_from": "Kconfig;Makefile",
+    "marker_files_to": "Kconfig;Makefile",
+    "file_count": "4",
+    "source_file_count": "2",
+    "code_loc": "883",
+    "target_file_count": "4",
+    "target_source_file_count": "2",
+    "target_code_loc": "886",
+    "changed_files": "2",
+    "added_loc": "12",
+    "deleted_loc": "9",
+    "modified_loc": "21",
+    "binary_files": "0"
+  },
+  "old_source_files": [
+    "drivers/dma-buf/heaps/cma_heap.c",
+    "drivers/dma-buf/heaps/system_heap.c"
+  ],
+  "case_pack_files": {
+    "reference_diff": "reference.diff",
+    "old_module_sources": "old_module_sources/",
+    "kernel_evidence": "kernel_evidence.json",
+    "expected_semantic_keys": "expected_semantic_keys.json",
+    "workflow_artifacts": "workflow_artifacts.json"
+  }
+}

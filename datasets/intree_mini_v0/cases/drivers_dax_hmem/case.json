@@ -1,0 +1,60 @@
+{
+  "module_path": "drivers/dax/hmem",
+  "category": "soft_reserved_resource_helper_migration",
+  "driver_change_summary": "walk_iomem_res_desc -> walk_soft_reserve_res; region_intersects -> region_intersects_soft_reserve",
+  "kernel_cause_summary": "v7.0-rc1 adds soft-reserve resource helpers used by hmem.",
+  "why_kernel_evolution_driven": "The reference patch replaces generic iomem/resource queries parameterized by IORES_DESC_SOFT_RESERVED with new kernel helpers that encode the Soft Reserved contract directly.",
+  "workflow_focus": "Non-allocation API replacement; affected-function discovery should include both hmem_init and hmem_register_device.",
+  "kernel_symbols": [
+    "walk_iomem_res_desc",
+    "walk_soft_reserve_res",
+    "region_intersects",
+    "region_intersects_soft_reserve",
+    "IORES_DESC_SOFT_RESERVED"
+  ],
+  "required_added_symbols": [
+    "walk_soft_reserve_res",
+    "region_intersects_soft_reserve"
+  ],
+  "expected_removed_patterns": [
+    "walk_iomem_res_desc",
+    "region_intersects("
+  ],
+  "kselftest_targets": [],
+  "case_id": "drivers_dax_hmem__v6.19__v7.0-rc1",
+  "old_ref": "v6.19",
+  "new_ref": "v7.0-rc1",
+  "evaluation_only": true,
+  "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+  "include_kernel_commit_info": false,
+  "metadata_from_candidate_csv": {
+    "from_ref": "v6.19",
+    "to_ref": "v7.0-rc1",
+    "module_path": "drivers/dax/hmem",
+    "status": "existing",
+    "marker_files_from": "Makefile",
+    "marker_files_to": "Makefile",
+    "file_count": "3",
+    "source_file_count": "2",
+    "code_loc": "267",
+    "target_file_count": "3",
+    "target_source_file_count": "2",
+    "target_code_loc": "267",
+    "changed_files": "2",
+    "added_loc": "4",
+    "deleted_loc": "4",
+    "modified_loc": "8",
+    "binary_files": "0"
+  },
+  "old_source_files": [
+    "drivers/dax/hmem/device.c",
+    "drivers/dax/hmem/hmem.c"
+  ],
+  "case_pack_files": {
+    "reference_diff": "reference.diff",
+    "old_module_sources": "old_module_sources/",
+    "kernel_evidence": "kernel_evidence.json",
+    "expected_semantic_keys": "expected_semantic_keys.json",
+    "workflow_artifacts": "workflow_artifacts.json"
+  }
+}

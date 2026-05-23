@@ -1,0 +1,11 @@
+case_id,module_path,category,modified_loc,code_loc,source_file_count,required_added_symbols,expected_removed_patterns,kselftest_targets,case_pack_dir,workflow_run_status
+drivers_dax_hmem__v6.19__v7.0-rc1,drivers/dax/hmem,soft_reserved_resource_helper_migration,8,267,2,walk_soft_reserve_res;region_intersects_soft_reserve,walk_iomem_res_desc;region_intersects(,,cases/drivers_dax_hmem,not_available
+drivers_pmdomain_st__v6.19__v7.0-rc1,drivers/pmdomain/st,allocator_object_helper_migration,2,94,1,kzalloc_obj,kzalloc(sizeof,,cases/drivers_pmdomain_st,not_available
+drivers_soc_nuvoton__v6.19__v7.0-rc1,drivers/soc/nuvoton,allocator_object_helper_migration,2,109,1,kzalloc_obj,kzalloc(sizeof,,cases/drivers_soc_nuvoton,not_available
+drivers_soc_ux500__v6.19__v7.0-rc1,drivers/soc/ux500,allocator_object_helper_migration,2,225,1,kzalloc_obj,kzalloc(sizeof,,cases/drivers_soc_ux500,not_available
+drivers_video_fbdev_mmp_panel__v6.19__v7.0-rc1,drivers/video/fbdev/mmp/panel,allocator_object_helper_migration,2,172,1,kzalloc_obj,kzalloc(sizeof,,cases/drivers_video_fbdev_mmp_panel,not_available
+drivers_gpu_vga__v6.19__v7.0-rc1,drivers/gpu/vga,allocator_object_helper_migration,2,1077,1,kzalloc_obj,kzalloc(sizeof,,cases/drivers_gpu_vga,not_available
+drivers_media_mmc_siano__v6.19__v7.0-rc1,drivers/media/mmc/siano,allocator_object_helper_migration,2,351,1,kzalloc_obj,kzalloc(sizeof,,cases/drivers_media_mmc_siano,not_available
+drivers_media_dvb-frontends_cxd2880__v6.19__v7.0-rc1,drivers/media/dvb-frontends/cxd2880,allocator_object_helper_migration,2,12245,29,kzalloc_obj,kzalloc(sizeof,,cases/drivers_media_dvb-frontends_cxd2880,not_available
+drivers_target_tcm_remote__v6.19__v7.0-rc1,drivers/target/tcm_remote,allocator_object_helper_migration,2,288,2,kzalloc_obj,kzalloc(sizeof,,cases/drivers_target_tcm_remote,not_available
+drivers_dma-buf_heaps__v6.19__v7.0-rc1,drivers/dma-buf/heaps,allocator_and_memory_semantics_migration,21,883,2,kzalloc_obj;kmalloc_objs;clear_page;__GFP_ACCOUNT,"kzalloc(sizeof;kmalloc_array;memset(vaddr, 0, PAGE_SIZE)",dmabuf-heaps;drivers/dma-buf,cases/drivers_dma-buf_heaps,not_available

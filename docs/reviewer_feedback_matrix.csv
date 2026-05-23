@@ -1,0 +1,19 @@
+reviewer,topic,status,next_action
+2974A,padded_submission,not_addressed,cut generic agent and implementation-detail prose
+2974A,generic_agent_novelty,partially_addressed,reframe novelty around kernel-evolution evidence and affected/spec workflow
+2974A,LPA_GMA_unclear,not_addressed,remove two-agent claim or justify with ablation
+2974A,sub_second_latency,not_addressed,remove claim unless measured and motivated
+2974A,data_contamination,partially_addressed,use evaluation-only reference diffs and consider post-cutoff release pairs
+2974A,unclear_metrics,partially_addressed,report compile semantic keys post reasoning and manual verdict separately
+2974A,dedup_missing,not_addressed,define and implement dedup protocol
+2974A,taxonomy_missing,not_addressed,derive or justify taxonomy with annotation protocol
+2974A,embedding_details,not_applicable_if_removed,remove embedding fields or fully specify them
+2974A,labeling_proportions,not_addressed,record manual vs automatic labels and annotation time
+2974A,patch_similarity_metric,partially_addressed,use similarity only as diagnostic
+2974A,missing_refs_acronyms,not_addressed,add references and acronym expansions
+2974B,design_motivation_unclear,partially_addressed,use mini dataset and baselines to motivate design
+2974B,design_vs_implementation_conflated,partially_addressed,rewrite around data flow and move tools to implementation
+2974B,evaluation_limited,partially_addressed,run clean 10-case and larger affected-function eval
+2974B,manual_labeling_cost,not_addressed,add annotation log and label agreement if possible
+2974B,evaluation_setup_unclear,partially_addressed,use manifest fields and driver class breakdown
+2974B,static_score_weights,not_addressed,remove weights or justify with ablation

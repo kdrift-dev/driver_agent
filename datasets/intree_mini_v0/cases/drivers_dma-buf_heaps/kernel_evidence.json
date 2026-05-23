@@ -1,0 +1,544 @@
+{
+  "items": [
+    {
+      "symbol": "__GFP_ACCOUNT",
+      "old_locations": [
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 49,
+          "text": "___GFP_ACCOUNT_BIT,"
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 85,
+          "text": "#define ___GFP_ACCOUNT\t\tBIT(___GFP_ACCOUNT_BIT)"
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 139,
+          "text": "* %__GFP_ACCOUNT causes the allocation to be accounted to kmemcg."
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 147,
+          "text": "#define __GFP_ACCOUNT\t((__force gfp_t)___GFP_ACCOUNT)"
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 373,
+          "text": "#define GFP_KERNEL_ACCOUNT (GFP_KERNEL | __GFP_ACCOUNT)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 198,
+          "text": "* __GFP_ACCOUNT being or not being passed to individual allocations."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 670,
+          "text": "(IS_ENABLED(CONFIG_MEMCG) ? __GFP_ACCOUNT : 0))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 694,
+          "text": "*  3) __GFP_ACCOUNT"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 791,
+          "text": "* kmalloc (with __GFP_ACCOUNT in flags) or kmem_cache_alloc. The memcg charge"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 804,
+          "text": "*    without __GFP_ACCOUNT"
+        },
+        {
+          "path": "mm/page_alloc.c",
+          "line": 5086,
+          "text": "if (memcg_kmem_online() && (gfp & __GFP_ACCOUNT))"
+        },
+        {
+          "path": "mm/page_alloc.c",
+          "line": 5256,
+          "text": "if (memcg_kmem_online() && (gfp & __GFP_ACCOUNT) && page &&"
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 49,
+          "text": "___GFP_ACCOUNT_BIT,"
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 85,
+          "text": "#define ___GFP_ACCOUNT\t\tBIT(___GFP_ACCOUNT_BIT)"
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 139,
+          "text": "* %__GFP_ACCOUNT causes the allocation to be accounted to kmemcg."
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 147,
+          "text": "#define __GFP_ACCOUNT\t((__force gfp_t)___GFP_ACCOUNT)"
+        },
+        {
+          "path": "include/linux/gfp_types.h",
+          "line": 376,
+          "text": "#define GFP_KERNEL_ACCOUNT (GFP_KERNEL | __GFP_ACCOUNT)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 200,
+          "text": "* __GFP_ACCOUNT being or not being passed to individual allocations."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 675,
+          "text": "(IS_ENABLED(CONFIG_MEMCG) ? __GFP_ACCOUNT : 0))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 699,
+          "text": "*  3) __GFP_ACCOUNT"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 796,
+          "text": "* kmalloc (with __GFP_ACCOUNT in flags) or kmem_cache_alloc. The memcg charge"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 809,
+          "text": "*    without __GFP_ACCOUNT"
+        },
+        {
+          "path": "mm/page_alloc.c",
+          "line": 5096,
+          "text": "if (memcg_kmem_online() && (gfp & __GFP_ACCOUNT))"
+        },
+        {
+          "path": "mm/page_alloc.c",
+          "line": 5266,
+          "text": "if (memcg_kmem_online() && (gfp & __GFP_ACCOUNT) && page &&"
+        }
+      ],
+      "old_definition_excerpt": " 45: \t___GFP_COMP_BIT,\n 46: \t___GFP_NOMEMALLOC_BIT,\n 47: \t___GFP_HARDWALL_BIT,\n 48: \t___GFP_THISNODE_BIT,\n>49: \t___GFP_ACCOUNT_BIT,\n 50: \t___GFP_ZEROTAGS_BIT,\n 51: #ifdef CONFIG_KASAN_HW_TAGS\n 52: \t___GFP_SKIP_ZERO_BIT,\n 53: \t___GFP_SKIP_KASAN_BIT,",
+      "new_definition_excerpt": " 45: \t___GFP_COMP_BIT,\n 46: \t___GFP_NOMEMALLOC_BIT,\n 47: \t___GFP_HARDWALL_BIT,\n 48: \t___GFP_THISNODE_BIT,\n>49: \t___GFP_ACCOUNT_BIT,\n 50: \t___GFP_ZEROTAGS_BIT,\n 51: #ifdef CONFIG_KASAN_HW_TAGS\n 52: \t___GFP_SKIP_ZERO_BIT,\n 53: \t___GFP_SKIP_KASAN_BIT,",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "clear_page",
+      "old_locations": [
+        {
+          "path": "arch/x86/include/asm/page.h",
+          "line": 28,
+          "text": "clear_page(page);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 51,
+          "text": "void clear_page_orig(void *page);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 52,
+          "text": "void clear_page_rep(void *page);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 53,
+          "text": "void clear_page_erms(void *page);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 54,
+          "text": "KCFI_REFERENCE(clear_page_orig);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 55,
+          "text": "KCFI_REFERENCE(clear_page_rep);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 56,
+          "text": "KCFI_REFERENCE(clear_page_erms);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 58,
+          "text": "static inline void clear_page(void *page)"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 65,
+          "text": "alternative_call_2(clear_page_orig,"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 66,
+          "text": "clear_page_rep, X86_FEATURE_REP_GOOD,"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 67,
+          "text": "clear_page_erms, X86_FEATURE_ERMS,"
+        },
+        {
+          "path": "include/linux/highmem.h",
+          "line": 240,
+          "text": "clear_page(kaddr);"
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 51,
+          "text": "void __clear_pages_unrolled(void *page);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 52,
+          "text": "KCFI_REFERENCE(__clear_pages_unrolled);"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 55,
+          "text": "* clear_pages() - clear a page range using a kernel virtual address."
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 62,
+          "text": "*  - __clear_pages_unrolled(): the oldest, slowest and universally"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 85,
+          "text": "static inline void clear_pages(void *addr, unsigned int npages)"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 100,
+          "text": "* __clear_pages_unrolled() are part of the inline asm register"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 103,
+          "text": "asm volatile(ALTERNATIVE_2(\"call __clear_pages_unrolled\","
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 110,
+          "text": "#define clear_pages clear_pages"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 112,
+          "text": "static inline void clear_page(void *addr)"
+        },
+        {
+          "path": "arch/x86/include/asm/page_64.h",
+          "line": 114,
+          "text": "clear_pages(addr, 1);"
+        },
+        {
+          "path": "include/linux/highmem.h",
+          "line": 217,
+          "text": "clear_page(addr);"
+        },
+        {
+          "path": "include/linux/highmem.h",
+          "line": 232,
+          "text": "* otherwise, we can safely use clear_pages()."
+        }
+      ],
+      "old_definition_excerpt": " 24: \n 25: static inline void clear_user_page(void *page, unsigned long vaddr,\n 26: \t\t\t\t   struct page *pg)\n 27: {\n>28: \tclear_page(page);\n 29: }\n 30: \n 31: static inline void copy_user_page(void *to, void *from, unsigned long vaddr,\n 32: \t\t\t\t  struct page *topage)",
+      "new_definition_excerpt": " 47: }\n 48: \n 49: #define __phys_reloc_hide(x)\t(x)\n 50: \n>51: void __clear_pages_unrolled(void *page);\n 52: KCFI_REFERENCE(__clear_pages_unrolled);\n 53: \n 54: /**\n 55:  * clear_pages() - clear a page range using a kernel virtual address.",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "kmalloc_array",
+      "old_locations": [
+        {
+          "path": "include/linux/slab.h",
+          "line": 992,
+          "text": "* kmalloc_array - allocate memory for an array."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 997,
+          "text": "static inline __alloc_size(1, 2) void *kmalloc_array_noprof(size_t n, size_t size, gfp_t flags)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1005,
+          "text": "#define kmalloc_array(...)\t\t\talloc_hooks(kmalloc_array_noprof(__VA_ARGS__))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1044,
+          "text": "#define kcalloc(n, size, flags)\t\tkmalloc_array(n, size, (flags) | __GFP_ZERO)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1066,
+          "text": "static inline __alloc_size(1, 2) void *kmalloc_array_node_noprof(size_t n, size_t size, gfp_t flags,"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1077,
+          "text": "#define kmalloc_array_node(...)\t\t\talloc_hooks(kmalloc_array_node_noprof(__VA_ARGS__))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1080,
+          "text": "kmalloc_array_node(_n, _size, (_flags) | __GFP_ZERO, _node)"
+        },
+        {
+          "path": "mm/slub.c",
+          "line": 9426,
+          "text": "int *data = kmalloc_array(nr_cpu_ids, sizeof(int), GFP_KERNEL);"
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "include/linux/slab.h",
+          "line": 1098,
+          "text": "* kmalloc_array - allocate memory for an array."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1103,
+          "text": "static inline __alloc_size(1, 2) void *kmalloc_array_noprof(size_t n, size_t size, gfp_t flags)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1111,
+          "text": "#define kmalloc_array(...)\t\t\talloc_hooks(kmalloc_array_noprof(__VA_ARGS__))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1150,
+          "text": "#define kcalloc(n, size, flags)\t\tkmalloc_array(n, size, (flags) | __GFP_ZERO)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1172,
+          "text": "static inline __alloc_size(1, 2) void *kmalloc_array_node_noprof(size_t n, size_t size, gfp_t flags,"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1183,
+          "text": "#define kmalloc_array_node(...)\t\t\talloc_hooks(kmalloc_array_node_noprof(__VA_ARGS__))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1186,
+          "text": "kmalloc_array_node(_n, _size, (_flags) | __GFP_ZERO, _node)"
+        }
+      ],
+      "old_definition_excerpt": " 988: }\n 989: #define kmalloc_node(...)\t\t\talloc_hooks(kmalloc_node_noprof(__VA_ARGS__))\n 990: \n 991: /**\n>992:  * kmalloc_array - allocate memory for an array.\n 993:  * @n: number of elements.\n 994:  * @size: element size.\n 995:  * @flags: the type of memory to allocate (see kmalloc).\n 996:  */",
+      "new_definition_excerpt": " 1094: }\n 1095: #define kmalloc_node(...)\t\t\talloc_hooks(kmalloc_node_noprof(__VA_ARGS__))\n 1096: \n 1097: /**\n>1098:  * kmalloc_array - allocate memory for an array.\n 1099:  * @n: number of elements.\n 1100:  * @size: element size.\n 1101:  * @flags: the type of memory to allocate (see kmalloc).\n 1102:  */",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "kmalloc_objs",
+      "old_locations": [],
+      "new_locations": [
+        {
+          "path": "include/linux/slab.h",
+          "line": 1024,
+          "text": "* kmalloc_objs - Allocate an array of the given type"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1032,
+          "text": "#define kmalloc_objs(VAR_OR_TYPE, COUNT, ...) \\"
+        },
+        {
+          "path": "mm/slub.c",
+          "line": 9142,
+          "text": "int *data = kmalloc_objs(int, nr_cpu_ids);"
+        }
+      ],
+      "old_definition_excerpt": "",
+      "new_definition_excerpt": " 1020: #define kmalloc_obj(VAR_OR_TYPE, ...) \\\n 1021: \t__alloc_objs(kmalloc, default_gfp(__VA_ARGS__), typeof(VAR_OR_TYPE), 1)\n 1022: \n 1023: /**\n>1024:  * kmalloc_objs - Allocate an array of the given type\n 1025:  * @VAR_OR_TYPE: Variable or type to allocate an array of.\n 1026:  * @COUNT: How many elements in the array.\n 1027:  * @GFP: GFP flags for the allocation.\n 1028:  *",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "new_or_newly_visible_in_kernel_paths"
+    },
+    {
+      "symbol": "kzalloc",
+      "old_locations": [
+        {
+          "path": "include/linux/slab.h",
+          "line": 928,
+          "text": "*\tZero the allocated memory before returning. Also see kzalloc()."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1088,
+          "text": "* kzalloc - allocate memory. The memory is set to zero."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1092,
+          "text": "static inline __alloc_size(1) void *kzalloc_noprof(size_t size, gfp_t flags)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1096,
+          "text": "#define kzalloc(...)\t\t\t\talloc_hooks(kzalloc_noprof(__VA_ARGS__))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1097,
+          "text": "#define kzalloc_node(_size, _flags, _node)\tkmalloc_node(_size, (_flags)|__GFP_ZERO, _node)"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 177,
+          "text": "return kzalloc(sizeof(struct resource), flags);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 1892,
+          "text": "entry = kzalloc(sizeof(*entry) + extra_size, GFP_KERNEL);"
+        },
+        {
+          "path": "mm/slub.c",
+          "line": 2618,
+          "text": "sheaf = kzalloc(sheaf_size, gfp);"
+        },
+        {
+          "path": "mm/slub.c",
+          "line": 5258,
+          "text": "* When init equals 'true', like for kzalloc() family, only"
+        },
+        {
+          "path": "mm/slub.c",
+          "line": 5369,
+          "text": "sheaf = kzalloc(struct_size(sheaf, objects, size), gfp);"
+        },
+        {
+          "path": "mm/slub.c",
+          "line": 8573,
+          "text": "* the complete object on kzalloc."
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "include/linux/slab.h",
+          "line": 933,
+          "text": "*\tZero the allocated memory before returning. Also see kzalloc()."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1050,
+          "text": "/* All kzalloc aliases for kmalloc_(obj|objs|flex). */"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1051,
+          "text": "#define kzalloc_obj(P, ...) \\"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1052,
+          "text": "__alloc_objs(kzalloc, default_gfp(__VA_ARGS__), typeof(P), 1)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1053,
+          "text": "#define kzalloc_objs(P, COUNT, ...) \\"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1054,
+          "text": "__alloc_objs(kzalloc, default_gfp(__VA_ARGS__), typeof(P), COUNT)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1055,
+          "text": "#define kzalloc_flex(P, FAM, COUNT, ...)\t\t\\"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1056,
+          "text": "__alloc_flex(kzalloc, default_gfp(__VA_ARGS__), typeof(P), FAM, COUNT)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1194,
+          "text": "* kzalloc - allocate memory. The memory is set to zero."
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1198,
+          "text": "static inline __alloc_size(1) void *kzalloc_noprof(size_t size, gfp_t flags)"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1202,
+          "text": "#define kzalloc(...)\t\t\t\talloc_hooks(kzalloc_noprof(__VA_ARGS__))"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1203,
+          "text": "#define kzalloc_node(_size, _flags, _node)\tkmalloc_node(_size, (_flags)|__GFP_ZERO, _node)"
+        }
+      ],
+      "old_definition_excerpt": " 924:  * Also it is possible to set different flags by OR'ing\n 925:  * in one or more of the following additional @flags:\n 926:  *\n 927:  * %__GFP_ZERO\n>928:  *\tZero the allocated memory before returning. Also see kzalloc().\n 929:  *\n 930:  * %__GFP_HIGH\n 931:  *\tThis allocation has high priority and may use emergency pools.\n 932:  *",
+      "new_definition_excerpt": " 929:  * Also it is possible to set different flags by OR'ing\n 930:  * in one or more of the following additional @flags:\n 931:  *\n 932:  * %__GFP_ZERO\n>933:  *\tZero the allocated memory before returning. Also see kzalloc().\n 934:  *\n 935:  * %__GFP_HIGH\n 936:  *\tThis allocation has high priority and may use emergency pools.\n 937:  *",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "kzalloc_obj",
+      "old_locations": [],
+      "new_locations": [
+        {
+          "path": "include/linux/slab.h",
+          "line": 1051,
+          "text": "#define kzalloc_obj(P, ...) \\"
+        },
+        {
+          "path": "include/linux/slab.h",
+          "line": 1053,
+          "text": "#define kzalloc_objs(P, COUNT, ...) \\"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 185,
+          "text": "return kzalloc_obj(struct resource, flags);"
+        }
+      ],
+      "old_definition_excerpt": "",
+      "new_definition_excerpt": " 1047: #define kmalloc_flex(VAR_OR_TYPE, FAM, COUNT, ...) \\\n 1048: \t__alloc_flex(kmalloc, default_gfp(__VA_ARGS__), typeof(VAR_OR_TYPE), FAM, COUNT)\n 1049: \n 1050: /* All kzalloc aliases for kmalloc_(obj|objs|flex). */\n>1051: #define kzalloc_obj(P, ...) \\\n 1052: \t__alloc_objs(kzalloc, default_gfp(__VA_ARGS__), typeof(P), 1)\n 1053: #define kzalloc_objs(P, COUNT, ...) \\\n 1054: \t__alloc_objs(kzalloc, default_gfp(__VA_ARGS__), typeof(P), COUNT)\n 1055: #define kzalloc_flex(P, FAM, COUNT, ...)\t\t\\",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "new_or_newly_visible_in_kernel_paths"
+    }
+  ],
+  "kernel_paths": [
+    "include/linux/slab.h",
+    "include/linux/ioport.h",
+    "include/linux/gfp.h",
+    "include/linux/gfp_types.h",
+    "include/linux/highmem.h",
+    "include/asm-generic/page.h",
+    "arch/x86/include/asm/page.h",
+    "arch/x86/include/asm/page_64.h",
+    "kernel/resource.c",
+    "mm/slab_common.c",
+    "mm/slub.c",
+    "mm/page_alloc.c"
+  ],
+  "include_kernel_commit_info": false,
+  "commit_info_policy": "disabled_by_default"
+}

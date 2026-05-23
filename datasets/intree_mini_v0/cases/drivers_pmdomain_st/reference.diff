@@ -1,0 +1,13 @@
+diff --git a/drivers/pmdomain/st/ste-ux500-pm-domain.c b/drivers/pmdomain/st/ste-ux500-pm-domain.c
+index 3d4f111ed156..6896cb4a7b71 100644
+--- a/drivers/pmdomain/st/ste-ux500-pm-domain.c
++++ b/drivers/pmdomain/st/ste-ux500-pm-domain.c
+@@ -65,7 +65,7 @@ static int ux500_pm_domains_probe(struct platform_device *pdev)
+ 	if (!np)
+ 		return -ENODEV;
+ 
+-	genpd_data = kzalloc(sizeof(*genpd_data), GFP_KERNEL);
++	genpd_data = kzalloc_obj(*genpd_data);
+ 	if (!genpd_data)
+ 		return -ENOMEM;
+ 

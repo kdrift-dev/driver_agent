@@ -1,0 +1,11 @@
+{
+  "required_added_symbols": [
+    "walk_soft_reserve_res",
+    "region_intersects_soft_reserve"
+  ],
+  "expected_removed_patterns": [
+    "walk_iomem_res_desc",
+    "region_intersects("
+  ],
+  "notes": "Semantic keys are evaluation metrics, not exact patch equality requirements."
+}

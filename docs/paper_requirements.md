@@ -1,0 +1,212 @@
+# Paper-Facing Requirements and Evidence Policy
+
+This document is the living source of truth for paper-facing claims, allowed inputs, evaluation-only artifacts, and currently unresolved design decisions. Update this file whenever the workflow boundary changes.
+
+## Current Paper-Facing Scope
+
+Driver-Agent targets in-tree Linux driver migration caused by kernel version evolution. The workflow starts from an old target driver module and old/new kernel source trees, then builds kernel-side evidence, affected functions, obligations/specs, and patch guidance.
+
+The paper-facing workflow must not rely on target driver new-version code or other-driver migration examples as agent input.
+
+## Agent Input Policy
+
+Allowed by default:
+
+- Old target module source.
+- Old/new kernel-side definitions and declarations for symbols used by the old target module.
+- Kernel-side definition excerpts, signature diffs, macro bodies, struct field diffs, and relevant kernel-side diff hunks.
+- Kernel documentation, include comments, and kernel-side scripts only when they are part of the kernel-side evidence path and do not expose target-driver new-version changes.
+
+Disabled by default:
+
+- Kernel commit subjects, commit messages, changed-file lists, and commit diff excerpts.
+- These may be enabled only as an explicit private/debug ablation with `--include-kernel-commit-info`.
+- If enabled, driver paths must remain excluded from diff excerpts and changed-file lists.
+- Synthetic replacement hints and case-specific patch fixups. These are private/debug only and must not be mixed into paper-facing results.
+
+Forbidden as agent input:
+
+- Target driver new-version source.
+- Target driver reference diff.
+- Other-driver migration examples or collateral driver evolution evidence.
+- Commit diff hunks under `drivers/**`.
+- Hand-written case-specific replacement hints or manually inferred correct patches.
+- Evaluation case-pack `reference.diff` files.
+
+## Evaluation-Only Policy
+
+Evaluation scripts may use the full new version after patch generation, including:
+
+- Target driver new source.
+- Target driver reference diff.
+- Upstream patch or commit with driver hunks.
+- Semantic keys derived from reference behavior.
+- Manual annotations.
+- kselftest/QEMU results.
+
+Evaluation-only artifacts must not appear in `llm_calls/*/input.json`.
+
+## Source Context Policy
+
+Analysis stages may read the full old target module source.
+
+Patch generation should be reported by source mode:
+
+- `focused`: default paper-facing mode; edit-scope function slices plus read-only direct caller/callback/resource context.
+- `full_module`: complete old target module source; fallback/debug mode when focused extraction fails or for explicit ablations.
+
+The default workflow should use `focused` so patch generation is driven by structured migration context rather than full-module prompting. If focused extraction is empty, the implementation may fall back to `full_module` for pipeline continuity, and this must be reported as `full_module_fallback_used=true`.
+
+## Affected Function Scope Policy
+
+Affected driver functions are split into three edit scopes:
+
+- `edit_required`: the function directly uses a changed kernel-side symbol and the compatibility obligation is evidence-backed.
+- `edit_candidate`: a direct caller/callee or resource-paired function that may need a coordinated edit, with explicit evidence such as caller error handling or paired cleanup/resource ownership.
+- `context_only`: lifecycle roots, callback registration context, same callback-chain neighbors, or cleanup/lifetime context used for reasoning only.
+
+Patch generation policy:
+
+- `edit_required` functions are default edit targets.
+- `edit_candidate` functions may be edited only when the patch rationale cites the candidate evidence.
+- `context_only` functions must not be edited by default.
+
+Rationale:
+
+- Expanding every caller/callback into editable scope creates unnecessary edits.
+- Keeping only direct callsites misses cases where caller error handling or paired cleanup must change.
+- The three-scope design preserves context while keeping the editable surface auditable.
+
+## Commit Information Policy
+
+Default paper-facing setting: no commit information.
+
+Rationale:
+
+- Commit messages can mention target drivers or high-level patch intent.
+- Reviewer concerns about contamination are easier to address when commit text is excluded.
+- Kernel definitions/diffs are the core allowed evidence.
+
+Optional ablation:
+
+- `--include-kernel-commit-info` may be used to study whether sanitized commit information improves evidence quality.
+- Results with this flag must be reported separately and not mixed with default paper-facing results.
+- Synthetic replacement hint experiments require `DRIVER_AGENT_ALLOW_SYNTHETIC_REPLACEMENT_HINTS=1`.
+- Case-specific patch fixup experiments require `DRIVER_AGENT_ALLOW_CASE_SPECIFIC_FIXUPS=1`.
+- These environment variables are not part of the public/default workflow.
+
+## Correctness Reporting Policy
+
+Do not report reference-patch similarity as correctness.
+
+Report metrics separately:
+
+- Patch apply status.
+- No-op status.
+- Compile status.
+- Semantic-key match.
+- Function-level reference overlap as diagnostic only.
+- FM-Agent-style post reasoning verdict as consistency signal only.
+- kselftest/QEMU result when available.
+- Manual verdict for curated mini dataset cases.
+
+## Deferred Semantic Modernization Policy
+
+Source-compatible semantic or idiomatic migrations are out of scope for the default workflow.
+
+Example:
+
+- `kzalloc(sizeof(*x), GFP_KERNEL)` to `kzalloc_obj(*x)`.
+- Both APIs exist across the release pair.
+- The old API remains source-compatible.
+- No kernel-side definition-level break necessarily exists.
+- Upstream may still migrate call sites to the newer helper as a safety or idiom update.
+
+Default workflow treatment:
+
+- Do not create a required compatibility obligation from this pattern unless kernel-side evidence shows a concrete contract change.
+- Do not mark a generated patch wrong only because it omits such modernization.
+- Do not include these cases in the main required-repair success denominator.
+- Record them as optional modernization or future-work cases.
+
+Paper treatment:
+
+- Use as a case study to explain the boundary between required compatibility repair and optional semantic modernization.
+- State that supporting this class would require an explicit optional mode, likely with commit-level, script-level, or broader evolution evidence.
+- Keep this separate from the default paper-facing workflow, which uses old target driver source plus old/new kernel-side definitions/diffs.
+
+## FM-Agent-Style Spec Policy
+
+FM-Agent-style specs are auxiliary artifacts, not correctness oracles.
+
+Role in Driver-Agent:
+
+- Pre-spec generates obligation-specific local specs for affected functions.
+- The specs help patch generation preserve data flow, return/error handling, ownership, cleanup, and locking assumptions visible in the provided evidence.
+- Pre/post reasoning use these specs as consistency checks against the stated compatibility obligations.
+
+What post reasoning can claim:
+
+- The patch appears consistent with the generated local spec.
+- The patch appears to satisfy the stated obligations present in the input evidence.
+- The patch preserves local data-flow/resource/error-path properties that the spec explicitly captured.
+
+What post reasoning cannot claim:
+
+- The patch is globally correct.
+- The generated spec is complete.
+- All true kernel/driver semantic obligations were discovered.
+- Hardware, firmware, interrupt, Device Tree, timing, or concurrency behavior is correct.
+
+Therefore, `post_reasoning=PASS` means only:
+
+```text
+the patch satisfies the stated obligations/specs supplied to the reasoner
+```
+
+It does not mean:
+
+```text
+the patch is correct with respect to the full upstream reference behavior
+```
+
+Correctness claims require additional evidence:
+
+- deterministic semantic-key checks,
+- compile results,
+- kselftest/QEMU execution when meaningful,
+- CBMC/KUnit/formal checks for local obligations,
+- or manual case-pack verdict.
+
+## Paper Claims Allowed Today
+
+Safe claims:
+
+- The default workflow excludes target driver new-version code and reference diffs from agent input.
+- The workflow constructs auditable kernel-side evidence from old/new kernel definitions and old driver usage.
+- The mini dataset provides evaluation-only case packs for workflow refinement.
+- FM-Agent-style specs guide patch generation and consistency checking, especially for local data-flow/resource/error-path properties.
+- Post reasoning is not treated as a proof of correctness.
+
+Unsafe claims until further evidence exists:
+
+- The system generally fixes Linux drivers.
+- FM-Agent-style post reasoning proves correctness.
+- LLM-generated specs are complete correctness specifications.
+- Similarity to upstream patch measures correctness.
+- Other-driver/collateral migration evidence is part of the main workflow.
+- Commit messages are part of the default agent input.
+- Source-compatible semantic modernization is treated as required repair.
+- Two-agent architecture or sub-second latency is necessary.
+
+## Open Decisions
+
+- Whether to include a strict no-commit ablation and an explicit commit-info ablation.
+- How to formalize dataset deduplication and annotation agreement.
+- Which kselftest cases can be executed reliably in QEMU.
+- Whether to add a future optional modernization mode for source-compatible semantic migrations.
+
+## Change Log
+
+- 2026-05-22: Source-compatible semantic modernization is documented as future work and excluded from the default required-repair workflow.
+- 2026-05-22: Default policy set to no kernel commit information. Commit info is now an explicit private/debug ablation via `--include-kernel-commit-info`.

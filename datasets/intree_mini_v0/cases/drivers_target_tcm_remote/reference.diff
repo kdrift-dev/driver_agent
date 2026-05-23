@@ -1,0 +1,13 @@
+diff --git a/drivers/target/tcm_remote/tcm_remote.c b/drivers/target/tcm_remote/tcm_remote.c
+index cb8db2558056..03b00f6eca58 100644
+--- a/drivers/target/tcm_remote/tcm_remote.c
++++ b/drivers/target/tcm_remote/tcm_remote.c
+@@ -156,7 +156,7 @@ static struct se_wwn *tcm_remote_make_wwn(
+ 	char *ptr;
+ 	int ret, off = 0;
+ 
+-	remote_hba = kzalloc(sizeof(*remote_hba), GFP_KERNEL);
++	remote_hba = kzalloc_obj(*remote_hba);
+ 	if (!remote_hba)
+ 		return ERR_PTR(-ENOMEM);
+ 

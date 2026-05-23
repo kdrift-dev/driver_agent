@@ -6,6 +6,7 @@ __pycache__/
 # Build / test artifacts
 .runs/
 runs/
+external_repos/
 *.log
 
 # Env / local config

@@ -1,0 +1,83 @@
+{
+  "module_path": "drivers/media/dvb-frontends/cxd2880",
+  "category": "allocator_object_helper_migration",
+  "driver_change_summary": "kzalloc(sizeof(struct cxd2880_priv), GFP_KERNEL) -> kzalloc_obj(struct cxd2880_priv)",
+  "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+  "why_kernel_evolution_driven": "The modified call is a direct single-struct allocation; the new helper removes the manual sizeof expression.",
+  "workflow_focus": "Large module and focused-source prompt stress test.",
+  "kernel_symbols": [
+    "kzalloc",
+    "kzalloc_obj",
+    "kmalloc_obj"
+  ],
+  "required_added_symbols": [
+    "kzalloc_obj"
+  ],
+  "expected_removed_patterns": [
+    "kzalloc(sizeof"
+  ],
+  "kselftest_targets": [],
+  "case_id": "drivers_media_dvb-frontends_cxd2880__v6.19__v7.0-rc1",
+  "old_ref": "v6.19",
+  "new_ref": "v7.0-rc1",
+  "evaluation_only": true,
+  "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+  "include_kernel_commit_info": false,
+  "metadata_from_candidate_csv": {
+    "from_ref": "v6.19",
+    "to_ref": "v7.0-rc1",
+    "module_path": "drivers/media/dvb-frontends/cxd2880",
+    "status": "existing",
+    "marker_files_from": "Kconfig;Makefile",
+    "marker_files_to": "Kconfig;Makefile",
+    "file_count": "31",
+    "source_file_count": "29",
+    "code_loc": "12245",
+    "target_file_count": "31",
+    "target_source_file_count": "29",
+    "target_code_loc": "12245",
+    "changed_files": "1",
+    "added_loc": "1",
+    "deleted_loc": "1",
+    "modified_loc": "2",
+    "binary_files": "0"
+  },
+  "old_source_files": [
+    "drivers/media/dvb-frontends/cxd2880/cxd2880.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_common.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_common.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_devio_spi.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_devio_spi.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_dtv.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_dvbt.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_dvbt2.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_integ.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_integ.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_io.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_io.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_spi.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_spi_device.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_spi_device.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_driver_version.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2_mon.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2_mon.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt_mon.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt_mon.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_mon.c",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_mon.h",
+    "drivers/media/dvb-frontends/cxd2880/cxd2880_top.c"
+  ],
+  "case_pack_files": {
+    "reference_diff": "reference.diff",
+    "old_module_sources": "old_module_sources/",
+    "kernel_evidence": "kernel_evidence.json",
+    "expected_semantic_keys": "expected_semantic_keys.json",
+    "workflow_artifacts": "workflow_artifacts.json"
+  }
+}

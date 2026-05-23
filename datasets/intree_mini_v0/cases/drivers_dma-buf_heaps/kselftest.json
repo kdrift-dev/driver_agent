@@ -1,0 +1,7 @@
+{
+  "targets": [
+    "dmabuf-heaps",
+    "drivers/dma-buf"
+  ],
+  "has_direct_kselftest_candidate": true
+}

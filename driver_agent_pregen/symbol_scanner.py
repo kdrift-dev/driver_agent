@@ -36,6 +36,7 @@ DRIVER_ROOT_STRUCT_KIND = {
     "file_operations": "file_ops",
     "net_device_ops": "netdev_ops",
     "dev_pm_ops": "pm",
+    "bus_type": "bus_type",
 }
 
 FILE_SCOPE_MACRO_HINTS = {
@@ -404,10 +405,11 @@ def _extract_ops_table_callbacks(text: str, rel_file: str) -> tuple[list[dict], 
                 {
                     "name": field,
                     "kind": "field",
+                    "owner_struct": struct_type,
                     "file": rel_file,
                     "line": line,
                     "code": assign.group(0),
-                    "enclosing_function": None,
+                    "enclosing_function": func,
                     "is_driver_local": False,
                     "definition_location_old": None,
                     "definition_location_new": None,
@@ -534,6 +536,8 @@ def _extract_file_scope_macro_invocations(
     force_file_macro_re = re.compile(
         r"\b("
         r"MODULE_[A-Za-z0-9_]+|"
+        r"BUS_ATTR_[A-Za-z0-9_]+|"
+        r"DEVICE_ATTR_[A-Za-z0-9_]+|"
         r"EXPORT_SYMBOL(?:_GPL)?|"
         r"module_(?:init|exit|param_named|param)|"
         r"DEFINE_[A-Za-z0-9_]+|"
@@ -599,6 +603,66 @@ def _extract_file_scope_macro_invocations(
                     "code": raw.strip(),
                     "enclosing_function": None,
                     "is_driver_local": name in local_macros or name in local_function_names,
+                    "definition_location_old": None,
+                    "definition_location_new": None,
+                    "locator": "regex",
+                }
+            )
+            if name == "BUS_ATTR_RO":
+                arg = ""
+                tail = line[m.end() :]
+                m_arg = re.match(r"\s*([A-Za-z_]\w*)\s*\)", tail)
+                if m_arg:
+                    arg = m_arg.group(1)
+                show_fn = f"{arg}_show" if arg else None
+                if show_fn and show_fn in local_function_names:
+                    out.append(
+                        {
+                            "name": "show",
+                            "kind": "field",
+                            "owner_struct": "bus_attribute",
+                            "file": rel_file,
+                            "line": line_no,
+                            "code": raw.strip(),
+                            "enclosing_function": show_fn,
+                            "is_driver_local": False,
+                            "definition_location_old": None,
+                            "definition_location_new": None,
+                            "locator": "regex",
+                        }
+                    )
+
+    # A malformed function-boundary match can hide file-scope attribute macros
+    # from the line-based pass above. Add a direct full-file pass for bus attrs.
+    for m in re.finditer(r"\bBUS_ATTR_RO\s*\(\s*([A-Za-z_]\w*)\s*\)", _strip_comments(text)):
+        arg = m.group(1)
+        line_no = _line_number_from_offset(text, m.start())
+        show_fn = f"{arg}_show"
+        out.append(
+            {
+                "name": "BUS_ATTR_RO",
+                "kind": "macro",
+                "file": rel_file,
+                "line": line_no,
+                "code": f"BUS_ATTR_RO({arg})",
+                "enclosing_function": None,
+                "is_driver_local": False,
+                "definition_location_old": None,
+                "definition_location_new": None,
+                "locator": "regex",
+            }
+        )
+        if show_fn in local_function_names:
+            out.append(
+                {
+                    "name": "show",
+                    "kind": "field",
+                    "owner_struct": "bus_attribute",
+                    "file": rel_file,
+                    "line": line_no,
+                    "code": f"BUS_ATTR_RO({arg})",
+                    "enclosing_function": show_fn,
+                    "is_driver_local": False,
                     "definition_location_old": None,
                     "definition_location_new": None,
                     "locator": "regex",
@@ -757,7 +821,7 @@ def run_symbol_scanner(module_result: ModuleSourceResult, extracted_dir: Path) -
                     "line": start_line,
                     "code": fn.signature,
                     "enclosing_function": fn.name,
-                    "is_driver_local": False,
+                    "is_driver_local": en in all_local_macros,
                     "definition_location_old": None,
                     "definition_location_new": None,
                     "locator": "regex",

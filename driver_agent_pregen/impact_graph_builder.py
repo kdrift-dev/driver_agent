@@ -90,6 +90,7 @@ def _migration_callsite_gate(local_slice: str, symbol_name: str, symbol_meta: di
 
 
 TIER_ORDER = {"context": 0, "semantic": 1, "hard": 2}
+EDIT_SCOPE_ORDER = {"context_only": 0, "edit_candidate": 1, "edit_required": 2}
 ALLOC_FAMILY = {
     "kmalloc",
     "kzalloc",
@@ -124,8 +125,19 @@ def _max_tier(a: str | None, b: str | None) -> str | None:
     return a if TIER_ORDER.get(a, -1) >= TIER_ORDER.get(b, -1) else b
 
 
+def _edit_scope_for_seed(tier: str | None) -> str:
+    if tier in {"hard", "semantic"}:
+        return "edit_required"
+    return "context_only"
+
+
 def _symbol_tier(item: dict[str, Any]) -> str | None:
     if not item:
+        return None
+    if item.get("kind") in {"enum", "global", "unknown"}:
+        # Keep these symbols in extracted evidence, but do not let broad token
+        # matches drive affected-function edits. They are too noisy without a
+        # precise declaration/provider.
         return None
     if item.get("migration_signal"):
         return "semantic"
@@ -311,7 +323,9 @@ def run_impact_graph_builder(
     ensure_dir(context_slice_dir)
 
     affected_functions = []
-    context_functions = []
+    edit_required_functions = []
+    edit_candidate_functions = []
+    context_only_functions = []
     excluded_seed_functions = []
     out_edges = []
     fn_records: dict[str, dict[str, Any]] = {}
@@ -392,12 +406,14 @@ def run_impact_graph_builder(
 
         for sym in sorted(kept_symbols):
             out_edges.append({"from": fn_name, "to": sym, "kind": "uses_kernel_symbol"})
+        edit_scope = _edit_scope_for_seed(kept_tier)
         rec = {
             "function": fn_name,
             "file": file_rel,
             "start_line": start_line,
             "end_line": end_line,
             "tier": kept_tier or "context",
+            "edit_scope": edit_scope,
             "uses_changed_kernel_symbols": sorted(kept_symbols),
             "trigger_reasons": kept_reasons,
             "ordinary_callers": ordinary_callers,
@@ -415,21 +431,31 @@ def run_impact_graph_builder(
         fn_records[fn_name] = rec
         callback_roots_by_fn[fn_name] = cb_roots
 
-    # Split into editable seeds (hard/semantic) vs context-only seeds.
-    editable_seed_names = set()
+    # Split direct seeds into required edits vs context-only seeds.
+    edit_required_seed_names = set()
     context_seed_names = set()
     for fn_name, rec in fn_records.items():
-        tier = rec.get("tier", "context")
-        if tier in {"hard", "semantic"}:
-            editable_seed_names.add(fn_name)
+        if rec.get("edit_scope") == "edit_required":
+            edit_required_seed_names.add(fn_name)
         else:
             context_seed_names.add(fn_name)
 
-    # Context expansion map: function -> reasons/evidence
+    # Expansion maps: function -> reasons/evidence. Candidate functions are
+    # allowed edit targets only when the evidence requires cross-function edits;
+    # context-only functions are reasoning context and should not be patched.
+    candidate_reason_map: dict[str, dict[str, Any]] = {}
     context_reason_map: dict[str, dict[str, Any]] = {}
 
+    def _add_candidate(fn_name: str, reason: str, evidence: str) -> None:
+        if fn_name in edit_required_seed_names:
+            return
+        info = candidate_reason_map.setdefault(fn_name, {"reasons": set(), "evidence": []})
+        info["reasons"].add(reason)
+        if evidence and len(info["evidence"]) < 8:
+            info["evidence"].append(evidence)
+
     def _add_context(fn_name: str, reason: str, evidence: str) -> None:
-        if fn_name in editable_seed_names:
+        if fn_name in edit_required_seed_names or fn_name in candidate_reason_map:
             return
         info = context_reason_map.setdefault(fn_name, {"reasons": set(), "evidence": []})
         info["reasons"].add(reason)
@@ -440,18 +466,18 @@ def run_impact_graph_builder(
     for fn_name in sorted(context_seed_names):
         _add_context(fn_name, "context_symbol_evidence", "symbol-tier=context")
 
-    # Evidence-backed expansion around editable seeds.
-    for seed in sorted(editable_seed_names):
+    # Evidence-backed expansion around required edit seeds.
+    for seed in sorted(edit_required_seed_names):
         rec = fn_records.get(seed, {})
-        seed_file = rec.get("file")
 
-        # 1) Direct caller expansion.
+        # 1) Direct caller expansion: callers may need return/error handling updates.
         for caller in callers_map.get(seed, []):
             if caller in fn_index:
-                _add_context(caller, "direct_caller_of_affected_seed", f"{caller}->{seed}")
-                out_edges.append({"from": caller, "to": seed, "kind": "context_direct_caller"})
+                _add_candidate(caller, "direct_caller_of_edit_required", f"{caller}->{seed}")
+                out_edges.append({"from": caller, "to": seed, "kind": "edit_candidate_direct_caller"})
 
-        # 2) Lifecycle root and same callback chain (one-hop neighbors in same root reachability).
+        # 2) Lifecycle root and same callback chain: context only unless a
+        # separate resource/caller-pairing rule promotes a function to candidate.
         cb_roots = callback_roots_by_fn.get(seed, [])
         for cb in cb_roots:
             root_fn = cb.get("root_function")
@@ -471,8 +497,8 @@ def run_impact_graph_builder(
         for cand_low in _paired_cleanup_candidates(seed):
             for name in local_fn_names:
                 if name.lower() == cand_low and name != seed:
-                    _add_context(name, "paired_cleanup_function", f"seed={seed};pair={name}")
-                    out_edges.append({"from": seed, "to": name, "kind": "context_paired_cleanup"})
+                    _add_candidate(name, "paired_cleanup_function", f"seed={seed};pair={name}")
+                    out_edges.append({"from": seed, "to": name, "kind": "edit_candidate_paired_cleanup"})
 
         # 4) Resource pairing expansion (conservative).
         if _function_alloc_signal(rec.get("trigger_reasons", [])):
@@ -482,15 +508,61 @@ def run_impact_graph_builder(
                     continue
                 if not _is_cleanup_like(name):
                     continue
-                _add_context(name, "resource_pairing", f"allocator-seed={seed};cleanup={name}")
-                out_edges.append({"from": seed, "to": name, "kind": "context_resource_pairing"})
+                _add_candidate(name, "resource_pairing", f"allocator-seed={seed};cleanup={name}")
+                out_edges.append({"from": seed, "to": name, "kind": "edit_candidate_resource_pairing"})
 
-    # Build editable affected functions.
-    for fn_name in sorted(editable_seed_names):
-        affected_functions.append(fn_records[fn_name])
+    # Build required edit records.
+    for fn_name in sorted(edit_required_seed_names):
+        rec = fn_records[fn_name]
+        edit_required_functions.append(rec)
+        affected_functions.append(rec)
 
-    # Build context function records with slices.
+    # Build candidate edit records with slices.
+    candidate_slice_dir = extracted_dir / "edit_candidate_function_slices"
+    ensure_dir(candidate_slice_dir)
+    for fn_name, info in sorted(candidate_reason_map.items()):
+        f = _select_function_record(fn_index.get(fn_name, []), fn_to_reasons.get(fn_name, []))
+        if not f:
+            continue
+        file_rel = f.get("file")
+        start_line = int(f.get("start_line", 1))
+        end_line = int(f.get("end_line", start_line))
+        src_path = module_result.copied_root / file_rel
+        local_slice = _read_line_slice(src_path, start_line, end_line) if src_path.exists() else ""
+        slice_filename = safe_filename(f"{fn_name}_{file_rel.replace('/', '_')}", suffix="c")
+        slice_path = candidate_slice_dir / slice_filename
+        write_text(slice_path, local_slice + ("\n" if local_slice else ""))
+
+        rec = {
+            "function": fn_name,
+            "file": file_rel,
+            "start_line": start_line,
+            "end_line": end_line,
+            "tier": "context",
+            "edit_scope": "edit_candidate",
+            "candidate_reasons": sorted(info["reasons"]),
+            "candidate_evidence": info["evidence"],
+            "ordinary_callers": sorted(set(callers_map.get(fn_name, []))),
+            "ordinary_callees": sorted(set(callees_map.get(fn_name, []))),
+            "callback_roots": [
+                {
+                    "root_kind": cb.get("root_kind", "unknown"),
+                    "root_function": cb.get("root_function"),
+                    "registration_site": cb.get("registration_site"),
+                    "evidence": cb.get("evidence"),
+                }
+                for cb in callbacks
+                if cb.get("root_function") == fn_name or fn_name in reach.get(cb.get("root_function"), set())
+            ],
+            "local_slice_path": f"edit_candidate_function_slices/{slice_filename}",
+        }
+        edit_candidate_functions.append(rec)
+        affected_functions.append(rec)
+
+    # Build context-only function records with slices.
     for fn_name, info in sorted(context_reason_map.items()):
+        if fn_name in candidate_reason_map:
+            continue
         f = _select_function_record(fn_index.get(fn_name, []), fn_to_reasons.get(fn_name, []))
         if not f:
             continue
@@ -503,13 +575,14 @@ def run_impact_graph_builder(
         slice_path = context_slice_dir / slice_filename
         write_text(slice_path, local_slice + ("\n" if local_slice else ""))
 
-        context_functions.append(
+        context_only_functions.append(
             {
                 "function": fn_name,
                 "file": file_rel,
                 "start_line": start_line,
                 "end_line": end_line,
                 "tier": "context",
+                "edit_scope": "context_only",
                 "context_reasons": sorted(info["reasons"]),
                 "context_evidence": info["evidence"],
                 "local_slice_path": f"context_function_slices/{slice_filename}",
@@ -517,24 +590,49 @@ def run_impact_graph_builder(
         )
 
     tier_counts = {"hard": 0, "semantic": 0, "context": 0}
-    for rec in affected_functions:
+    for rec in edit_required_functions:
         tier = rec.get("tier", "context")
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
-    tier_counts["context"] += len(context_functions)
+    tier_counts["context"] += len(edit_candidate_functions) + len(context_only_functions)
+
+    edit_scope_counts = {
+        "edit_required": len(edit_required_functions),
+        "edit_candidate": len(edit_candidate_functions),
+        "context_only": len(context_only_functions),
+    }
+    editable_functions = [
+        {
+            "function": x.get("function"),
+            "file": x.get("file"),
+            "edit_scope": x.get("edit_scope"),
+            "tier": x.get("tier"),
+        }
+        for x in (edit_required_functions + edit_candidate_functions)
+    ]
 
     payload = {
         "module_path": module_result.module_path,
         "affected_tier_policy": {
-            "tiers": ["hard", "semantic", "context"],
-            "editable_tiers": ["hard", "semantic"],
-            "context_only_tiers": ["context"],
+            "legacy_tiers": ["hard", "semantic", "context"],
+            "edit_scopes": ["edit_required", "edit_candidate", "context_only"],
+            "default_edit_scopes": ["edit_required"],
+            "conditional_edit_scopes": ["edit_candidate"],
+            "context_only_scopes": ["context_only"],
+            "policy": (
+                "Patch generation may edit edit_required functions. It may edit "
+                "edit_candidate functions only when the patch rationale cites their "
+                "candidate evidence. context_only functions are reasoning context and "
+                "must not be edited by default."
+            ),
         },
-        "editable_functions": [
-            {"function": x.get("function"), "file": x.get("file"), "tier": x.get("tier")} for x in affected_functions
-        ],
-        "context_functions": context_functions,
+        "edit_required_functions": edit_required_functions,
+        "edit_candidate_functions": edit_candidate_functions,
+        "context_only_functions": context_only_functions,
+        "editable_functions": editable_functions,
+        "context_functions": context_only_functions,
         "excluded_seed_functions": excluded_seed_functions,
         "tier_counts": tier_counts,
+        "edit_scope_counts": edit_scope_counts,
         "affected_functions": affected_functions,
         "edges": out_edges,
     }

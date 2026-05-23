@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -48,12 +49,10 @@ ALLOC_FAMILY_REPLACEMENTS = {
     "kvcalloc": ["kvzalloc_objs"],
 }
 
-SYMBOL_REPLACEMENT_HINTS = {
-    "sprintf": ["sysfs_emit", "scnprintf"],
-    "snprintf": ["scnprintf", "sysfs_emit", "sysfs_emit_at"],
-    "scnprintf": ["sysfs_emit", "sysfs_emit_at"],
-    "system_wq": ["system_percpu_wq", "system_unbound_wq"],
-}
+# Hand-written replacement maps are intentionally disabled in the paper-facing
+# workflow. Replacement candidates should come from old/new kernel definitions
+# or explicitly enabled private/debug evidence, not case-specific hints.
+SYMBOL_REPLACEMENT_HINTS: dict[str, list[str]] = {}
 
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
@@ -74,6 +73,13 @@ def _choose_location(locations: list[dict], module_path: str) -> dict | None:
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
+
+
+def _norm_signature_line(s: str) -> str:
+    text = _norm(s)
+    text = re.sub(r"\bextern\s+", "", text)
+    text = re.sub(r"\s*;\s*$", ";", text)
+    return text
 
 
 def _strip_lineno_prefix(text: str) -> str:
@@ -290,7 +296,7 @@ def run_kernel_diff_builder(
     locations_payload: dict[str, Any],
     module_path: str,
     *,
-    collect_commits: bool = True,
+    collect_commits: bool = False,
     affected_func_signal_mode: str = "kernel_only",
     old_ref: str | None = None,
     new_ref: str | None = None,
@@ -300,6 +306,14 @@ def run_kernel_diff_builder(
         raise ValueError(
             f"unsupported affected_func_signal_mode={affected_func_signal_mode!r}; "
             "expected one of: kernel_only, kernel_plus_other_drivers"
+        )
+    if (
+        affected_func_signal_mode == "kernel_plus_other_drivers"
+        and os.environ.get("DRIVER_AGENT_ALLOW_DRIVER_EVIDENCE") != "1"
+    ):
+        raise ValueError(
+            "kernel_plus_other_drivers is disabled by policy; "
+            "set DRIVER_AGENT_ALLOW_DRIVER_EVIDENCE=1 only for private/debug experiments."
         )
 
     exclude_prefixes: list[str] = [module_path]
@@ -337,6 +351,8 @@ def run_kernel_diff_builder(
 
         old_def_cmp = _strip_lineno_prefix(old_def)
         new_def_cmp = _strip_lineno_prefix(new_def)
+        old_match_cmp = _norm_signature_line(str((old_loc or {}).get("match", "") or ""))
+        new_match_cmp = _norm_signature_line(str((new_loc or {}).get("match", "") or ""))
 
         old_exists = bool(item.get("old_locations"))
         new_exists = bool(item.get("new_locations"))
@@ -344,6 +360,11 @@ def run_kernel_diff_builder(
         definition_changed = False
         if old_exists and not new_exists:
             definition_changed = True
+        elif old_match_cmp and new_match_cmp and kind in {"function", "macro", "enum", "global", "unknown"}:
+            # Avoid false positives from unrelated nearby context changes in
+            # broad excerpts. For single-line symbols, the locator's matched
+            # declaration/definition line is the reliable comparison unit.
+            definition_changed = old_match_cmp != new_match_cmp
         elif old_def and new_def:
             definition_changed = _norm(old_def_cmp) != _norm(new_def_cmp)
         elif kind == "include" and old_exists != new_exists:
@@ -450,6 +471,10 @@ def run_kernel_diff_builder(
 
     payload = {
         "affected_func_signal_mode": affected_func_signal_mode,
+        "collect_commit_info": bool(collect_commits),
+        "commit_info_policy": (
+            "enabled_explicitly_with_excluded_paths" if collect_commits else "disabled_by_default"
+        ),
         "commit_exclude_prefixes": exclude_prefixes,
         "semantic_obligation_table": semantic_obligation_table,
         "items": items_out,
@@ -497,6 +522,10 @@ def _likely_migration_symbol(symbol: str, kind: str) -> bool:
     if low in SYMBOL_REPLACEMENT_HINTS:
         return True
     return False
+
+
+def _allow_synthetic_replacement_hints() -> bool:
+    return os.environ.get("DRIVER_AGENT_ALLOW_SYNTHETIC_REPLACEMENT_HINTS") == "1"
 
 
 def _is_plausible_replacement(old_symbol: str, new_symbol: str) -> bool:
@@ -741,11 +770,10 @@ def _detect_migration_signal(
     noncall_candidates = _collect_noncall_replacement_candidates(symbol, commits)
     candidates = _merge_replacement_candidates(candidates, noncall_candidates, second_source="base")
 
-    # Kernel-side scripted migration hints (e.g., scripts/coccinelle/api/kmalloc_objs.cocci)
-    # can encode allocator-family replacements without showing literal old symbol calls
-    # in commit hunks. Preserve deterministic evidence by emitting synthetic candidates.
+    # Synthetic replacement hints are private/debug only. They are not part of
+    # the default paper-facing evidence boundary.
     low_sym = (symbol or "").strip().lower()
-    if low_sym in ALLOC_FAMILY_REPLACEMENTS:
+    if _allow_synthetic_replacement_hints() and low_sym in ALLOC_FAMILY_REPLACEMENTS:
         for c in commits:
             text = f"{c.get('subject', '')}\n{c.get('message', '')}\n{c.get('diff_excerpt', '')}".lower()
             if "kmalloc_objs.cocci" in text or "alloc_obj" in text or "alloc_objs" in text:
@@ -753,7 +781,8 @@ def _detect_migration_signal(
                 reasons.append("allocator-family migration hinted by kernel-side coccinelle script evidence")
                 break
 
-    candidates = _add_symbol_hint_candidates(candidates=candidates, symbol=symbol, commits=commits)
+    if _allow_synthetic_replacement_hints():
+        candidates = _add_symbol_hint_candidates(candidates=candidates, symbol=symbol, commits=commits)
 
     if candidates:
         reasons.append("replacement-like call additions observed near removed old callsites")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
 
 from .repo_utils import RepositoryAccessor
 from .utils import ensure_dir, write_json, write_text
@@ -89,6 +90,87 @@ def run_module_source_loader(
         new_ref=accessor.new_ref,
         old_exists=old_exists,
         new_path_exists=new_exists,
+        source_files_old=files,
+        headers_old=headers,
+        module_loc_old=module_loc,
+        copied_root=copied_root,
+    )
+
+
+def run_external_module_source_loader(
+    *,
+    source_root: Path,
+    module_path: str,
+    extracted_dir: Path,
+    old_ref: str | None,
+    new_ref: str | None,
+    new_path_exists: bool = False,
+    note: str | None = None,
+) -> ModuleSourceResult:
+    """Load an out-of-tree driver source snapshot into the normal artifact layout.
+
+    The rest of Driver-Agent expects files to live under
+    extracted/old_module_sources/<module_path>/..., so OOT files get a synthetic
+    module_path while preserving their original relative paths below that root.
+    """
+    ensure_dir(extracted_dir)
+    source_root = source_root.resolve()
+    if not source_root.exists() or not source_root.is_dir():
+        raise FileNotFoundError(f"external source root not found: {source_root}")
+
+    copied_root = extracted_dir / "old_module_sources"
+    module_root = copied_root / module_path
+    if module_root.exists():
+        shutil.rmtree(module_root)
+    ensure_dir(module_root)
+
+    files: list[str] = []
+    headers: list[str] = []
+    module_loc = 0
+    for path in sorted(source_root.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name.endswith(".mod.c") or path.name in {"Module.symvers", "modules.order"}:
+            continue
+        if path.name.startswith(".") or "/." in f"/{path.relative_to(source_root).as_posix()}":
+            continue
+        if path.suffix.lower() not in SOURCE_EXTENSIONS:
+            continue
+        rel_under_source = path.relative_to(source_root).as_posix()
+        rel = f"{module_path.rstrip('/')}/{rel_under_source}"
+        files.append(rel)
+        if path.suffix.lower() in {".h", ".hpp", ".hh"}:
+            headers.append(rel)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        module_loc += len(text.splitlines())
+        dst = copied_root / rel
+        ensure_dir(dst.parent)
+        write_text(dst, text)
+
+    write_text(extracted_dir / "old_module_file_list.txt", "\n".join(files) + ("\n" if files else ""))
+
+    payload = {
+        "module_path": module_path,
+        "old_ref": old_ref,
+        "new_ref": new_ref,
+        "old_exists": True,
+        "new_path_exists": new_path_exists,
+        "source_files_old": files,
+        "headers_old": headers,
+        "module_loc_old": module_loc,
+        "source_origin": "out_of_tree",
+        "external_source_root": source_root.as_posix(),
+        "note": note
+        or "out-of-tree module path is synthetic; no buildable unit inference performed",
+    }
+    write_json(extracted_dir / "module_source.json", payload)
+
+    return ModuleSourceResult(
+        module_path=module_path,
+        old_ref=old_ref,
+        new_ref=new_ref,
+        old_exists=True,
+        new_path_exists=new_path_exists,
         source_files_old=files,
         headers_old=headers,
         module_loc_old=module_loc,

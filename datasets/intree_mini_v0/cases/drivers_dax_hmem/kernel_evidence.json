@@ -1,0 +1,308 @@
+{
+  "items": [
+    {
+      "symbol": "IORES_DESC_SOFT_RESERVED",
+      "old_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 144,
+          "text": "IORES_DESC_SOFT_RESERVED\t\t= 8,"
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 145,
+          "text": "IORES_DESC_SOFT_RESERVED\t\t= 8,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 55,
+          "text": ".desc\t= IORES_DESC_SOFT_RESERVED,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 470,
+          "text": "IORES_DESC_SOFT_RESERVED, arg, func);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 704,
+          "text": "IORESOURCE_MEM, IORES_DESC_SOFT_RESERVED);"
+        }
+      ],
+      "old_definition_excerpt": " 140: \tIORES_DESC_PERSISTENT_MEMORY\t\t= 4,\n 141: \tIORES_DESC_PERSISTENT_MEMORY_LEGACY\t= 5,\n 142: \tIORES_DESC_DEVICE_PRIVATE_MEMORY\t= 6,\n 143: \tIORES_DESC_RESERVED\t\t\t= 7,\n>144: \tIORES_DESC_SOFT_RESERVED\t\t= 8,\n 145: \tIORES_DESC_CXL\t\t\t\t= 9,\n 146: };\n 147: \n 148: /*",
+      "new_definition_excerpt": " 141: \tIORES_DESC_PERSISTENT_MEMORY\t\t= 4,\n 142: \tIORES_DESC_PERSISTENT_MEMORY_LEGACY\t= 5,\n 143: \tIORES_DESC_DEVICE_PRIVATE_MEMORY\t= 6,\n 144: \tIORES_DESC_RESERVED\t\t\t= 7,\n>145: \tIORES_DESC_SOFT_RESERVED\t\t= 8,\n 146: \tIORES_DESC_CXL\t\t\t\t= 9,\n 147: };\n 148: \n 149: /*",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "region_intersects",
+      "old_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 130,
+          "text": "* Descriptors are used by walk_iomem_res_desc() and region_intersects()"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 563,
+          "text": "static int __region_intersects(struct resource *parent, resource_size_t start,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 627,
+          "text": "* region_intersects() - determine intersection of region with known resources"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 646,
+          "text": "int region_intersects(resource_size_t start, size_t size, unsigned long flags,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 652,
+          "text": "ret = __region_intersects(&iomem_resource, start, size, flags, desc);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 657,
+          "text": "EXPORT_SYMBOL_GPL(region_intersects);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 1995,
+          "text": "if (__region_intersects(base, addr, size, 0, IORES_DESC_NONE) !="
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 131,
+          "text": "* Descriptors are used by walk_iomem_res_desc() and region_intersects()"
+        },
+        {
+          "path": "include/linux/ioport.h",
+          "line": 430,
+          "text": "region_intersects_soft_reserve(resource_size_t start, size_t size);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 600,
+          "text": "static int __region_intersects(struct resource *parent, resource_size_t start,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 664,
+          "text": "* region_intersects() - determine intersection of region with known resources"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 683,
+          "text": "int region_intersects(resource_size_t start, size_t size, unsigned long flags,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 689,
+          "text": "ret = __region_intersects(&iomem_resource, start, size, flags, desc);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 694,
+          "text": "EXPORT_SYMBOL_GPL(region_intersects);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 700,
+          "text": "int region_intersects_soft_reserve(resource_size_t start, size_t size)"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 703,
+          "text": "return __region_intersects(&soft_reserve_resource, start, size,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 706,
+          "text": "EXPORT_SYMBOL_GPL(region_intersects_soft_reserve);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 2044,
+          "text": "if (__region_intersects(base, addr, size, 0, IORES_DESC_NONE) !="
+        }
+      ],
+      "old_definition_excerpt": " 126: \n 127: /*\n 128:  * I/O Resource Descriptors\n 129:  *\n>130:  * Descriptors are used by walk_iomem_res_desc() and region_intersects()\n 131:  * for searching a specific resource range in the iomem table.  Assign\n 132:  * a new descriptor when a resource range supports the search interfaces.\n 133:  * Otherwise, resource.desc must be set to IORES_DESC_NONE (0).\n 134:  */",
+      "new_definition_excerpt": " 127: \n 128: /*\n 129:  * I/O Resource Descriptors\n 130:  *\n>131:  * Descriptors are used by walk_iomem_res_desc() and region_intersects()\n 132:  * for searching a specific resource range in the iomem table.  Assign\n 133:  * a new descriptor when a resource range supports the search interfaces.\n 134:  * Otherwise, resource.desc must be set to IORES_DESC_NONE (0).\n 135:  */",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "region_intersects_soft_reserve",
+      "old_locations": [],
+      "new_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 430,
+          "text": "region_intersects_soft_reserve(resource_size_t start, size_t size);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 700,
+          "text": "int region_intersects_soft_reserve(resource_size_t start, size_t size)"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 706,
+          "text": "EXPORT_SYMBOL_GPL(region_intersects_soft_reserve);"
+        }
+      ],
+      "old_definition_excerpt": "",
+      "new_definition_excerpt": " 426: \t\t    void *arg, int (*func)(struct resource *, void *));\n 427: extern int walk_soft_reserve_res(u64 start, u64 end, void *arg,\n 428: \t\t\t\t int (*func)(struct resource *, void *));\n 429: extern int\n>430: region_intersects_soft_reserve(resource_size_t start, size_t size);\n 431: \n 432: struct resource *devm_request_free_mem_region(struct device *dev,\n 433: \t\tstruct resource *base, unsigned long size);\n 434: struct resource *request_free_mem_region(struct resource *base,",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "new_or_newly_visible_in_kernel_paths"
+    },
+    {
+      "symbol": "walk_iomem_res_desc",
+      "old_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 130,
+          "text": "* Descriptors are used by walk_iomem_res_desc() and region_intersects()"
+        },
+        {
+          "path": "include/linux/ioport.h",
+          "line": 419,
+          "text": "walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start, u64 end,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 393,
+          "text": "static int __walk_iomem_res_desc(resource_size_t start, resource_size_t end,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 414,
+          "text": "* walk_iomem_res_desc - Walks through iomem resources and calls func()"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 430,
+          "text": "int walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 433,
+          "text": "return __walk_iomem_res_desc(start, end, flags, desc, arg, func);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 435,
+          "text": "EXPORT_SYMBOL_GPL(walk_iomem_res_desc);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 449,
+          "text": "return __walk_iomem_res_desc(start, end, flags, IORES_DESC_NONE, arg,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 514,
+          "text": "return __walk_iomem_res_desc(start, end, flags, IORES_DESC_NONE, arg,"
+        }
+      ],
+      "new_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 131,
+          "text": "* Descriptors are used by walk_iomem_res_desc() and region_intersects()"
+        },
+        {
+          "path": "include/linux/ioport.h",
+          "line": 425,
+          "text": "walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start, u64 end,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 429,
+          "text": "static int __walk_iomem_res_desc(resource_size_t start, resource_size_t end,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 439,
+          "text": "* walk_iomem_res_desc - Walks through iomem resources and calls func()"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 455,
+          "text": "int walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 458,
+          "text": "return __walk_iomem_res_desc(start, end, flags, desc, arg, func);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 460,
+          "text": "EXPORT_SYMBOL_GPL(walk_iomem_res_desc);"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 486,
+          "text": "return __walk_iomem_res_desc(start, end, flags, IORES_DESC_NONE, arg,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 551,
+          "text": "return __walk_iomem_res_desc(start, end, flags, IORES_DESC_NONE, arg,"
+        }
+      ],
+      "old_definition_excerpt": " 126: \n 127: /*\n 128:  * I/O Resource Descriptors\n 129:  *\n>130:  * Descriptors are used by walk_iomem_res_desc() and region_intersects()\n 131:  * for searching a specific resource range in the iomem table.  Assign\n 132:  * a new descriptor when a resource range supports the search interfaces.\n 133:  * Otherwise, resource.desc must be set to IORES_DESC_NONE (0).\n 134:  */",
+      "new_definition_excerpt": " 127: \n 128: /*\n 129:  * I/O Resource Descriptors\n 130:  *\n>131:  * Descriptors are used by walk_iomem_res_desc() and region_intersects()\n 132:  * for searching a specific resource range in the iomem table.  Assign\n 133:  * a new descriptor when a resource range supports the search interfaces.\n 134:  * Otherwise, resource.desc must be set to IORES_DESC_NONE (0).\n 135:  */",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "unchanged"
+    },
+    {
+      "symbol": "walk_soft_reserve_res",
+      "old_locations": [],
+      "new_locations": [
+        {
+          "path": "include/linux/ioport.h",
+          "line": 427,
+          "text": "extern int walk_soft_reserve_res(u64 start, u64 end, void *arg,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 466,
+          "text": "int walk_soft_reserve_res(u64 start, u64 end, void *arg,"
+        },
+        {
+          "path": "kernel/resource.c",
+          "line": 472,
+          "text": "EXPORT_SYMBOL_GPL(walk_soft_reserve_res);"
+        }
+      ],
+      "old_definition_excerpt": "",
+      "new_definition_excerpt": " 423: \t\t\tint (*func)(struct resource *, void *));\n 424: extern int\n 425: walk_iomem_res_desc(unsigned long desc, unsigned long flags, u64 start, u64 end,\n 426: \t\t    void *arg, int (*func)(struct resource *, void *));\n>427: extern int walk_soft_reserve_res(u64 start, u64 end, void *arg,\n 428: \t\t\t\t int (*func)(struct resource *, void *));\n 429: extern int\n 430: region_intersects_soft_reserve(resource_size_t start, size_t size);\n 431: ",
+      "commits_touching_kernel_side_symbol": [],
+      "definition_presence_change": "new_or_newly_visible_in_kernel_paths"
+    }
+  ],
+  "kernel_paths": [
+    "include/linux/slab.h",
+    "include/linux/ioport.h",
+    "include/linux/gfp.h",
+    "include/linux/gfp_types.h",
+    "include/linux/highmem.h",
+    "include/asm-generic/page.h",
+    "arch/x86/include/asm/page.h",
+    "arch/x86/include/asm/page_64.h",
+    "kernel/resource.c",
+    "mm/slab_common.c",
+    "mm/slub.c",
+    "mm/page_alloc.c"
+  ],
+  "include_kernel_commit_info": false,
+  "commit_info_policy": "disabled_by_default"
+}

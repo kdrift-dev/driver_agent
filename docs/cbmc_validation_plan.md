@@ -26,6 +26,9 @@
 ## 4) How CBMC could be integrated later
 - Input:
   - start from `affected_function_slices/<function>.c`.
+- Spec role:
+  - treat FM-Agent-style specs as candidate assertions or assumptions, not trusted correctness specifications.
+  - keep only assertions that can be grounded in compatibility obligations, code slices, or deterministic semantic keys.
 - Environment modeling:
   - generate/stitch stubs for referenced kernel APIs and structs.
 - Obligation encoding:
@@ -34,6 +37,7 @@
   - run bounded model checking on target function slices.
 - Reporting:
   - emit pass/fail/unknown with violated obligation IDs and trace snippets.
+  - report CBMC as stronger local evidence for encoded obligations, not as full hardware-driver correctness.
 
 ## 5) Additional Driver-Agent metadata to output for CBMC readiness
 - Per obligation:

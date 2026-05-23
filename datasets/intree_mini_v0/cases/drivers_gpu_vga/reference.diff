@@ -1,0 +1,13 @@
+diff --git a/drivers/gpu/vga/vga_switcheroo.c b/drivers/gpu/vga/vga_switcheroo.c
+index 68e45a26e85f..8fe1ae3c71bb 100644
+--- a/drivers/gpu/vga/vga_switcheroo.c
++++ b/drivers/gpu/vga/vga_switcheroo.c
+@@ -297,7 +297,7 @@ static int register_client(struct pci_dev *pdev,
+ {
+ 	struct vga_switcheroo_client *client;
+ 
+-	client = kzalloc(sizeof(*client), GFP_KERNEL);
++	client = kzalloc_obj(*client);
+ 	if (!client)
+ 		return -ENOMEM;
+ 

@@ -1,0 +1,52 @@
+{
+  "items": [
+    {
+      "module_path": "drivers/dma-buf/heaps",
+      "targets": [
+        "dmabuf-heaps",
+        "drivers/dma-buf"
+      ],
+      "recommended_command": "make -C tools/testing/selftests TARGETS=dmabuf-heaps run_tests",
+      "qemu_notes": "Good first candidate; tests allocate dma-buf heaps and can run without target hardware when heap devices are enabled.",
+      "dataset_role": "primary"
+    },
+    {
+      "module_path": "drivers/nfc/nxp-nci",
+      "targets": [
+        "nci"
+      ],
+      "recommended_command": "make -C tools/testing/selftests TARGETS=nci run_tests",
+      "qemu_notes": "Use cautiously: the reference patch is IRQ trigger / hardware or Device Tree semantics, so NCI tests are not a clean semantic oracle.",
+      "dataset_role": "limitation_candidate"
+    },
+    {
+      "module_path": "drivers/block/zram",
+      "targets": [
+        "zram"
+      ],
+      "recommended_command": "make -C tools/testing/selftests TARGETS=zram run_tests",
+      "qemu_notes": "Strong selftest coverage but patch size is outside modified_loc<=50; keep in separate kselftest dataset.",
+      "dataset_role": "kselftest_only"
+    },
+    {
+      "module_path": "drivers/net/netconsole",
+      "targets": [
+        "drivers/net/netconsole"
+      ],
+      "recommended_command": "make -C tools/testing/selftests TARGETS=drivers/net/netconsole run_tests",
+      "qemu_notes": "Good network namespace/QEMU candidate when a matching driver migration exists.",
+      "dataset_role": "kselftest_only"
+    },
+    {
+      "module_path": "generic-device-probe",
+      "targets": [
+        "devices/error_logs",
+        "devices/probe",
+        "devices/exist"
+      ],
+      "recommended_command": "make -C tools/testing/selftests TARGETS=devices/error_logs run_tests",
+      "qemu_notes": "Generic smoke checks for probe/error regressions; not a semantic proof for a specific driver migration.",
+      "dataset_role": "generic_smoke"
+    }
+  ]
+}

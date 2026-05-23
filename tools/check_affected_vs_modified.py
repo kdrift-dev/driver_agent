@@ -439,18 +439,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--only-changed", action="store_true", default=True)
     p.add_argument("--include-unchanged", action="store_true", help="override --only-changed")
     p.add_argument("--keep-case-artifacts", action="store_true")
-    p.set_defaults(collect_commit_evidence=True)
+    p.set_defaults(collect_commit_evidence=False)
     p.add_argument(
         "--collect-commit-evidence",
         dest="collect_commit_evidence",
         action="store_true",
-        help="collect per-symbol git log/commit evidence in kernel diff builder (default: enabled)",
+        help="collect per-symbol git log/commit evidence in kernel diff builder (default: disabled)",
     )
     p.add_argument(
         "--no-collect-commit-evidence",
         dest="collect_commit_evidence",
         action="store_false",
-        help="disable commit evidence collection for faster but non-equivalent runs",
+        help="disable commit evidence collection (default)",
     )
     p.add_argument(
         "--max-subprocs",
@@ -479,16 +479,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         choices=["kernel_only", "kernel_plus_other_drivers"],
         default="kernel_only",
-        help=(
-            "signal source mode for affected-functions: "
-            "kernel_only (strict kernel-side, default) or "
-            "kernel_plus_other_drivers (opt-in, allow non-target drivers hints)"
-        ),
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--semantic-obligation-table",
         default=None,
-        help="optional semantic table JSON to enrich kernel diff evidence for affected-function detection",
+        help=argparse.SUPPRESS,
     )
     p.set_defaults(ignore_comment_only_function_changes=True)
     p.add_argument(
@@ -508,6 +504,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    allow_driver_evidence = os.environ.get("DRIVER_AGENT_ALLOW_DRIVER_EVIDENCE") == "1"
+    if args.affected_func_signal_mode != "kernel_only" and not allow_driver_evidence:
+        raise SystemExit(
+            "--affected-func-signal-mode=kernel_plus_other_drivers is disabled by policy; "
+            "the evaluation workflow uses only target old-source plus old/new kernel-side definitions."
+        )
+    if args.semantic_obligation_table and not allow_driver_evidence:
+        raise SystemExit(
+            "--semantic-obligation-table is disabled by policy; "
+            "semantic/collateral driver evidence is not part of the default evaluation workflow."
+        )
 
     csv_path = Path(args.csv).resolve()
     repo_path = Path(args.repo).resolve()
@@ -579,7 +586,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.affected_func_signal_mode == "kernel_plus_other_drivers"
         else None
     )
-
     meta = {
         "csv": str(csv_path),
         "repo": str(repo_path),

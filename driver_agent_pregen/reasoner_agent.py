@@ -196,6 +196,52 @@ def _collect_slices(
     return out
 
 
+def _impact_symbol_keys(impact_graph: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for item in impact_graph.get("affected_functions", []) or []:
+        for sym in item.get("uses_changed_kernel_symbols", []) or []:
+            if sym:
+                keys.add(str(sym))
+    return keys
+
+
+def _slim_kernel_diffs_for_impact(kernel_definition_diffs: dict[str, Any], impact_graph: dict[str, Any]) -> dict[str, Any]:
+    keys = _impact_symbol_keys(impact_graph)
+    if not keys:
+        return {**kernel_definition_diffs, "items": []}
+    items = []
+    for item in kernel_definition_diffs.get("items", []) or []:
+        key = f"{item.get('symbol')} ({item.get('kind')})"
+        if key not in keys:
+            continue
+        slim = dict(item)
+        for field in ("old_definition", "new_definition", "definition_diff"):
+            text = str(slim.get(field, "") or "")
+            if len(text) > 5000:
+                slim[field] = text[:5000] + "\n...[truncated]"
+        items.append(slim)
+    return {**kernel_definition_diffs, "items": items}
+
+
+def _slim_obligations_for_impact(compatibility_obligations: dict[str, Any], impact_graph: dict[str, Any]) -> dict[str, Any]:
+    keys = _impact_symbol_keys(impact_graph)
+    if not keys:
+        return {**compatibility_obligations, "obligations": [], "semantic_obligations": []}
+    out = dict(compatibility_obligations)
+    out["obligations"] = [
+        x
+        for x in compatibility_obligations.get("obligations", []) or []
+        if str(x.get("affected_kernel_symbol", "")) in keys
+    ]
+    out["semantic_obligations"] = [
+        x
+        for x in compatibility_obligations.get("semantic_obligations", []) or []
+        if str(x.get("affected_kernel_symbol", "")) in keys
+    ]
+    out["llm_payload_filter"] = "impact_symbols_only; full obligations remain in extracted/compatibility_obligations.json"
+    return out
+
+
 def run_pre_reasoner_agent(
     *,
     llm_client: LLMClient,
@@ -217,10 +263,13 @@ def run_pre_reasoner_agent(
         "case_id": case_id,
         "module_path": module_path,
         "pre_patch_specs": pre_specs,
-        "compatibility_obligations": compatibility_obligations,
-        "kernel_definition_diffs": kernel_definition_diffs,
+        "compatibility_obligations": _slim_obligations_for_impact(compatibility_obligations, impact_graph),
+        "kernel_definition_diffs": _slim_kernel_diffs_for_impact(kernel_definition_diffs, impact_graph),
         "impact_graph": impact_graph,
         "callback_graph": callback_graph,
+        "edit_required_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="edit_required_functions"),
+        "edit_candidate_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="edit_candidate_functions"),
+        "context_only_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="context_only_functions"),
         "affected_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="affected_functions"),
         "context_function_slices": _collect_slices(extracted_dir, impact_graph, list_key="context_functions"),
         "instruction": "Judge old driver compatibility against new kernel obligations and provide textual patch guidance.",

@@ -12,7 +12,7 @@ def _symbol_pattern(name: str, kind: str) -> tuple[str, bool, bool]:
     esc = re.escape(name)
     if kind == "function":
         # Broad match first; declaration/definition filtering happens in post-processing.
-        return rf"{esc}[[:space:]]*\(", True, False
+        return rf"\b{esc}[[:space:]]*\(", True, False
     if kind == "macro":
         return rf"\b{esc}\b", True, False
     if kind == "struct":
@@ -61,6 +61,57 @@ def run_definition_locator(
         if kind == "include":
             old_locations = _locate_include_header(accessor, "old", name)
             new_locations = _locate_include_header(accessor, "new", name)
+        elif kind == "field":
+            owner_structs = sorted(
+                {
+                    str(u.get("owner_struct", "")).strip()
+                    for u in uses
+                    if str(u.get("owner_struct", "")).strip()
+                }
+            )
+            if owner_structs:
+                old_locations = []
+                new_locations = []
+                for owner in owner_structs[:4]:
+                    old_locations.extend(_locate_struct_definition(accessor, "old", owner, field_name=name, module_path=module_path))
+                    new_locations.extend(_locate_struct_definition(accessor, "new", owner, field_name=name, module_path=module_path))
+            else:
+                pattern, regex, fixed = _symbol_pattern(name, kind)
+                search_paths = _search_pathspecs_for_kind(kind, module_path)
+                old_hits = accessor.search(
+                    "old",
+                    pattern,
+                    regex=regex,
+                    fixed=fixed,
+                    pathspecs=search_paths,
+                    max_hits=40,
+                )
+                new_hits = accessor.search(
+                    "new",
+                    pattern,
+                    regex=regex,
+                    fixed=fixed,
+                    pathspecs=search_paths,
+                    max_hits=40,
+                )
+                old_locations = [
+                    {
+                        "path": h.path,
+                        "line": h.line,
+                        "match": h.text.strip()[:500],
+                        "locator": h.locator,
+                    }
+                    for h in old_hits
+                ]
+                new_locations = [
+                    {
+                        "path": h.path,
+                        "line": h.line,
+                        "match": h.text.strip()[:500],
+                        "locator": h.locator,
+                    }
+                    for h in new_hits
+                ]
         else:
             pattern, regex, fixed = _symbol_pattern(name, kind)
             if kind == "function":
@@ -121,6 +172,9 @@ def run_definition_locator(
                     pathspecs=search_paths,
                     max_hits=40,
                 )
+                if kind in {"macro", "enum"}:
+                    old_hits = _filter_constant_like_hits(old_hits, name)
+                    new_hits = _filter_constant_like_hits(new_hits, name)
 
             old_locations = [
                 {
@@ -152,6 +206,7 @@ def run_definition_locator(
                 "line": u.get("line"),
                 "enclosing_function": u.get("enclosing_function"),
                 "code": u.get("code"),
+                "owner_struct": u.get("owner_struct"),
             }
             for u in uses
         ]
@@ -218,6 +273,42 @@ def _locate_include_header(accessor: RepositoryAccessor, side: str, include_name
     return locations
 
 
+def _locate_struct_definition(
+    accessor: RepositoryAccessor,
+    side: str,
+    struct_name: str,
+    *,
+    field_name: str | None = None,
+    module_path: str | None = None,
+) -> list[dict]:
+    pattern = rf"\bstruct\s+{re.escape(struct_name)}\s*\{{"
+    hits = accessor.search(
+        side,
+        pattern,
+        regex=True,
+        fixed=False,
+        pathspecs=["include/*", "arch/*/include/*"] + ([_module_family_pathspec(module_path)] if _module_family_pathspec(module_path) else []),
+        max_hits=24,
+    )
+    out = []
+    for h in hits:
+        out.append(
+            {
+                "path": h.path,
+                "line": h.line,
+                "match": (
+                    f"struct {struct_name} definition"
+                    + (f" provider for field .{field_name}" if field_name else "")
+                    + f": {h.text.strip()[:360]}"
+                ),
+                "locator": h.locator,
+                "owner_struct": struct_name,
+                "field": field_name,
+            }
+        )
+    return out
+
+
 def _search_pathspecs_for_kind(kind: str, module_path: str | None = None) -> list[str]:
     module_family = _module_family_pathspec(module_path)
     if kind in {"enum", "macro", "field", "struct", "global", "unknown"}:
@@ -241,6 +332,22 @@ def _filter_function_like_hits(hits, symbol_name: str):
     return out
 
 
+def _filter_constant_like_hits(hits, symbol_name: str):
+    out = []
+    for h in hits:
+        text = h.text.strip()
+        if re.search(rf"^\s*#\s*define\s+{re.escape(symbol_name)}\b", text):
+            out.append(h)
+            continue
+        if re.search(rf"^\s*{re.escape(symbol_name)}\s*(?:=|,)", text):
+            out.append(h)
+            continue
+        if re.search(rf"[{{,]\s*{re.escape(symbol_name)}\s*(?:=|,)", text):
+            out.append(h)
+            continue
+    return out
+
+
 def _looks_like_decl_or_def(line: str, symbol_name: str) -> bool:
     text = line.strip()
     if not text:
@@ -254,10 +361,17 @@ def _looks_like_decl_or_def(line: str, symbol_name: str) -> bool:
     idx = text.find(symbol_name)
     if idx < 0:
         return False
+    before = text[idx - 1] if idx > 0 else ""
+    after_idx = idx + len(symbol_name)
+    after = text[after_idx] if after_idx < len(text) else ""
+    if (before and (before.isalnum() or before == "_")) or (after and (after.isalnum() or after == "_")):
+        return False
     prefix = text[:idx]
 
     # Reject common call-site shapes.
     if any(prefix.rstrip().endswith(k) for k in ("return", "if", "for", "while", "switch", "sizeof")):
+        return False
+    if re.search(r"\b(if|for|while|switch|return)\s*\([^;{}]*$", prefix):
         return False
     if "->" in prefix or "." in prefix or "=" in prefix:
         return False

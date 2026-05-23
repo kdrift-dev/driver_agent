@@ -1,0 +1,13 @@
+diff --git a/drivers/video/fbdev/mmp/panel/tpo_tj032md01bw.c b/drivers/video/fbdev/mmp/panel/tpo_tj032md01bw.c
+index 34fae588e202..d111ec2a4703 100644
+--- a/drivers/video/fbdev/mmp/panel/tpo_tj032md01bw.c
++++ b/drivers/video/fbdev/mmp/panel/tpo_tj032md01bw.c
+@@ -144,7 +144,7 @@ static int tpohvga_probe(struct spi_device *spi)
+ 		return ret;
+ 	}
+ 
+-	plat_data = kzalloc(sizeof(*plat_data), GFP_KERNEL);
++	plat_data = kzalloc_obj(*plat_data);
+ 	if (plat_data == NULL)
+ 		return -ENOMEM;
+ 

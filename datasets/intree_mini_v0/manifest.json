@@ -1,0 +1,600 @@
+{
+  "cases": [
+    {
+      "module_path": "drivers/dax/hmem",
+      "category": "soft_reserved_resource_helper_migration",
+      "driver_change_summary": "walk_iomem_res_desc -> walk_soft_reserve_res; region_intersects -> region_intersects_soft_reserve",
+      "kernel_cause_summary": "v7.0-rc1 adds soft-reserve resource helpers used by hmem.",
+      "why_kernel_evolution_driven": "The reference patch replaces generic iomem/resource queries parameterized by IORES_DESC_SOFT_RESERVED with new kernel helpers that encode the Soft Reserved contract directly.",
+      "workflow_focus": "Non-allocation API replacement; affected-function discovery should include both hmem_init and hmem_register_device.",
+      "kernel_symbols": [
+        "walk_iomem_res_desc",
+        "walk_soft_reserve_res",
+        "region_intersects",
+        "region_intersects_soft_reserve",
+        "IORES_DESC_SOFT_RESERVED"
+      ],
+      "required_added_symbols": [
+        "walk_soft_reserve_res",
+        "region_intersects_soft_reserve"
+      ],
+      "expected_removed_patterns": [
+        "walk_iomem_res_desc",
+        "region_intersects("
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_dax_hmem__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/dax/hmem",
+        "status": "existing",
+        "marker_files_from": "Makefile",
+        "marker_files_to": "Makefile",
+        "file_count": "3",
+        "source_file_count": "2",
+        "code_loc": "267",
+        "target_file_count": "3",
+        "target_source_file_count": "2",
+        "target_code_loc": "267",
+        "changed_files": "2",
+        "added_loc": "4",
+        "deleted_loc": "4",
+        "modified_loc": "8",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/dax/hmem/device.c",
+        "drivers/dax/hmem/hmem.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/pmdomain/st",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(*genpd_data), GFP_KERNEL) -> kzalloc_obj(*genpd_data)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The old call allocates exactly one object; the new kernel provides an object-aware allocation helper for this pattern.",
+      "workflow_focus": "Simple semantic migration in init/probe-style code.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_pmdomain_st__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/pmdomain/st",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "3",
+        "source_file_count": "1",
+        "code_loc": "94",
+        "target_file_count": "3",
+        "target_source_file_count": "1",
+        "target_code_loc": "94",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/pmdomain/st/ste-ux500-pm-domain.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/soc/nuvoton",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(*attr), GFP_KERNEL) -> kzalloc_obj(*attr)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The allocation is a single-object allocation and matches the new object-aware helper contract.",
+      "workflow_focus": "Small module with init/exit resource pairing.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_soc_nuvoton__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/soc/nuvoton",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "3",
+        "source_file_count": "1",
+        "code_loc": "109",
+        "target_file_count": "3",
+        "target_source_file_count": "1",
+        "target_code_loc": "109",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/soc/nuvoton/wpcm450-soc.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/soc/ux500",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(*soc_dev_attr), GFP_KERNEL) -> kzalloc_obj(*soc_dev_attr)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The allocation is a single-object allocation in an init path; the new helper preserves allocation semantics while making object size explicit.",
+      "workflow_focus": "Init path and error cleanup preservation.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_soc_ux500__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/soc/ux500",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "3",
+        "source_file_count": "1",
+        "code_loc": "225",
+        "target_file_count": "3",
+        "target_source_file_count": "1",
+        "target_code_loc": "225",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/soc/ux500/ux500-soc-id.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/video/fbdev/mmp/panel",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(*plat_data), GFP_KERNEL) -> kzalloc_obj(*plat_data)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The old probe allocates one platform-data object; the new kernel helper captures that object allocation idiom.",
+      "workflow_focus": "Probe callback and allocation failure behavior.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_video_fbdev_mmp_panel__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/video/fbdev/mmp/panel",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "3",
+        "source_file_count": "1",
+        "code_loc": "172",
+        "target_file_count": "3",
+        "target_source_file_count": "1",
+        "target_code_loc": "172",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/video/fbdev/mmp/panel/tpo_tj032md01bw.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/gpu/vga",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(*client), GFP_KERNEL) -> kzalloc_obj(*client)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The driver registers a client allocated as one object; the helper replacement is a source-compatible semantic migration.",
+      "workflow_focus": "Registration path and cleanup pairing.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_gpu_vga__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/gpu/vga",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "3",
+        "source_file_count": "1",
+        "code_loc": "1077",
+        "target_file_count": "3",
+        "target_source_file_count": "1",
+        "target_code_loc": "1077",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/gpu/vga/vga_switcheroo.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/media/mmc/siano",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(struct smssdio_device), GFP_KERNEL) -> kzalloc_obj(struct smssdio_device)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The reference patch converts a one-struct allocation to the new object-aware helper.",
+      "workflow_focus": "Probe path in media/mmc.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_media_mmc_siano__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/media/mmc/siano",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "3",
+        "source_file_count": "1",
+        "code_loc": "351",
+        "target_file_count": "3",
+        "target_source_file_count": "1",
+        "target_code_loc": "351",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/media/mmc/siano/smssdio.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/media/dvb-frontends/cxd2880",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(struct cxd2880_priv), GFP_KERNEL) -> kzalloc_obj(struct cxd2880_priv)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The modified call is a direct single-struct allocation; the new helper removes the manual sizeof expression.",
+      "workflow_focus": "Large module and focused-source prompt stress test.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_media_dvb-frontends_cxd2880__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/media/dvb-frontends/cxd2880",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "31",
+        "source_file_count": "29",
+        "code_loc": "12245",
+        "target_file_count": "31",
+        "target_source_file_count": "29",
+        "target_code_loc": "12245",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/media/dvb-frontends/cxd2880/cxd2880.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_common.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_common.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_devio_spi.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_devio_spi.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_dtv.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_dvbt.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_dvbt2.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_integ.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_integ.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_io.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_io.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_spi.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_spi_device.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_spi_device.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_driver_version.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2_mon.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt2_mon.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt_mon.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_dvbt_mon.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_mon.c",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_tnrdmd_mon.h",
+        "drivers/media/dvb-frontends/cxd2880/cxd2880_top.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/target/tcm_remote",
+      "category": "allocator_object_helper_migration",
+      "driver_change_summary": "kzalloc(sizeof(*remote_hba), GFP_KERNEL) -> kzalloc_obj(*remote_hba)",
+      "kernel_cause_summary": "slab introduces kmalloc_obj/kzalloc_obj family and treewide object allocation migration.",
+      "why_kernel_evolution_driven": "The old code allocates one HBA object and then initializes it; the reference patch adopts the object-aware allocator helper.",
+      "workflow_focus": "Target subsystem; spec may over- or under-constrain string/configfs behavior.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_obj"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof"
+      ],
+      "kselftest_targets": [],
+      "case_id": "drivers_target_tcm_remote__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/target/tcm_remote",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "4",
+        "source_file_count": "2",
+        "code_loc": "288",
+        "target_file_count": "4",
+        "target_source_file_count": "2",
+        "target_code_loc": "288",
+        "changed_files": "1",
+        "added_loc": "1",
+        "deleted_loc": "1",
+        "modified_loc": "2",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/target/tcm_remote/tcm_remote.c",
+        "drivers/target/tcm_remote/tcm_remote.h"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    },
+    {
+      "module_path": "drivers/dma-buf/heaps",
+      "category": "allocator_and_memory_semantics_migration",
+      "driver_change_summary": "kzalloc_obj/kmalloc_objs conversions plus clear_page and GFP accounting adjustment",
+      "kernel_cause_summary": "object-aware allocator helpers are introduced; memory zeroing/accounting semantics are adjusted in heap allocation paths.",
+      "why_kernel_evolution_driven": "The patch combines allocator helper migration with memory-management semantic updates in dma-buf heap allocation code.",
+      "workflow_focus": "kselftest-friendly multi-edit case; tests can exercise dma-buf heap allocation paths.",
+      "kernel_symbols": [
+        "kzalloc",
+        "kzalloc_obj",
+        "kmalloc_array",
+        "kmalloc_objs",
+        "clear_page",
+        "__GFP_ACCOUNT"
+      ],
+      "required_added_symbols": [
+        "kzalloc_obj",
+        "kmalloc_objs",
+        "clear_page",
+        "__GFP_ACCOUNT"
+      ],
+      "expected_removed_patterns": [
+        "kzalloc(sizeof",
+        "kmalloc_array",
+        "memset(vaddr, 0, PAGE_SIZE)"
+      ],
+      "kselftest_targets": [
+        "dmabuf-heaps",
+        "drivers/dma-buf"
+      ],
+      "case_id": "drivers_dma-buf_heaps__v6.19__v7.0-rc1",
+      "old_ref": "v6.19",
+      "new_ref": "v7.0-rc1",
+      "evaluation_only": true,
+      "reference_diff_policy": "reference.diff is for evaluation/manual annotation only and must not be used as Driver-Agent input",
+      "include_kernel_commit_info": false,
+      "metadata_from_candidate_csv": {
+        "from_ref": "v6.19",
+        "to_ref": "v7.0-rc1",
+        "module_path": "drivers/dma-buf/heaps",
+        "status": "existing",
+        "marker_files_from": "Kconfig;Makefile",
+        "marker_files_to": "Kconfig;Makefile",
+        "file_count": "4",
+        "source_file_count": "2",
+        "code_loc": "883",
+        "target_file_count": "4",
+        "target_source_file_count": "2",
+        "target_code_loc": "886",
+        "changed_files": "2",
+        "added_loc": "12",
+        "deleted_loc": "9",
+        "modified_loc": "21",
+        "binary_files": "0"
+      },
+      "old_source_files": [
+        "drivers/dma-buf/heaps/cma_heap.c",
+        "drivers/dma-buf/heaps/system_heap.c"
+      ],
+      "case_pack_files": {
+        "reference_diff": "reference.diff",
+        "old_module_sources": "old_module_sources/",
+        "kernel_evidence": "kernel_evidence.json",
+        "expected_semantic_keys": "expected_semantic_keys.json",
+        "workflow_artifacts": "workflow_artifacts.json"
+      }
+    }
+  ]
+}

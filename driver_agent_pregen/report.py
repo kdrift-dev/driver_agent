@@ -22,6 +22,7 @@ def run_final_report_builder(
     context_packet: dict[str, Any],
     patch_generation: Optional[dict[str, Any]] = None,
     validation: Optional[dict[str, Any]] = None,
+    validation_summary: Optional[dict[str, Any]] = None,
     stage_timings: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     reports_dir = out_dir / "reports"
@@ -29,6 +30,9 @@ def run_final_report_builder(
 
     changed_defs = [i for i in kernel_diffs.get("items", []) if i.get("definition_changed")]
     affected = impact_graph.get("affected_functions", [])
+    edit_required = impact_graph.get("edit_required_functions", [])
+    edit_candidate = impact_graph.get("edit_candidate_functions", [])
+    context_only = impact_graph.get("context_only_functions", impact_graph.get("context_functions", []))
 
     report_json = {
         "case_id": case_id,
@@ -41,6 +45,9 @@ def run_final_report_builder(
             "module_loc_old": module_source.get("module_loc_old", 0),
         },
         "kernel_side_changed_definitions": changed_defs,
+        "edit_required_functions": edit_required,
+        "edit_candidate_functions": edit_candidate,
+        "context_only_functions": context_only,
         "affected_driver_functions": affected,
         "top_down_context": {
             "callback_roots": callback_graph.get("roots", []),
@@ -53,6 +60,7 @@ def run_final_report_builder(
         "patch_guidance": context_packet.get("patch_generation_guidance", []),
         "patch_generation": patch_generation or {},
         "validation": validation or {},
+        "validation_summary_v2": validation_summary or {},
         "stage_timings": stage_timings or [],
         "known_uncertainty": context_packet.get("open_questions", []),
         "recommended_next_step": "Use patch_generation candidate + validation outputs to iterate until compile/runtime checks pass.",
@@ -79,10 +87,15 @@ def run_final_report_builder(
     md.append("")
 
     md.append("## Affected driver functions")
+    md.append(
+        f"- edit_required={len(edit_required)}, edit_candidate={len(edit_candidate)}, "
+        f"context_only={len(context_only)}"
+    )
     if affected:
         for fn in affected:
             syms = ", ".join(fn.get("uses_changed_kernel_symbols", []))
-            md.append(f"- {fn.get('function')} ({fn.get('file')}): {syms}")
+            scope = fn.get("edit_scope", "unknown")
+            md.append(f"- [{scope}] {fn.get('function')} ({fn.get('file')}): {syms}")
     else:
         md.append("- none detected")
     md.append("")
@@ -131,6 +144,19 @@ def run_final_report_builder(
         md.append(f"- qemu_runs: {qemu.get('detected_qemu_runs', 0)}")
         post = validation.get("post_reasoning", {})
         md.append(f"- post_reasoning_verdict: {post.get('overall_verdict', 'UNKNOWN')}")
+    else:
+        md.append("- not executed")
+    md.append("")
+
+    md.append("## Validation Summary v2")
+    if validation_summary:
+        md.append(f"- overall_evidence_status: {validation_summary.get('overall_evidence_status', 'unknown')}")
+        md.append(f"- not_a_correctness_proof: {validation_summary.get('not_a_correctness_proof', True)}")
+        for level in validation_summary.get("levels", []):
+            md.append(f"- L{level.get('level')} {level.get('name')}: {level.get('status')}")
+        caveat = validation_summary.get("input_policy", {}).get("spec_consistency_caveat", "")
+        if caveat:
+            md.append(f"- spec_consistency_caveat: {caveat}")
     else:
         md.append("- not executed")
     md.append("")

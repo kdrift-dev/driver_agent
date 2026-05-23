@@ -1,0 +1,9 @@
+{
+  "required_added_symbols": [
+    "kzalloc_obj"
+  ],
+  "expected_removed_patterns": [
+    "kzalloc(sizeof"
+  ],
+  "notes": "Semantic keys are evaluation metrics, not exact patch equality requirements."
+}

@@ -1,0 +1,13 @@
+diff --git a/drivers/soc/nuvoton/wpcm450-soc.c b/drivers/soc/nuvoton/wpcm450-soc.c
+index c5e0d11c383b..5511bd284773 100644
+--- a/drivers/soc/nuvoton/wpcm450-soc.c
++++ b/drivers/soc/nuvoton/wpcm450-soc.c
+@@ -74,7 +74,7 @@ static int __init wpcm450_soc_init(void)
+ 		return -ENODEV;
+ 	}
+ 
+-	attr = kzalloc(sizeof(*attr), GFP_KERNEL);
++	attr = kzalloc_obj(*attr);
+ 	if (!attr)
+ 		return -ENOMEM;
+ 

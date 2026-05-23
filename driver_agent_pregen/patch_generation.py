@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 import difflib
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .llm_client import LLMClient
 from .patch_line_fixer import fix_patch_line_numbers
-from .prompts import build_patch_generation_prompt
-from .utils import read_json, read_text, write_json, write_text
+from .prompts import build_baseline_patch_generation_prompt, build_patch_generation_prompt
+from .utils import read_json, read_text, truncate_text, write_json, write_text
 
 
 def _extract_diff_text(text: str) -> str:
@@ -76,6 +77,9 @@ def _normalize_patch_semantics(patch_text: str) -> tuple[str, list[str]]:
     - When patch introduces `region_intersects_soft_reserve(...)`, avoid
       collapsing `if (rc != REGION_INTERSECTS)` into `if (!rc)`.
     """
+    if os.environ.get("DRIVER_AGENT_ALLOW_CASE_SPECIFIC_FIXUPS") != "1":
+        return patch_text, []
+
     msgs: list[str] = []
     lines = patch_text.splitlines()
     out: list[str] = []
@@ -190,6 +194,27 @@ def _extract_function_block(
     }
 
 
+def _record_to_source_candidate(item: dict[str, Any], role: str) -> dict[str, Any] | None:
+    fn = str(item.get("function", "") or "").strip()
+    rel_file = str(item.get("file", "") or "").strip()
+    if not fn or not rel_file:
+        return None
+    try:
+        start = int(item.get("start_line", 1) or 1)
+        end = int(item.get("end_line", start) or start)
+    except Exception:
+        start = 1
+        end = 1
+    return {
+        "name": fn,
+        "file": rel_file,
+        "start_line": start,
+        "end_line": end,
+        "role": role,
+        "source_meta": item,
+    }
+
+
 def _build_focused_old_sources(
     *,
     extracted_dir: Path,
@@ -199,39 +224,55 @@ def _build_focused_old_sources(
     max_chars_per_block: int = 12000,
     max_blocks: int = 80,
 ) -> list[dict[str, Any]]:
+    required = list(impact_graph.get("edit_required_functions", []) or [])
+    candidates = list(impact_graph.get("edit_candidate_functions", []) or [])
+    context_only = list(impact_graph.get("context_only_functions", []) or impact_graph.get("context_functions", []) or [])
     affected = list(impact_graph.get("affected_functions", []) or [])
-    if not affected:
+
+    # Backward compatibility for old run artifacts without explicit edit scopes.
+    if not required and not candidates and affected:
+        required = [x for x in affected if str(x.get("edit_scope", "edit_required")) == "edit_required"]
+        candidates = [x for x in affected if str(x.get("edit_scope", "")) == "edit_candidate"]
+        if not required and not candidates:
+            required = affected
+
+    if not required and not candidates and not context_only:
         return []
 
     roles_by_fn: dict[str, set[str]] = defaultdict(set)
     records_by_fn: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    source_meta_by_fn: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-    for af in affected:
-        fn = str(af.get("function", "")).strip()
-        if not fn:
-            continue
-        roles_by_fn[fn].add("affected")
+    def add_record(item: dict[str, Any], role: str) -> None:
+        rec = _record_to_source_candidate(item, role)
+        if not rec:
+            return
+        fn = str(rec["name"])
+        roles_by_fn[fn].add(role)
+        records_by_fn[fn].append(rec)
+        source_meta_by_fn[fn].append(dict(item))
 
-        file_rel = str(af.get("file", "")).strip()
-        if file_rel:
-            records_by_fn[fn].append(
-                {
-                    "name": fn,
-                    "file": file_rel,
-                    "start_line": int(af.get("start_line", 1)),
-                    "end_line": int(af.get("end_line", af.get("start_line", 1))),
-                }
-            )
+    for item in required:
+        add_record(item, "edit_required")
 
+    for item in candidates:
+        add_record(item, "edit_candidate")
+
+    for item in context_only:
+        add_record(item, "context_only")
+
+    # Add direct callers / callback roots as read-only context unless they are
+    # already edit_required/edit_candidate.
+    for af in required + candidates:
         for caller in af.get("ordinary_callers", []) or []:
             c = str(caller or "").strip()
             if c:
-                roles_by_fn[c].add("direct_caller")
+                roles_by_fn[c].add("context_direct_caller")
 
         for cb in af.get("callback_roots", []) or []:
             root_fn = str((cb or {}).get("root_function", "")).strip()
             if root_fn:
-                roles_by_fn[root_fn].add("callback_root")
+                roles_by_fn[root_fn].add("context_callback_root")
 
     fn_index = _load_driver_function_index(extracted_dir)
     blocks: list[dict[str, Any]] = []
@@ -267,6 +308,34 @@ def _build_focused_old_sources(
             )
             if not block:
                 continue
+            meta_items = source_meta_by_fn.get(fn_name, [])
+            is_editable = bool({"edit_required", "edit_candidate"} & set(roles))
+            if "context_only" in roles and not is_editable:
+                block["source_item_kind"] = "context_function_block"
+            block["editable"] = is_editable
+            block["edit_scope"] = (
+                "edit_required"
+                if "edit_required" in roles
+                else "edit_candidate"
+                if "edit_candidate" in roles
+                else "context_only"
+            )
+            block["candidate_reasons"] = sorted(
+                {
+                    str(x)
+                    for meta in meta_items
+                    for x in (meta.get("candidate_reasons", []) or [])
+                    if str(x).strip()
+                }
+            )
+            block["context_reasons"] = sorted(
+                {
+                    str(x)
+                    for meta in meta_items
+                    for x in (meta.get("context_reasons", []) or [])
+                    if str(x).strip()
+                }
+            )
             blocks.append(block)
             if len(blocks) >= max_blocks:
                 return blocks
@@ -282,6 +351,385 @@ def _collect_file_contents(extracted_dir: Path, paths: Iterable[str]) -> dict[st
         if p.exists() and p.is_file():
             out[rel] = read_text(p)
     return out
+
+
+def _function_key(item: dict[str, Any]) -> tuple[str, str] | None:
+    fn = str(item.get("function", "") or "").strip()
+    path = str(item.get("file", "") or "").strip()
+    if not fn or not path:
+        return None
+    return (path, fn)
+
+
+def _edit_scope_payload(impact_graph: dict[str, Any]) -> dict[str, Any]:
+    required = list(impact_graph.get("edit_required_functions", []) or [])
+    candidates = list(impact_graph.get("edit_candidate_functions", []) or [])
+    context_only = list(impact_graph.get("context_only_functions", []) or impact_graph.get("context_functions", []) or [])
+
+    def slim(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = []
+        for item in items:
+            out.append(
+                {
+                    "function": item.get("function"),
+                    "file": item.get("file"),
+                    "edit_scope": item.get("edit_scope"),
+                    "tier": item.get("tier"),
+                    "candidate_reasons": item.get("candidate_reasons", []),
+                    "context_reasons": item.get("context_reasons", []),
+                    "uses_changed_kernel_symbols": item.get("uses_changed_kernel_symbols", []),
+                }
+            )
+        return out
+
+    return {
+        "policy": impact_graph.get("affected_tier_policy", {}),
+        "edit_required_functions": slim(required),
+        "edit_candidate_functions": slim(candidates),
+        "context_only_functions": slim(context_only),
+        "editable_functions": slim(required + candidates),
+        "rule_summary": (
+            "edit_required functions are default edit targets; edit_candidate functions may be edited only "
+            "when candidate evidence is cited; context_only functions are non-editable reasoning context."
+        ),
+    }
+
+
+def _source_payload_summary(
+    *,
+    mode: str,
+    requested_mode: str,
+    old_sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    kinds: dict[str, int] = defaultdict(int)
+    editable = 0
+    readonly = 0
+    paths: set[str] = set()
+    for item in old_sources:
+        kinds[str(item.get("source_item_kind", "unknown"))] += 1
+        paths.add(str(item.get("path", "")))
+        if bool(item.get("editable")):
+            editable += 1
+        else:
+            readonly += 1
+    return {
+        "requested_mode": requested_mode,
+        "actual_mode": mode,
+        "full_module_fallback_used": requested_mode == "focused" and mode == "full_module",
+        "source_item_count": len(old_sources),
+        "editable_source_items": editable,
+        "readonly_context_source_items": readonly,
+        "source_item_kinds": dict(sorted(kinds.items())),
+        "source_paths": sorted(p for p in paths if p),
+        "policy": (
+            "focused mode provides edit-scope function slices plus read-only context slices; "
+            "full module source is supplied only when focused extraction is empty or when full_module is explicitly requested"
+        ),
+    }
+
+
+def _load_function_ranges(extracted_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    payload = read_json(extracted_dir / "driver_functions.json", default={}) or {}
+    by_file: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for fn in payload.get("functions", []) or []:
+        if not isinstance(fn, dict):
+            continue
+        file_rel = str(fn.get("file", "") or "").strip()
+        name = str(fn.get("name", "") or "").strip()
+        if not file_rel or not name:
+            continue
+        try:
+            start = int(fn.get("start_line", 0) or 0)
+            end = int(fn.get("end_line", start) or start)
+        except Exception:
+            continue
+        if start <= 0 or end < start:
+            continue
+        by_file[file_rel].append({"function": name, "start_line": start, "end_line": end})
+    for funcs in by_file.values():
+        funcs.sort(key=lambda x: (int(x["start_line"]), int(x["end_line"])))
+    return dict(by_file)
+
+
+def _parse_touched_function_scopes(patch_text: str, extracted_dir: Path) -> list[dict[str, Any]]:
+    ranges = _load_function_ranges(extracted_dir)
+    touched: list[dict[str, Any]] = []
+    current_file = ""
+    hunk_re = re.compile(r"@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@")
+
+    def flush_modified_points(file_rel: str, points: list[int], hunk_start: int, hunk_end: int) -> None:
+        if not file_rel or not points:
+            return
+        matched = False
+        for fn in ranges.get(file_rel, []):
+            start = int(fn["start_line"])
+            end = int(fn["end_line"])
+            if not any(start <= p <= end for p in points):
+                continue
+            touched.append(
+                {
+                    "file": file_rel,
+                    "function": fn["function"],
+                    "start_line": start,
+                    "end_line": end,
+                    "hunk_old_start": hunk_start,
+                    "hunk_old_end": hunk_end,
+                    "modified_old_lines": sorted(set(points)),
+                    "scope_kind": "function",
+                }
+            )
+            matched = True
+        if not matched:
+            touched.append(
+                {
+                    "file": file_rel,
+                    "function": None,
+                    "hunk_old_start": hunk_start,
+                    "hunk_old_end": hunk_end,
+                    "modified_old_lines": sorted(set(points)),
+                    "scope_kind": "global_or_unknown",
+                }
+            )
+
+    old_line = 0
+    hunk_start = 0
+    hunk_end = 0
+    modified_points: list[int] = []
+    last_deleted_old_line: int | None = None
+
+    for line in (patch_text or "").splitlines():
+        if line.startswith("diff --git ") or line.startswith("--- "):
+            flush_modified_points(current_file, modified_points, hunk_start, hunk_end)
+            modified_points = []
+            old_line = 0
+            hunk_start = 0
+            hunk_end = 0
+            last_deleted_old_line = None
+        if line.startswith("--- a/"):
+            current_file = line[len("--- a/") :].strip()
+            continue
+        if line.startswith("@@") and current_file:
+            flush_modified_points(current_file, modified_points, hunk_start, hunk_end)
+            modified_points = []
+            old_line = 0
+            hunk_start = 0
+            hunk_end = 0
+            last_deleted_old_line = None
+            m = hunk_re.search(line)
+            if not m:
+                continue
+            old_start = int(m.group(1))
+            old_count = int(m.group(2) or "1")
+            old_line = old_start
+            hunk_start = old_start
+            hunk_end = old_start if old_count <= 0 else old_start + old_count - 1
+            continue
+        if not current_file or not hunk_start:
+            continue
+        if line.startswith("\\"):
+            continue
+        if line.startswith("-") and not line.startswith("---"):
+            modified_points.append(old_line)
+            last_deleted_old_line = old_line
+            old_line += 1
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            # Insertions have no old-side line number. Attribute them to the
+            # insertion point in the old file so policy checks still identify
+            # the containing function without counting unchanged context. If
+            # this is a replacement, keep the inserted line attached to the
+            # just-deleted old line instead of drifting into the next function.
+            modified_points.append(last_deleted_old_line if last_deleted_old_line is not None else max(hunk_start, old_line))
+            continue
+        if line.startswith(" "):
+            last_deleted_old_line = None
+            old_line += 1
+
+    flush_modified_points(current_file, modified_points, hunk_start, hunk_end)
+
+    # de-duplicate repeated hunks in the same function while keeping enough evidence.
+    dedup: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, int, int, tuple[int, ...]]] = set()
+    for item in touched:
+        key = (
+            str(item.get("file", "")),
+            str(item.get("function", "")),
+            int(item.get("hunk_old_start", 0) or 0),
+            int(item.get("hunk_old_end", 0) or 0),
+            tuple(int(x) for x in item.get("modified_old_lines", []) or []),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(item)
+    return dedup
+
+
+def _edit_scope_policy_check(
+    *,
+    patch_text: str,
+    extracted_dir: Path,
+    impact_graph: dict[str, Any],
+    candidate_rationale_text: str = "",
+) -> dict[str, Any]:
+    required = {_function_key(x) for x in impact_graph.get("edit_required_functions", []) or []}
+    candidates = {_function_key(x) for x in impact_graph.get("edit_candidate_functions", []) or []}
+    context_only = {
+        _function_key(x)
+        for x in (impact_graph.get("context_only_functions", []) or impact_graph.get("context_functions", []) or [])
+    }
+    required.discard(None)
+    candidates.discard(None)
+    context_only.discard(None)
+    editable = set(required) | set(candidates)
+    candidate_meta: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in impact_graph.get("edit_candidate_functions", []) or []:
+        key = _function_key(item)
+        if key:
+            candidate_meta[key] = item
+
+    touched = _parse_touched_function_scopes(patch_text, extracted_dir)
+    violations: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    rationale_low = str(candidate_rationale_text or "").lower()
+    for item in touched:
+        if item.get("scope_kind") != "function":
+            warnings.append({"reason": "global_or_unknown_hunk", **item})
+            continue
+        key = (str(item.get("file", "")), str(item.get("function", "")))
+        modified_lines = {int(x) for x in item.get("modified_old_lines", []) or []}
+        if key not in editable and modified_lines:
+            overlap_covered = True
+            for point in modified_lines:
+                if not any(
+                    other is not item
+                    and other.get("scope_kind") == "function"
+                    and (str(other.get("file", "")), str(other.get("function", ""))) in editable
+                    and point in {int(x) for x in other.get("modified_old_lines", []) or []}
+                    for other in touched
+                ):
+                    overlap_covered = False
+                    break
+            if overlap_covered:
+                warnings.append({"reason": "overlapping_function_boundary_covered_by_editable_scope", **item})
+                continue
+        if key in context_only:
+            violations.append({"reason": "context_only_function_modified", **item})
+            continue
+        if key not in editable:
+            violations.append({"reason": "function_outside_edit_scope", **item})
+            continue
+        if key in candidates:
+            meta = candidate_meta.get(key, {})
+            fn_low = key[1].lower()
+            reason_terms = [str(x).lower() for x in meta.get("candidate_reasons", []) or [] if str(x).strip()]
+            evidence_terms = [str(x).lower() for x in meta.get("candidate_evidence", []) or [] if str(x).strip()]
+            cites_fn = fn_low in rationale_low
+            cites_reason = any(t and t in rationale_low for t in reason_terms)
+            cites_evidence = any(t and t[:120] in rationale_low for t in evidence_terms)
+            if not (cites_fn and (cites_reason or cites_evidence)):
+                violations.append(
+                    {
+                        "reason": "edit_candidate_modified_without_cited_candidate_evidence",
+                        "candidate_reasons": meta.get("candidate_reasons", []),
+                        "candidate_evidence": meta.get("candidate_evidence", []),
+                        **item,
+                    }
+                )
+
+    return {
+        "ok": not violations,
+        "violations": violations,
+        "warnings": warnings,
+        "touched_function_scopes": touched,
+        "allowed_edit_required": sorted([{"file": p, "function": f} for p, f in required], key=lambda x: (x["file"], x["function"])),
+        "allowed_edit_candidate": sorted([{"file": p, "function": f} for p, f in candidates], key=lambda x: (x["file"], x["function"])),
+    }
+
+
+def _drop_policy_violation_hunks(patch_text: str, violations: list[dict[str, Any]]) -> tuple[str, list[str]]:
+    """Remove whole hunks that policy already proved outside editable scope.
+
+    This is intentionally conservative: only scope violations with exact file
+    and old hunk coordinates are dropped. If the resulting patch no longer has
+    effective changes, callers still reject it.
+    """
+    drop_keys = {
+        (
+            str(v.get("file", "")),
+            int(v.get("hunk_old_start", 0) or 0),
+            int(v.get("hunk_old_end", 0) or 0),
+        )
+        for v in violations
+        if str(v.get("reason", "")) in {"function_outside_edit_scope", "context_only_function_modified"}
+    }
+    drop_keys.discard(("", 0, 0))
+    if not drop_keys:
+        return patch_text, []
+
+    hunk_re = re.compile(r"@@\s+-(\d+)(?:,(\d+))?\s+\+\d+(?:,\d+)?\s+@@")
+    lines = (patch_text or "").splitlines(keepends=True)
+    out: list[str] = []
+    removed: list[str] = []
+    section_header: list[str] = []
+    section_hunks: list[list[str]] = []
+    current_file = ""
+    current_hunk: list[str] | None = None
+    current_hunk_key: tuple[str, int, int] | None = None
+
+    def flush_section() -> None:
+        nonlocal section_header, section_hunks, current_hunk, current_hunk_key
+        if current_hunk is not None:
+            if current_hunk_key in drop_keys:
+                removed.append(f"{current_hunk_key[0]}:{current_hunk_key[1]}-{current_hunk_key[2]}")
+            else:
+                section_hunks.append(current_hunk)
+            current_hunk = None
+            current_hunk_key = None
+        if section_hunks:
+            out.extend(section_header)
+            for h in section_hunks:
+                out.extend(h)
+        section_header = []
+        section_hunks = []
+
+    for line in lines:
+        if line.startswith("diff --git "):
+            flush_section()
+            section_header = [line]
+            current_file = ""
+            continue
+        if not section_header:
+            out.append(line)
+            continue
+        if line.startswith("--- a/"):
+            current_file = line[len("--- a/") :].strip()
+            section_header.append(line)
+            continue
+        if line.startswith("@@"):
+            if current_hunk is not None:
+                if current_hunk_key in drop_keys:
+                    removed.append(f"{current_hunk_key[0]}:{current_hunk_key[1]}-{current_hunk_key[2]}")
+                else:
+                    section_hunks.append(current_hunk)
+            m = hunk_re.search(line)
+            if m:
+                old_start = int(m.group(1))
+                old_count = int(m.group(2) or "1")
+                old_end = old_start if old_count <= 0 else old_start + old_count - 1
+                current_hunk_key = (current_file, old_start, old_end)
+            else:
+                current_hunk_key = None
+            current_hunk = [line]
+            continue
+        if current_hunk is not None:
+            current_hunk.append(line)
+        else:
+            section_header.append(line)
+
+    flush_section()
+    pruned = "".join(out)
+    return pruned, removed
 
 
 def _list_module_source_paths(extracted_dir: Path, module_path: str) -> list[str]:
@@ -425,6 +873,68 @@ def _has_strong_semantic_obligations(compatibility_obligations: dict[str, Any]) 
     return False
 
 
+def _slim_kernel_definition_diffs(kernel_definition_diffs: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep baseline kernel evidence compact and evidence-only."""
+    payload = kernel_definition_diffs or {}
+    items_out: list[dict[str, Any]] = []
+    for item in payload.get("items", []) or []:
+        if not isinstance(item, dict):
+            continue
+        old_locations = item.get("old_locations", []) or []
+        new_locations = item.get("new_locations", []) or []
+        change_type = str(item.get("change_type_guess", "") or "unknown")
+        has_signal = bool(
+            item.get("definition_changed")
+            or item.get("migration_signal")
+            or (old_locations and not new_locations)
+            or (new_locations and not old_locations)
+            or change_type not in {"", "unknown"}
+        )
+        if not has_signal:
+            continue
+
+        commits_out: list[dict[str, Any]] = []
+        for commit in item.get("commits", []) or []:
+            if not isinstance(commit, dict):
+                continue
+            commits_out.append(
+                {
+                    "hash": commit.get("hash", ""),
+                    "subject": commit.get("subject", ""),
+                    "message": truncate_text(str(commit.get("message", "") or ""), max_chars=1200),
+                    "changed_files": commit.get("changed_files", []) or [],
+                    "diff_excerpt": truncate_text(str(commit.get("diff_excerpt", "") or ""), max_chars=2500),
+                }
+            )
+
+        items_out.append(
+            {
+                "symbol": item.get("symbol", ""),
+                "kind": item.get("kind", ""),
+                "used_by_driver": item.get("used_by_driver", []) or [],
+                "old_locations": old_locations,
+                "new_locations": new_locations,
+                "old_definition": truncate_text(str(item.get("old_definition", "") or ""), max_chars=2000),
+                "new_definition": truncate_text(str(item.get("new_definition", "") or ""), max_chars=2000),
+                "definition_changed": bool(item.get("definition_changed")),
+                "definition_diff": truncate_text(str(item.get("definition_diff", "") or ""), max_chars=4000),
+                "change_type_guess": change_type,
+                "migration_signal": item.get("migration_signal"),
+                "replacement_candidates": item.get("replacement_candidates", []) or [],
+                "commits": commits_out[:8],
+                "confidence": item.get("confidence", ""),
+                "open_questions": item.get("open_questions", []) or [],
+            }
+        )
+
+    return {
+        "affected_func_signal_mode": payload.get("affected_func_signal_mode", ""),
+        "commit_exclude_prefixes": payload.get("commit_exclude_prefixes", []) or [],
+        "semantic_obligation_table": payload.get("semantic_obligation_table", ""),
+        "items": items_out,
+    }
+
+
 def run_patch_generation_agent(
     *,
     llm_client: LLMClient,
@@ -442,17 +952,58 @@ def run_patch_generation_agent(
     prompt_strength: str = "normal",
     source_mode: str = "full_module",
     source_with_line_numbers: bool = True,
+    patch_generation_mode: str = "agent",
+    old_ref: str | None = None,
+    new_ref: str | None = None,
+    kernel_definition_diffs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     stage_dir = llm_calls_dir / "03_patch_generation"
     stage_dir.mkdir(parents=True, exist_ok=True)
     patch_runs_dir = run_dir / "patch_runs"
     patch_runs_dir.mkdir(parents=True, exist_ok=True)
 
-    mode = str(source_mode or "full_module").strip().lower()
-    if mode not in {"full_module", "focused"}:
-        mode = "full_module"
+    generation_mode = str(patch_generation_mode or "agent").strip().lower()
+    if generation_mode not in {"agent", "baseline_source_only", "baseline_kernel_evidence"}:
+        raise ValueError(
+            f"unsupported patch_generation_mode={patch_generation_mode!r}; "
+            "expected one of: agent, baseline_source_only, baseline_kernel_evidence"
+        )
 
-    if mode == "focused":
+    requested_source_mode = str(source_mode or "focused").strip().lower()
+    mode = requested_source_mode
+    if mode not in {"full_module", "focused"}:
+        mode = "focused"
+        requested_source_mode = "focused"
+    if generation_mode != "agent":
+        # Baselines intentionally receive full old-module source only; no affected graph is used
+        # to choose or narrow edit scope.
+        mode = "full_module"
+        requested_source_mode = "full_module"
+
+    deterministic_noop = generation_mode == "agent" and _should_emit_auto_noop(
+        compatibility_obligations=compatibility_obligations,
+        impact_graph=impact_graph,
+    )
+
+    source_payload_summary_override: dict[str, Any] | None = None
+    if deterministic_noop:
+        # No LLM patch-generation call is needed when there are no obligations
+        # and no affected functions. Do not load full module source as a
+        # fallback here; doing so misrepresents what the patch agent consumed.
+        old_sources: list[dict[str, Any]] = []
+        mode = requested_source_mode if requested_source_mode in {"focused", "full_module"} else "focused"
+        source_payload_summary_override = {
+            "requested_source_mode": requested_source_mode,
+            "actual_source_mode": "none",
+            "full_module_fallback_used": False,
+            "source_item_count": 0,
+            "editable_source_items": 0,
+            "readonly_context_source_items": 0,
+            "source_item_kinds": {},
+            "source_paths": [],
+            "reason": "deterministic_noop_short_circuit_without_llm_source_payload",
+        }
+    elif mode == "focused":
         old_sources = _build_focused_old_sources(
             extracted_dir=extracted_dir,
             module_path=module_path,
@@ -474,33 +1025,82 @@ def run_patch_generation_agent(
             with_line_numbers=bool(source_with_line_numbers),
         )
 
-    input_payload = {
-        "case_id": case_id,
-        "module_path": module_path,
-        "max_candidates": max_candidates,
-        "patch_source_mode": mode,
-        "patch_source_with_line_numbers": bool(source_with_line_numbers),
-        "compatibility_obligations": compatibility_obligations,
-        "impact_graph": impact_graph,
-        "pre_reasoning": pre_reasoning,
-        "context_packet": {
-            "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
-            "patch_generation_guidance": context_packet.get("patch_generation_guidance", []),
-            "hard_validation_plan": context_packet.get("hard_validation_plan", []),
-            "semantic_validation_plan": context_packet.get("semantic_validation_plan", []),
-            "open_questions": context_packet.get("open_questions", []),
-        },
-        "old_module_sources": old_sources,
-        "instruction": "Generate unified diff patch candidate(s) for migration. Keep patch minimal and evidence-grounded.",
-    }
+    if generation_mode == "agent":
+        input_payload = {
+            "case_id": case_id,
+            "module_path": module_path,
+            "max_candidates": max_candidates,
+            "patch_generation_mode": generation_mode,
+            "patch_source_mode": mode,
+            "patch_source_with_line_numbers": bool(source_with_line_numbers),
+            "source_payload_summary": source_payload_summary_override or _source_payload_summary(
+                mode=mode,
+                requested_mode=requested_source_mode,
+                old_sources=old_sources,
+            ),
+            "compatibility_obligations": compatibility_obligations,
+            "impact_graph": impact_graph,
+            "edit_scope_policy": _edit_scope_payload(impact_graph),
+            "pre_reasoning": pre_reasoning,
+            "context_packet": {
+                "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
+                "patch_generation_guidance": context_packet.get("patch_generation_guidance", []),
+                "hard_validation_plan": context_packet.get("hard_validation_plan", []),
+                "semantic_validation_plan": context_packet.get("semantic_validation_plan", []),
+                "open_questions": context_packet.get("open_questions", []),
+            },
+            "old_module_sources": old_sources,
+            "instruction": "Generate unified diff patch candidate(s) for migration. Keep patch minimal and evidence-grounded.",
+        }
+    else:
+        input_payload = {
+            "case_id": case_id,
+            "module_path": module_path,
+            "old_ref": old_ref,
+            "new_ref": new_ref,
+            "max_candidates": max_candidates,
+            "patch_generation_mode": generation_mode,
+            "patch_source_mode": mode,
+            "patch_source_with_line_numbers": bool(source_with_line_numbers),
+            "source_payload_summary": _source_payload_summary(
+                mode=mode,
+                requested_mode=requested_source_mode,
+                old_sources=old_sources,
+            ),
+            "old_module_sources": old_sources,
+            "instruction": "Generate baseline patch candidate(s). Use only fields present in this baseline input.",
+        }
+        if generation_mode == "baseline_kernel_evidence":
+            input_payload["kernel_definition_diffs"] = _slim_kernel_definition_diffs(kernel_definition_diffs)
+            relevant_patch_path = extracted_dir / "kernel_relevant_diff.patch"
+            input_payload["kernel_relevant_diff"] = (
+                truncate_text(read_text(relevant_patch_path), max_chars=16000)
+                if relevant_patch_path.exists()
+                else ""
+            )
 
     strict_mode = str(prompt_strength or "normal").strip().lower() == "strict"
-    prompt = build_patch_generation_prompt(
-        input_payload,
-        strict_mode=strict_mode,
-        source_mode=mode,
-        source_with_line_numbers=bool(source_with_line_numbers),
-    )
+    if generation_mode == "baseline_source_only":
+        prompt = build_baseline_patch_generation_prompt(
+            input_payload,
+            baseline_mode="source_only",
+            strict_mode=strict_mode,
+            source_with_line_numbers=bool(source_with_line_numbers),
+        )
+    elif generation_mode == "baseline_kernel_evidence":
+        prompt = build_baseline_patch_generation_prompt(
+            input_payload,
+            baseline_mode="kernel_evidence",
+            strict_mode=strict_mode,
+            source_with_line_numbers=bool(source_with_line_numbers),
+        )
+    else:
+        prompt = build_patch_generation_prompt(
+            input_payload,
+            strict_mode=strict_mode,
+            source_mode=mode,
+            source_with_line_numbers=bool(source_with_line_numbers),
+        )
     default_output = {
         "case_id": case_id,
         "stage": "patch_generation",
@@ -508,10 +1108,6 @@ def run_patch_generation_agent(
         "module_level_notes": ["dry-run or no-provider placeholder"],
     }
 
-    deterministic_noop = _should_emit_auto_noop(
-        compatibility_obligations=compatibility_obligations,
-        impact_graph=impact_graph,
-    )
     if deterministic_noop:
         write_text(stage_dir / "prompt.md", prompt)
         write_json(stage_dir / "input.json", input_payload)
@@ -539,7 +1135,9 @@ def run_patch_generation_agent(
     normalized: list[dict[str, Any]] = []
     policy_rejections: list[dict[str, Any]] = []
     rejected_noop_candidates: list[dict[str, Any]] = []
-    strong_semantic_required = _has_strong_semantic_obligations(compatibility_obligations)
+    strong_semantic_required = (
+        _has_strong_semantic_obligations(compatibility_obligations) if generation_mode == "agent" else False
+    )
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
         cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
@@ -607,6 +1205,79 @@ def run_patch_generation_agent(
             candidate_patch = raw_diff
             fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
 
+        scope_check = (
+            _edit_scope_policy_check(
+                patch_text=candidate_patch,
+                extracted_dir=extracted_dir,
+                impact_graph=impact_graph,
+                candidate_rationale_text=" ".join(
+                    [
+                        str(cand.get("strategy", "") or ""),
+                        str(cand.get("rationale", "") or ""),
+                        " ".join(str(x) for x in cand.get("evidence", []) or []),
+                    ]
+                ),
+            )
+            if generation_mode == "agent" and candidate_patch
+            else {"ok": True, "violations": [], "warnings": [], "touched_function_scopes": []}
+        )
+        if not scope_check.get("ok", True):
+            pruned_patch, removed_hunks = _drop_policy_violation_hunks(
+                candidate_patch,
+                list(scope_check.get("violations", []) or []),
+            )
+            if removed_hunks and _has_effective_changes(pruned_patch):
+                pruned_touched = _list_touched_files_from_patch(pruned_patch)
+                pruned_file_map = _collect_file_contents(extracted_dir, pruned_touched)
+                pruned_fixed_ok, pruned_fixed_text, pruned_fix_msgs = fix_patch_line_numbers(
+                    pruned_patch,
+                    file_contents=pruned_file_map,
+                )
+                pruned_candidate_patch = pruned_fixed_text if pruned_fixed_text else pruned_patch
+                pruned_candidate_patch, pruned_sem_msgs = _normalize_patch_semantics(pruned_candidate_patch)
+                pruned_fix_msgs.extend(pruned_sem_msgs)
+                pruned_scope_check = _edit_scope_policy_check(
+                    patch_text=pruned_candidate_patch,
+                    extracted_dir=extracted_dir,
+                    impact_graph=impact_graph,
+                    candidate_rationale_text=" ".join(
+                        [
+                            str(cand.get("strategy", "") or ""),
+                            str(cand.get("rationale", "") or ""),
+                            " ".join(str(x) for x in cand.get("evidence", []) or []),
+                        ]
+                    ),
+                )
+                if pruned_fixed_ok and pruned_scope_check.get("ok", True):
+                    fix_msgs.append("pruned_edit_scope_violation_hunks:" + ",".join(removed_hunks))
+                    fix_msgs.extend(pruned_fix_msgs)
+                    candidate_patch = pruned_candidate_patch
+                    touched = pruned_touched
+                    fixed_ok = pruned_fixed_ok
+                    scope_check = pruned_scope_check
+
+        if not scope_check.get("ok", True):
+            fix_msgs.append("rejected_by_edit_scope_policy")
+            fix_report = {
+                "candidate_id": cid,
+                "raw_patch_nonempty": bool(raw_diff.strip()),
+                "line_fix_ok": fixed_ok,
+                "messages": fix_msgs,
+                "touched_files": touched,
+                "no_op_candidate": False,
+                "rejected_by_policy": True,
+                "edit_scope_policy_check": scope_check,
+            }
+            write_json(cdir / "patch_fix_report.json", fix_report)
+            policy_rejections.append(
+                {
+                    "candidate_id": cid,
+                    "reason": "edit_scope_policy_violation",
+                    "violations": scope_check.get("violations", []),
+                }
+            )
+            continue
+
         fixed_path = cdir / "02_fixed_patch.diff"
         write_text(fixed_path, candidate_patch)
 
@@ -617,6 +1288,7 @@ def run_patch_generation_agent(
             "messages": fix_msgs,
             "touched_files": touched,
             "no_op_candidate": no_op_candidate,
+            "edit_scope_policy_check": scope_check,
         }
         write_json(cdir / "patch_fix_report.json", fix_report)
 
@@ -633,10 +1305,11 @@ def run_patch_generation_agent(
                 "line_fix_ok": fixed_ok,
                 "line_fix_messages": fix_msgs,
                 "no_op_candidate": no_op_candidate,
+                "edit_scope_policy_check": scope_check,
             }
         )
 
-    if not normalized:
+    if not normalized and generation_mode == "agent":
         heur = _heuristic_patch_from_guidance(
             extracted_dir=extracted_dir,
             module_path=module_path,
@@ -700,6 +1373,70 @@ def run_patch_generation_agent(
                 candidate_patch = raw_patch
                 fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
             if not reject_heur_candidate:
+                scope_check = (
+                    _edit_scope_policy_check(
+                        patch_text=candidate_patch,
+                        extracted_dir=extracted_dir,
+                        impact_graph=impact_graph,
+                        candidate_rationale_text=f"heuristic_fallback {heur.get('reason', '')} pre_reasoning.patch_guidance",
+                    )
+                    if candidate_patch
+                    else {"ok": True, "violations": [], "warnings": [], "touched_function_scopes": []}
+                )
+                if not scope_check.get("ok", True):
+                    pruned_patch, removed_hunks = _drop_policy_violation_hunks(
+                        candidate_patch,
+                        list(scope_check.get("violations", []) or []),
+                    )
+                    if removed_hunks and _has_effective_changes(pruned_patch):
+                        pruned_touched = _list_touched_files_from_patch(pruned_patch)
+                        pruned_file_map = _collect_file_contents(extracted_dir, pruned_touched)
+                        pruned_fixed_ok, pruned_fixed_text, pruned_fix_msgs = fix_patch_line_numbers(
+                            pruned_patch,
+                            file_contents=pruned_file_map,
+                        )
+                        pruned_candidate_patch = pruned_fixed_text if pruned_fixed_text else pruned_patch
+                        pruned_candidate_patch, pruned_sem_msgs = _normalize_patch_semantics(pruned_candidate_patch)
+                        pruned_fix_msgs.extend(pruned_sem_msgs)
+                        pruned_scope_check = _edit_scope_policy_check(
+                            patch_text=pruned_candidate_patch,
+                            extracted_dir=extracted_dir,
+                            impact_graph=impact_graph,
+                            candidate_rationale_text=f"heuristic_fallback {heur.get('reason', '')} pre_reasoning.patch_guidance",
+                        )
+                        if pruned_fixed_ok and pruned_scope_check.get("ok", True):
+                            fix_msgs.append("pruned_edit_scope_violation_hunks:" + ",".join(removed_hunks))
+                            fix_msgs.extend(pruned_fix_msgs)
+                            candidate_patch = pruned_candidate_patch
+                            touched = pruned_touched
+                            fixed_ok = pruned_fixed_ok
+                            scope_check = pruned_scope_check
+
+                if not scope_check.get("ok", True):
+                    fix_msgs.append("rejected_by_edit_scope_policy")
+                    fix_report = {
+                        "candidate_id": cid,
+                        "raw_patch_nonempty": bool(raw_patch.strip()),
+                        "line_fix_ok": fixed_ok,
+                        "messages": fix_msgs,
+                        "touched_files": touched,
+                        "fallback_reason": heur.get("reason", ""),
+                        "no_op_candidate": False,
+                        "rejected_by_policy": True,
+                        "edit_scope_policy_check": scope_check,
+                    }
+                    write_json(cdir / "patch_fix_report.json", fix_report)
+                    policy_rejections.append(
+                        {
+                            "candidate_id": cid,
+                            "reason": "edit_scope_policy_violation",
+                            "fallback": "heuristic",
+                            "violations": scope_check.get("violations", []),
+                        }
+                    )
+                    reject_heur_candidate = True
+
+            if not reject_heur_candidate:
                 fixed_path = cdir / "02_fixed_patch.diff"
                 write_text(fixed_path, candidate_patch)
 
@@ -711,6 +1448,7 @@ def run_patch_generation_agent(
                     "touched_files": touched,
                     "fallback_reason": heur.get("reason", ""),
                     "no_op_candidate": no_op_candidate,
+                    "edit_scope_policy_check": scope_check,
                 }
                 write_json(cdir / "patch_fix_report.json", fix_report)
 
@@ -727,6 +1465,7 @@ def run_patch_generation_agent(
                         "line_fix_ok": fixed_ok,
                         "line_fix_messages": fix_msgs,
                         "no_op_candidate": no_op_candidate,
+                        "edit_scope_policy_check": scope_check,
                     }
                 )
 
@@ -802,7 +1541,14 @@ def run_patch_generation_agent(
     out = {
         "case_id": case_id,
         "stage": "patch_generation",
+        "patch_generation_mode": generation_mode,
         "patch_source_mode": mode,
+        "requested_patch_source_mode": requested_source_mode,
+        "source_payload_summary": source_payload_summary_override or _source_payload_summary(
+            mode=mode,
+            requested_mode=requested_source_mode,
+            old_sources=old_sources,
+        ),
         "patch_source_with_line_numbers": bool(source_with_line_numbers),
         "parse_status": llm_output.get("parse_status", "unknown"),
         "module_level_notes": llm_output.get("module_level_notes", []),

@@ -565,14 +565,14 @@ def build_dataset(args: argparse.Namespace) -> None:
 
     with (out_dir / "manifest.csv").open("w", newline="", encoding="utf-8") as f:
         fieldnames = list(manifest_rows[0].keys())
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(manifest_rows)
     write_json(out_dir / "manifest.json", {"cases": manifest_json})
 
     with (out_dir / "kselftest_v0.csv").open("w", newline="", encoding="utf-8") as f:
         fieldnames = ["module_path", "targets", "recommended_command", "dataset_role", "qemu_notes"]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for item in KSELFTEST_V0:
             writer.writerow({**item, "targets": ";".join(item["targets"])})

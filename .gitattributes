@@ -1,0 +1,3 @@
+# Case-pack reference patches contain unified-diff context lines. Treat them as
+# artifacts so whitespace checks do not flag valid patch syntax as source code.
+datasets/intree_mini_v0/cases/**/reference.diff -diff

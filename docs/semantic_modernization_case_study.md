@@ -71,4 +71,3 @@ Policy for that future mode:
 - It must report results separately from required compatibility repair.
 - It must not use target driver new-version diff as generation input.
 - It should mark edits as modernization, not correctness-required repair, unless stronger kernel-side contract evidence exists.
-

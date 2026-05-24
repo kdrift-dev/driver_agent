@@ -43,6 +43,7 @@ Constraints:
 1. Patch MUST only touch files under module_path unless clearly required by evidence.
 2. Preserve ownership, error path, locking, and cleanup semantics.
 3. Do not invent kernel APIs. Use only APIs appearing in evidence or obligations.
+3a. Preserve return-value conventions. If a replacement helper returns int or an enum-like status, do not convert existing comparisons into boolean checks unless evidence explicitly says the new helper returns bool.
 4. Respect edit_scope_policy:
    - edit_required functions are default edit targets.
    - edit_candidate functions may be edited only when rationale cites their candidate evidence.
@@ -92,6 +93,7 @@ Constraints:
 1. Do not use or assume target driver new-version source, target driver diff, reference patch, compatibility obligations, affected-function graph, pre-specs, or pre/post reasoning unless they are explicitly present in the baseline input.
 2. Patch MUST only touch files under module_path.
 3. Preserve ownership, error path, locking, cleanup, and existing driver behavior unless the input gives evidence for a required migration.
+3a. Preserve return-value conventions. If a replacement helper returns int or an enum-like status, do not rewrite existing comparisons as boolean checks unless the supplied evidence explicitly says the helper returns bool.
 4. If the input does not provide enough evidence for a code change, emit an explicit no-op candidate with empty patch_diff.
 5. Do not invent kernel APIs. In kernel-evidence mode, use only APIs appearing in the supplied kernel evidence or old module source.
 6. Output MUST be strict JSON matching the required schema.

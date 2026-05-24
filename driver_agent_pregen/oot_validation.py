@@ -33,7 +33,7 @@ _STAGES = [
     "test_generation",
     "suite_execution",
     "qemu_execution",
-    "post_reasoning",
+    "spec_consistency",
 ]
 
 
@@ -257,12 +257,57 @@ def _extract_slice(text: str, start_line: int, end_line: int, pad: int = 20) -> 
     return "\n".join(f"{n:5d}: {lines[n - 1]}" for n in range(start, end + 1))
 
 
-def _collect_oot_patched_slices(source_patched: Path, module_path: str, impact_graph: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_include_block(text: str, *, max_lines: int = 140) -> str:
+    lines = text.splitlines()
+    out: list[str] = []
+    saw_include = False
+    for n, line in enumerate(lines[:max_lines], start=1):
+        stripped = line.strip()
+        if stripped.startswith("#include"):
+            saw_include = True
+            out.append(f"{n:5d}: {line}")
+            continue
+        if not saw_include:
+            if not stripped or stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+                out.append(f"{n:5d}: {line}")
+                continue
+            if stripped.startswith("#") and not stripped.startswith("#include"):
+                out.append(f"{n:5d}: {line}")
+                continue
+        else:
+            if not stripped or stripped.startswith("#include"):
+                out.append(f"{n:5d}: {line}")
+                continue
+            break
+    return "\n".join(out)
+
+
+def _direct_include_requirement_files(compatibility_obligations: dict[str, Any]) -> set[str]:
+    files: set[str] = set()
+    for obl in compatibility_obligations.get("obligations", []) or []:
+        for ev in obl.get("evidence", []) or []:
+            if ev.get("type") != "direct_include_requirement":
+                continue
+            value = ev.get("value") or {}
+            rel = str(value.get("file") or "").strip()
+            if rel:
+                files.add(rel)
+    return files
+
+
+def _collect_oot_patched_slices(
+    source_patched: Path,
+    module_path: str,
+    impact_graph: dict[str, Any],
+    compatibility_obligations: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     out = []
+    include_files: set[str] = set()
     for afn in impact_graph.get("affected_functions", []) or []:
         rel = str(afn.get("file", "") or "")
         if not rel:
             continue
+        include_files.add(rel)
         root_rel = _strip_module_prefix(rel, module_path)
         p = source_patched / root_rel
         if not p.exists():
@@ -274,6 +319,23 @@ def _collect_oot_patched_slices(source_patched: Path, module_path: str, impact_g
                 "function": afn.get("function"),
                 "file": rel,
                 "slice": _extract_slice(read_text(p), start, end),
+            }
+        )
+    include_files.update(_direct_include_requirement_files(compatibility_obligations or {}))
+    for rel in sorted(include_files):
+        root_rel = _strip_module_prefix(rel, module_path)
+        p = source_patched / root_rel
+        if not p.exists() or p.suffix not in {".c", ".h", ".rs"}:
+            continue
+        block = _extract_include_block(read_text(p))
+        if not block:
+            continue
+        out.append(
+            {
+                "function": "__file_includes__",
+                "file": rel,
+                "source_item_kind": "patched_file_include_block",
+                "slice": block,
             }
         )
     return out
@@ -644,6 +706,7 @@ def run_oot_integrated_validation_agent(
         "suite_execution": {"success": True, "runs": [], "skipped": True, "reason": "oot_qemu_script_runs_inside_qemu"},
         "qemu": {},
         "post_reasoning": {},
+        "spec_consistency": {},
         "validation_stage_results": stage_results,
         "open_questions": [],
     }
@@ -708,6 +771,17 @@ def run_oot_integrated_validation_agent(
     root_patch_path = validation_dir / "oot_root_relative_patch.diff"
     write_text(root_patch_path, root_patch)
     patch_apply = runner.apply_generated_patch(validation_dir, source_patched, root_patch, iteration=None)
+    if (
+        not patch_apply.get("ok")
+        and patch_apply.get("reason") == "empty_patch"
+        and bool(cand.get("no_op_candidate"))
+    ):
+        patch_apply = {
+            **patch_apply,
+            "ok": True,
+            "reason": "no-op candidate; skipped git apply",
+            "method": "no_op_candidate",
+        }
     out["apply"] = {
         "patch_path": patch_path.as_posix(),
         "oot_root_relative_patch_path": root_patch_path.as_posix(),
@@ -717,7 +791,7 @@ def run_oot_integrated_validation_agent(
     if not patch_apply.get("ok"):
         _set_stage(stage_results, "patch_apply", "failed", patch_apply.get("reason", "patch_apply_failed"))
         return finalize("failed")
-    _set_stage(stage_results, "patch_apply", "passed", "patch applied to OOT source root")
+    _set_stage(stage_results, "patch_apply", "passed", str(patch_apply.get("reason") or "patch applied to OOT source root"))
 
     out["stage_patched_files"] = {
         "copied_files": cand.get("touched_files", []),
@@ -850,7 +924,7 @@ def run_oot_integrated_validation_agent(
         }
         _set_stage(stage_results, "qemu_execution", "skipped", "qemu disabled by flag")
 
-    patched_slices = _collect_oot_patched_slices(source_patched, module_path, impact_graph)
+    patched_slices = _collect_oot_patched_slices(source_patched, module_path, impact_graph, compatibility_obligations)
     post_reasoning = run_post_reasoner_agent(
         llm_client=llm_client,
         llm_calls_dir=llm_calls_dir,
@@ -867,19 +941,32 @@ def run_oot_integrated_validation_agent(
     parse_ok = str(post_reasoning.get("parse_status", "")) == "ok"
     verdict = str(post_reasoning.get("overall_verdict", "UNKNOWN")).upper()
     if parse_ok and verdict == "PASS":
-        _set_stage(stage_results, "post_reasoning", "passed", "overall_verdict=PASS")
+        spec_status = "passed"
+        spec_reason = "overall_verdict=PASS"
     elif parse_ok:
-        _set_stage(stage_results, "post_reasoning", "failed", f"overall_verdict={verdict}")
+        spec_status = "failed"
+        spec_reason = f"overall_verdict={verdict}"
     else:
-        _set_stage(stage_results, "post_reasoning", "failed", post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}")
+        spec_status = "failed"
+        spec_reason = post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}"
+    out["spec_consistency"] = {
+        "status": spec_status,
+        "reason": spec_reason,
+        "overall_verdict": verdict,
+        "parse_status": post_reasoning.get("parse_status", ""),
+        "not_a_correctness_proof": True,
+        "caveat": (
+            "This is an LLM consistency check against generated local specs and stated "
+            "obligations; it is not a correctness metric."
+        ),
+    }
+    _set_stage(stage_results, "spec_consistency", spec_status, spec_reason)
 
     ok = bool(
         old_build.get("ok")
         and not new_pre_build.get("ok")
         and post_build.get("ok")
         and (not enable_qemu or (qemu_run and qemu_run.get("ok")))
-        and parse_ok
-        and verdict == "PASS"
     )
     out["timings"] = {"total_sec": round(time.time() - t0, 3)}
     if not old_build.get("ok"):
@@ -891,7 +978,7 @@ def run_oot_integrated_validation_agent(
     if enable_qemu and not (qemu_run and qemu_run.get("ok")):
         out["open_questions"].append("oot_qemu_smoke_not_success")
     if not parse_ok or verdict != "PASS":
-        out["open_questions"].append("post_reasoning_not_pass")
+        out["open_questions"].append("spec_consistency_not_pass")
 
     if not keep_worktrees:
         runner.run(["git", "-C", str(accessor.repo), "worktree", "remove", "-f", str(old_tree)], timeout=300)

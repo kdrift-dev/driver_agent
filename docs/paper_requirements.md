@@ -236,8 +236,22 @@ Unsafe claims until further evidence exists:
 - Which kselftest cases can be executed reliably in QEMU.
 - Whether to add a future optional modernization mode for source-compatible semantic migrations.
 
+## Current ATC-Gap TODOs
+
+These are design TODOs, not requests to add more weak validation layers.
+
+- Semantic-modernization statistics: measure source-compatible modernization patterns such as `kzalloc -> kzalloc_obj` as motivation only. Do not feed these signals into the default pipeline or report them as required correctness repairs.
+- In-tree case scope: align the case definition with the actual analysis scope. A case may be a marker directory, but the source scope should use deepest-marker owned files rather than recursive parent paths. Record code LOC and source file count for every case.
+- Input size boundary: define the supported source-context budget for LLM patch generation. Large modules should use affected slices plus caller/resource context by default; full-module source is fallback/debug only.
+- Dataset construction: build the final dataset only after case-scope cleanup. The mini dataset remains a workflow-debugging set, not the final evaluation set.
+- Correctness validation: strengthen deterministic semantic-key/edit-scope/build/runtime evidence where it answers a real correctness question. Do not add Sparse/Smatch/CBMC/KUnit layers unless they are meaningful for the selected case class.
+- OOT case studies: add small but non-trivial out-of-tree drivers that fail on the new kernel, can be patched, and expose observable QEMU-testable behavior.
+- Related-work comparison: compare against source-only LLM, source+kernel-diff LLM, and deterministic Coccinelle/regex-style baselines where applicable. Reference overlap remains diagnostic, not correctness.
+- Spec consistency: report FM-Agent-style post reasoning as `spec_consistency`, never as a correctness metric.
+
 ## Change Log
 
+- 2026-05-24: Added ATC-gap TODOs and renamed post reasoning's paper-facing role to spec consistency.
 - 2026-05-22: Source-compatible semantic modernization is documented as future work and excluded from the default required-repair workflow.
 - 2026-05-22: Default policy set to no kernel commit information. Commit info is now an explicit private/debug ablation via `--include-kernel-commit-info`.
 - 2026-05-23: QEMU dynamic validation scope documented as strong only for virtual/software-visible interfaces; hardware-dependent drivers remain smoke-only or hardware-required.

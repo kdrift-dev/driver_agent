@@ -143,7 +143,10 @@ def run_final_report_builder(
         md.append(f"- qemu_enabled: {qemu.get('enabled', False)}")
         md.append(f"- qemu_runs: {qemu.get('detected_qemu_runs', 0)}")
         post = validation.get("post_reasoning", {})
-        md.append(f"- post_reasoning_verdict: {post.get('overall_verdict', 'UNKNOWN')}")
+        spec = validation.get("spec_consistency", {})
+        md.append(f"- spec_consistency_verdict: {post.get('overall_verdict', 'UNKNOWN')}")
+        md.append(f"- spec_consistency_status: {spec.get('status', 'unknown')}")
+        md.append("- spec_consistency_is_correctness_metric: false")
     else:
         md.append("- not executed")
     md.append("")

@@ -29,9 +29,21 @@ from .report import run_final_report_builder
 from .repo_utils import RepositoryAccessor
 from .spec_agent import run_pre_spec_agent
 from .symbol_scanner import run_symbol_scanner
-from .utils import now_timestamp, read_text, slugify, write_json, write_text
+from .utils import ensure_dir, now_timestamp, read_text, slugify, write_json, write_text
 from .validation import run_validation_agent
 from .validation_summary import build_validation_summary_v2
+
+
+def _requires_effective_migration_edit(obligations: dict[str, Any]) -> bool:
+    for item in obligations.get("obligations", []) or []:
+        if item.get("hard_checks"):
+            return True
+        if item.get("replacement_candidates") and str(item.get("semantic_strength", "")).lower() == "strong":
+            return True
+    for item in obligations.get("semantic_obligations", []) or []:
+        if str(item.get("strength", "")).lower() == "strong" and item.get("replacement_candidates"):
+            return True
+    return False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -453,6 +465,14 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             "semantic/collateral driver evidence is not part of the default workflow."
         )
 
+    if int(args.jobs or 1) >= 8:
+        # The definition locator can issue multiple git-grep subprocesses in
+        # parallel. Keep each grep single-threaded unless the caller explicitly
+        # overrides it to avoid N workers * M grep threads oversubscription.
+        os.environ.setdefault("DRIVER_AGENT_GIT_GREP_THREADS", "1")
+        metadata["git_grep_threads"] = os.environ.get("DRIVER_AGENT_GIT_GREP_THREADS")
+        write_json(run_dir / "metadata.json", metadata)
+
     pipeline_t0 = time.perf_counter()
     semantic_obligation_table = (
         args.semantic_obligation_table
@@ -525,78 +545,149 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         lambda: run_symbol_scanner(module_result, extracted_dir),
     )
 
-    locations_payload = stage(
-        "03_kernel_definition_locator",
-        lambda: run_definition_locator(
-            accessor,
-            extracted_dir,
-            scan_payload["driver_used_symbols"],
-            module_path=args.module_path,
-        ),
-    )
+    baseline_source_only = str(args.patch_generation_mode or "").strip().lower() == "baseline_source_only"
 
-    kernel_diffs = stage(
-        "04_kernel_definition_diff_builder",
-        lambda: run_kernel_diff_builder(
-            accessor,
-            extracted_dir,
-            locations_payload,
-            args.module_path,
-            collect_commits=bool(args.include_kernel_commit_info),
-            affected_func_signal_mode=args.affected_func_signal_mode,
-            old_ref=args.old_ref,
-            new_ref=args.new_ref,
-            semantic_obligation_table=semantic_obligation_table,
-        ),
-    )
-
-    impact_graph = stage(
-        "05_impact_graph_builder",
-        lambda: run_impact_graph_builder(module_result, extracted_dir, scan_payload, kernel_diffs),
-    )
-
-    if oot_integrated:
-        assert external_source_root is not None
-        oot_pre_patch_build_diagnostics = stage(
-            "05b_oot_pre_patch_build_diagnostics",
-            lambda: collect_oot_pre_patch_build_diagnostics(
-                accessor=accessor,
-                run_dir=run_dir,
-                external_source_root=external_source_root,
-                jobs=args.jobs,
-                make_extra_args=args.oot_make_extra_arg or [],
-            ),
+    if baseline_source_only:
+        metadata["baseline_source_only_policy"] = (
+            "kernel definition location/diff, impact graph, obligations, and pre-patch LLM analysis "
+            "are skipped; the patch LLM receives only old target module source"
         )
-        write_json(extracted_dir / "oot_pre_patch_build_diagnostics.json", oot_pre_patch_build_diagnostics)
-        impact_graph = stage(
-            "05c_oot_compile_diagnostic_impact_filter",
-            lambda: filter_impact_graph_by_oot_compile_diagnostics(
-                impact_graph=impact_graph,
-                diagnostics=oot_pre_patch_build_diagnostics,
-                extracted_dir=extracted_dir,
+        write_json(run_dir / "metadata.json", metadata)
+
+        def _baseline_empty_locations() -> dict[str, Any]:
+            payload = {
+                "items": [],
+                "skipped": True,
+                "skip_reason": "baseline_source_only receives no kernel-side evidence",
+            }
+            write_json(extracted_dir / "kernel_definition_locations.json", payload)
+            return payload
+
+        def _baseline_empty_kernel_diffs() -> dict[str, Any]:
+            payload = {
+                "items": [],
+                "affected_func_signal_mode": args.affected_func_signal_mode,
+                "commit_exclude_prefixes": [args.module_path],
+                "skipped": True,
+                "skip_reason": "baseline_source_only receives no kernel-side evidence",
+            }
+            write_json(extracted_dir / "kernel_definition_diffs.json", payload)
+            write_text(extracted_dir / "kernel_relevant_diff.patch", "")
+            return payload
+
+        def _baseline_empty_impact_graph() -> dict[str, Any]:
+            payload = {
+                "module_path": args.module_path,
+                "affected_functions": [],
+                "edit_required_functions": [],
+                "edit_candidate_functions": [],
+                "context_only_functions": [],
+                "context_functions": [],
+                "editable_functions": [],
+                "edges": [],
+                "affected_tier_policy": {
+                    "skipped": True,
+                    "skip_reason": "baseline_source_only does not use affected-function analysis",
+                },
+                "skipped": True,
+                "skip_reason": "baseline_source_only does not use affected-function analysis",
+            }
+            write_json(extracted_dir / "impact_graph.json", payload)
+            write_json(extracted_dir / "callback_graph.json", {"roots": [], "reachable": {}, "edges": []})
+            ensure_dir(extracted_dir / "affected_function_slices")
+            return payload
+
+        def _baseline_empty_obligations() -> dict[str, Any]:
+            payload = {
+                "obligations": [],
+                "semantic_obligations": [],
+                "semantic_obligation_summary": {"count": 0, "strong_count": 0},
+                "skipped": True,
+                "skip_reason": "baseline_source_only receives no compatibility obligations",
+            }
+            write_json(extracted_dir / "compatibility_obligations.json", payload)
+            return payload
+
+        locations_payload = stage("03_kernel_definition_locator", _baseline_empty_locations)
+        kernel_diffs = stage("04_kernel_definition_diff_builder", _baseline_empty_kernel_diffs)
+        impact_graph = stage("05_impact_graph_builder", _baseline_empty_impact_graph)
+        callback_graph = {"roots": [], "reachable": {}, "edges": []}
+        obligations = stage("06_compatibility_obligation_builder", _baseline_empty_obligations)
+    else:
+        locations_payload = stage(
+            "03_kernel_definition_locator",
+            lambda: run_definition_locator(
+                accessor,
+                extracted_dir,
+                scan_payload["driver_used_symbols"],
                 module_path=args.module_path,
+                exclude_driver_paths=(args.affected_func_signal_mode == "kernel_only"),
+                jobs=max(1, int(args.jobs or 1)),
             ),
         )
-        write_json(extracted_dir / "impact_graph.json", impact_graph)
 
-    callback_graph = {
-        "roots": scan_payload.get("driver_callbacks", {}).get("callbacks", []),
-        "reachable": {},
-        "edges": scan_payload.get("call_graph", {}).get("edges", []),
-    }
+        kernel_diffs = stage(
+            "04_kernel_definition_diff_builder",
+            lambda: run_kernel_diff_builder(
+                accessor,
+                extracted_dir,
+                locations_payload,
+                args.module_path,
+                collect_commits=bool(args.include_kernel_commit_info),
+                affected_func_signal_mode=args.affected_func_signal_mode,
+                old_ref=args.old_ref,
+                new_ref=args.new_ref,
+                semantic_obligation_table=semantic_obligation_table,
+            ),
+        )
 
-    obligations = stage(
-        "06_compatibility_obligation_builder",
-        lambda: run_obligation_builder(
-            extracted_dir,
-            kernel_diffs,
-            impact_graph,
-            old_ref=args.old_ref,
-            new_ref=args.new_ref,
-            module_path=args.module_path,
-            semantic_obligation_table=semantic_obligation_table,
-        ),
-    )
+        impact_graph = stage(
+            "05_impact_graph_builder",
+            lambda: run_impact_graph_builder(module_result, extracted_dir, scan_payload, kernel_diffs),
+        )
+
+        if oot_integrated:
+            assert external_source_root is not None
+            oot_pre_patch_build_diagnostics = stage(
+                "05b_oot_pre_patch_build_diagnostics",
+                lambda: collect_oot_pre_patch_build_diagnostics(
+                    accessor=accessor,
+                    run_dir=run_dir,
+                    external_source_root=external_source_root,
+                    jobs=args.jobs,
+                    make_extra_args=args.oot_make_extra_arg or [],
+                ),
+            )
+            write_json(extracted_dir / "oot_pre_patch_build_diagnostics.json", oot_pre_patch_build_diagnostics)
+            impact_graph = stage(
+                "05c_oot_compile_diagnostic_impact_filter",
+                lambda: filter_impact_graph_by_oot_compile_diagnostics(
+                    impact_graph=impact_graph,
+                    diagnostics=oot_pre_patch_build_diagnostics,
+                    extracted_dir=extracted_dir,
+                    module_path=args.module_path,
+                ),
+            )
+            write_json(extracted_dir / "impact_graph.json", impact_graph)
+
+        callback_graph = {
+            "roots": scan_payload.get("driver_callbacks", {}).get("callbacks", []),
+            "reachable": {},
+            "edges": scan_payload.get("call_graph", {}).get("edges", []),
+        }
+
+        obligations = stage(
+            "06_compatibility_obligation_builder",
+            lambda: run_obligation_builder(
+                extracted_dir,
+                kernel_diffs,
+                impact_graph,
+                old_ref=args.old_ref,
+                new_ref=args.new_ref,
+                module_path=args.module_path,
+                semantic_obligation_table=semantic_obligation_table,
+            ),
+        )
 
     llm_client = LLMClient(
         LLMConfig(
@@ -612,6 +703,24 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         )
     )
 
+    baseline_patch_generation = str(args.patch_generation_mode or "agent").startswith("baseline_")
+    agent_no_required_migration_edit = bool(
+        not baseline_patch_generation and not _requires_effective_migration_edit(obligations)
+    )
+    pre_patch_llm_dry_run = bool(args.dry_run or baseline_patch_generation or agent_no_required_migration_edit)
+    if baseline_patch_generation:
+        metadata["baseline_pre_patch_llm_policy"] = (
+            "pre-spec and pre-reasoner are dry-run in baseline patch-generation modes; "
+            "only the baseline patch prompt calls the LLM"
+        )
+        write_json(run_dir / "metadata.json", metadata)
+    if agent_no_required_migration_edit:
+        metadata["agent_no_required_migration_edit_policy"] = (
+            "No hard or strong semantic compatibility obligation was found; "
+            "pre-spec/pre-reasoner LLM calls are skipped and patch generation may emit a deterministic no-op candidate."
+        )
+        write_json(run_dir / "metadata.json", metadata)
+
     pre_specs = stage(
         "07_pre_patch_spec_agent",
         lambda: run_pre_spec_agent(
@@ -623,7 +732,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             kernel_definition_diffs=kernel_diffs,
             compatibility_obligations=obligations,
             impact_graph=impact_graph,
-            dry_run=args.dry_run,
+            dry_run=pre_patch_llm_dry_run,
         ),
     )
 
@@ -640,7 +749,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             kernel_definition_diffs=kernel_diffs,
             impact_graph=impact_graph,
             callback_graph=callback_graph,
-            dry_run=args.dry_run,
+            dry_run=pre_patch_llm_dry_run,
         ),
     )
 

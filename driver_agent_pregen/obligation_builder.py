@@ -6,6 +6,15 @@ from typing import Any
 from .utils import read_json, write_json
 
 
+_SKIP_SYMBOLS = {
+    "__alignof__",
+    "__alignof",
+    "__builtin_offsetof",
+    "__builtin_types_compatible_p",
+    "sizeof",
+}
+
+
 def _checks_for_change(change_type: str, old_missing_new: bool) -> tuple[list[str], list[str], str]:
     hard: list[str] = []
     semantic: list[str] = []
@@ -71,6 +80,11 @@ def _semantic_obligation_kind(item: dict) -> str | None:
 
 
 def _semantic_strength(item: dict) -> str:
+    if item.get("kernel_side_helper_signal") and item.get("replacement_candidates"):
+        # Kernel-side helper discovery is useful guidance, but it is not direct
+        # proof that the old source-compatible callsite is wrong. Keep it below
+        # "strong" unless a semantic table or hard API evidence reinforces it.
+        return "medium"
     if item.get("migration_signal") and item.get("replacement_candidates"):
         return "strong"
     if item.get("migration_signal"):
@@ -247,6 +261,8 @@ def run_obligation_builder(
     for item in kernel_diffs.get("items", []):
         symbol = item.get("symbol")
         kind = item.get("kind", "unknown")
+        if str(symbol) in _SKIP_SYMBOLS:
+            continue
         sym_key = f"{symbol} ({kind})"
 
         missing_new = any("missing in new_ref" in q for q in item.get("open_questions", []))
@@ -281,8 +297,31 @@ def run_obligation_builder(
                 }
             )
 
-        # Keep obligations focused on concrete migration deltas.
-        if not definition_changed and not missing_new and not effective_migration_signal:
+        # Field/struct regex fallbacks can occasionally attach a nearby kernel
+        # diff hunk to an unlocated driver token. If neither old nor new
+        # locations exist and there is no include or migration signal, this is
+        # not enough evidence for a hard driver obligation.
+        unlocated_type_or_field = (
+            kind in {"field", "struct"}
+            and not (item.get("old_locations") or [])
+            and not (item.get("new_locations") or [])
+            and not item.get("direct_include_requirements")
+            and not missing_new
+            and not effective_migration_signal
+        )
+        if unlocated_type_or_field:
+            continue
+
+        # Keep obligations focused on concrete migration deltas. Include
+        # direct-include obligations even when the provider definition itself
+        # did not change; these capture source files relying on transitive
+        # kernel headers.
+        if (
+            not definition_changed
+            and not missing_new
+            and not effective_migration_signal
+            and effective_change_type != "include_dependency"
+        ):
             continue
         if effective_change_type == "unknown" and not missing_new and not effective_migration_signal:
             continue
@@ -298,6 +337,8 @@ def run_obligation_builder(
                 "value": item.get("definition_diff", "")[:4000],
             }
         ]
+        for req in item.get("direct_include_requirements", [])[:8]:
+            evidence.append({"type": "direct_include_requirement", "value": req})
         evidence.extend(table_evidence)
         for c in item.get("commits", [])[:4]:
             evidence.append(
@@ -323,6 +364,7 @@ def run_obligation_builder(
                 "open_questions": item.get("open_questions", []),
                 "patch_guidance_seed": seed,
                 "migration_signal": effective_migration_signal,
+                "semantic_strength": table_strength,
                 "replacement_candidates": replacement_candidates,
                 "table_hit_rows": [h.get("row_id") for h in table_hits if h.get("row_id")],
             }

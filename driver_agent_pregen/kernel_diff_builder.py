@@ -55,6 +55,117 @@ ALLOC_FAMILY_REPLACEMENTS = {
 SYMBOL_REPLACEMENT_HINTS: dict[str, list[str]] = {}
 
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_HELPER_DECL_RE = re.compile(
+    r"^(?:extern\s+|static\s+inline\s+|static\s+)?"
+    r"(?:[A-Za-z_][A-Za-z0-9_\s\*\[\]]+\s+)+"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+_EXPORT_RE = re.compile(r"\bEXPORT_SYMBOL(?:_GPL)?\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
+_COMMON_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "api",
+    "arg",
+    "args",
+    "bool",
+    "char",
+    "const",
+    "dev",
+    "device",
+    "do",
+    "end",
+    "for",
+    "from",
+    "get",
+    "int",
+    "long",
+    "new",
+    "old",
+    "or",
+    "ptr",
+    "return",
+    "res",
+    "set",
+    "size",
+    "start",
+    "static",
+    "struct",
+    "the",
+    "to",
+    "u64",
+    "unsigned",
+    "void",
+    "desc",
+}
+_HELPER_RELATION_STOP_TOKENS = _COMMON_TOKENS | {
+    # These tokens appear in many helper names and should not by themselves
+    # justify a source-compatible migration signal.
+    "add",
+    "atomic",
+    "begin",
+    "bit",
+    "blk",
+    "bpf",
+    "capable",
+    "class",
+    "classes",
+    "commit",
+    "create",
+    "complete",
+    "data",
+    "del",
+    "delete",
+    "destroy",
+    "drm",
+    "each",
+    "entry",
+    "exit",
+    "first",
+    "free",
+    "helper",
+    "inc",
+    "init",
+    "inner",
+    "ipv6",
+    "list",
+    "lock",
+    "map",
+    "may",
+    "mq",
+    "mutex",
+    "net",
+    "ns",
+    "offset",
+    "page",
+    "payload",
+    "priv",
+    "prog",
+    "queue",
+    "rcu",
+    "read",
+    "refcount",
+    "request",
+    "rq",
+    "skb",
+    "spin",
+    "state",
+    "stop",
+    "test",
+    "unlock",
+    "user",
+    "vblank",
+    "write",
+}
+_OPPOSITE_TOKEN_PAIRS = {
+    ("lock", "unlock"),
+    ("get", "put"),
+    ("alloc", "free"),
+    ("create", "destroy"),
+    ("register", "unregister"),
+    ("enable", "disable"),
+    ("open", "close"),
+}
 
 
 def _is_diff_metadata_line(line: str) -> bool:
@@ -87,6 +198,364 @@ def _strip_lineno_prefix(text: str) -> str:
     for line in (text or "").splitlines():
         lines.append(re.sub(r"^\s*\d+:\s?", "", line))
     return "\n".join(lines)
+
+
+def _normalized_token(token: str) -> str:
+    token = (token or "").lower().strip("_")
+    if not token:
+        return ""
+    if token in {"reserved", "reservation", "reservations"}:
+        return "reserve"
+    if token in {"resources", "resource"}:
+        return "res"
+    if token in {"descs", "descriptor", "descriptors"}:
+        return "desc"
+    return token
+
+
+def _symbol_tokens(text: str) -> set[str]:
+    raw = re.findall(r"[A-Za-z][A-Za-z0-9]*", (text or "").replace("-", "_"))
+    out: set[str] = set()
+    for part in raw:
+        for token in re.split(r"_+", part):
+            token = _normalized_token(token)
+            if not token or token in _COMMON_TOKENS or len(token) <= 1:
+                continue
+            out.add(token)
+    return out
+
+
+def _symbol_base_name(symbol: str) -> str:
+    text = str(symbol or "")
+    m = re.match(r"^(.*) \(([^()]*)\)$", text)
+    if m:
+        return m.group(1).strip()
+    return text.strip()
+
+
+def _safe_kernel_evidence_path(path: str, module_path: str) -> bool:
+    p = (path or "").strip().strip("/")
+    if not p:
+        return False
+    mod = module_path.strip().strip("/")
+    if mod and (p == mod or p.startswith(mod + "/")):
+        return False
+    # Paper-facing default excludes driver diffs, including other drivers.
+    if p == "drivers" or p.startswith("drivers/"):
+        return False
+    if p.startswith(("Documentation/", "tools/", "samples/", "scripts/")):
+        return False
+    return True
+
+
+_INCLUDE_RE = re.compile(r"^\s*#\s*include\s*([<\"])([^>\"]+)[>\"]")
+
+
+def _visible_includes_by_file(extracted_dir: Path, module_path: str) -> tuple[dict[str, set[str]], set[str]]:
+    payload = read_json(extracted_dir / "driver_includes.json", default={}) or {}
+    direct_system: dict[str, set[str]] = {}
+    local_edges: dict[str, set[str]] = {}
+    all_system_headers: set[str] = set()
+
+    module_root = extracted_dir / "old_module_sources" / module_path
+    source_files = {
+        p.relative_to(extracted_dir / "old_module_sources").as_posix()
+        for p in module_root.rglob("*")
+        if p.is_file() and p.suffix in {".c", ".h"}
+    } if module_root.exists() else set()
+
+    def resolve_local(file_rel: str, inc: str) -> str:
+        base = Path(file_rel).parent
+        candidate = (base / inc).as_posix()
+        parts: list[str] = []
+        for part in candidate.split("/"):
+            if part in {"", "."}:
+                continue
+            if part == "..":
+                if parts:
+                    parts.pop()
+                continue
+            parts.append(part)
+        normalized = "/".join(parts)
+        if normalized in source_files:
+            return normalized
+        fallback = (Path(module_path) / inc).as_posix()
+        return fallback if fallback in source_files else ""
+
+    for item in payload.get("includes", []) or []:
+        file_rel = str(item.get("file", "") or "").strip()
+        inc = str(item.get("include", "") or "").strip()
+        if not file_rel or not inc:
+            continue
+        raw_inc = inc.strip("<>\"")
+        if inc.startswith("<"):
+            direct_system.setdefault(file_rel, set()).add(raw_inc)
+            all_system_headers.add(raw_inc)
+            continue
+        target = resolve_local(file_rel, raw_inc)
+        if target:
+            local_edges.setdefault(file_rel, set()).add(target)
+
+    # Parse local headers too. driver_includes.json is source-file oriented; this
+    # closure lets us avoid flagging headers already provided through local
+    # module headers such as vkms_drv.h.
+    for file_rel in sorted(source_files):
+        p = extracted_dir / "old_module_sources" / file_rel
+        try:
+            lines = read_text(p).splitlines()
+        except Exception:
+            continue
+        for line in lines[:120]:
+            m = _INCLUDE_RE.match(line)
+            if not m:
+                continue
+            inc = m.group(2).strip()
+            if m.group(1) == "<":
+                direct_system.setdefault(file_rel, set()).add(inc)
+                all_system_headers.add(inc)
+            else:
+                target = resolve_local(file_rel, inc)
+                if target:
+                    local_edges.setdefault(file_rel, set()).add(target)
+
+    memo: dict[str, set[str]] = {}
+
+    def visible(file_rel: str, stack: tuple[str, ...] = ()) -> set[str]:
+        if file_rel in memo:
+            return set(memo[file_rel])
+        if file_rel in stack:
+            return set()
+        out = set(direct_system.get(file_rel, set()))
+        for local in local_edges.get(file_rel, set()):
+            out.update(visible(local, stack + (file_rel,)))
+        memo[file_rel] = set(out)
+        return out
+
+    all_files = set(source_files) | set(direct_system) | set(local_edges)
+    return {file_rel: visible(file_rel) for file_rel in all_files}, all_system_headers
+
+
+def _include_header_from_provider_path(path: str) -> str:
+    p = str(path or "").strip()
+    if not p.startswith("include/") or not p.endswith(".h"):
+        return ""
+    return p[len("include/") :]
+
+
+def _symbol_header_relation(symbol: str, provider_path: str) -> bool:
+    """Return whether a provider header is specific enough for a direct-include hint."""
+    header = _include_header_from_provider_path(provider_path)
+    if not header:
+        return False
+    stem = Path(header).stem.lower().replace("-", "_")
+    sym = _symbol_base_name(symbol).lower()
+    sym_flat = sym.replace("_", "")
+    stem_flat = stem.replace("_", "")
+    if len(stem_flat) < 5:
+        return False
+    if stem in sym or stem_flat in sym_flat:
+        return True
+    # DRM and subsystem headers often encode a family prefix, e.g.
+    # drm_colorop.h provides struct drm_colorop_state and helpers.
+    stem_tokens = set(stem.split("_"))
+    sym_tokens = set(sym.split("_"))
+    meaningful = stem_tokens - _HELPER_RELATION_STOP_TOKENS
+    return bool(meaningful) and meaningful.issubset(sym_tokens)
+
+
+def _header_includes(text: str, header: str) -> bool:
+    return bool(re.search(rf"^\s*#\s*include\s*<\s*{re.escape(header)}\s*>", text or "", flags=re.M))
+
+
+def _header_lost_transitive_include(
+    accessor: RepositoryAccessor,
+    *,
+    including_header: str,
+    provider_header: str,
+    cache: dict[tuple[str, str], bool],
+) -> bool:
+    if not including_header or not provider_header or including_header == provider_header:
+        return False
+    key = (including_header, provider_header)
+    if key in cache:
+        return cache[key]
+    path = f"include/{including_header}"
+    try:
+        if not accessor.path_exists("old", path) or not accessor.path_exists("new", path):
+            cache[key] = False
+            return False
+        old_text = accessor.read_file("old", path)
+        new_text = accessor.read_file("new", path)
+    except Exception:
+        cache[key] = False
+        return False
+    lost = _header_includes(old_text, provider_header) and not _header_includes(new_text, provider_header)
+    cache[key] = bool(lost)
+    return bool(lost)
+
+
+def _detect_direct_include_requirements(
+    *,
+    accessor: RepositoryAccessor,
+    item: dict[str, Any],
+    symbol: str,
+    module_path: str,
+    visible_includes: dict[str, set[str]],
+    module_system_headers: set[str],
+    transitive_include_loss_cache: dict[tuple[str, str], bool],
+) -> list[dict[str, Any]]:
+    """Identify source files relying on transitive kernel header includes.
+
+    This uses old-driver source plus old/new kernel definition locations only.
+    It does not read the new target driver. The rule is intentionally narrow:
+    the provider must be a public header whose basename is related to the
+    symbol family, and the same file must not already directly include it.
+    """
+    if item.get("kind") not in {"function", "struct"}:
+        return []
+    providers: list[str] = []
+    for loc_key in ("new_locations", "old_locations"):
+        for loc in item.get(loc_key, []) or []:
+            path = str(loc.get("path", "") or "")
+            header = _include_header_from_provider_path(path)
+            if not header:
+                continue
+            if not _safe_kernel_evidence_path(path, module_path):
+                continue
+            if not _symbol_header_relation(symbol, path):
+                continue
+            # Avoid converting every transitive kernel header use into a patch
+            # request. Only require a direct include when the target module
+            # already includes this provider header somewhere, which indicates
+            # the header is a known public dependency in this module.
+            if header not in module_system_headers:
+                continue
+            if header not in providers:
+                providers.append(header)
+    if not providers:
+        return []
+
+    reqs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for use in item.get("used_by_driver", []) or []:
+        file_rel = str(use.get("file", "") or "")
+        if not file_rel.startswith(module_path.rstrip("/") + "/"):
+            continue
+        includes = visible_includes.get(file_rel, set())
+        for header in providers:
+            key = (file_rel, header)
+            if key in seen or header in includes:
+                continue
+            lost_via = sorted(
+                inc
+                for inc in includes
+                if _header_lost_transitive_include(
+                    accessor,
+                    including_header=inc,
+                    provider_header=header,
+                    cache=transitive_include_loss_cache,
+                )
+            )
+            if not lost_via:
+                continue
+            seen.add(key)
+            reqs.append(
+                {
+                    "file": file_rel,
+                    "required_include": f"<{header}>",
+                    "provider_path": f"include/{header}",
+                    "symbol": symbol,
+                    "kind": item.get("kind"),
+                    "line": use.get("line"),
+                    "enclosing_function": use.get("enclosing_function"),
+                    "transitive_include_lost_via": lost_via[:6],
+                    "reason": "old source relied on a transitive kernel header include that is absent in new_ref",
+                }
+            )
+    return reqs
+
+
+def _strip_decl_annotations(text: str) -> str:
+    out = re.sub(r"\s+__\w+\s*\([^;]*?\)", "", text or "")
+    out = re.sub(r"\s+__\w+\b", "", out)
+    return _norm_signature_line(out)
+
+
+def _signature_annotation_only(old_match: str, new_match: str) -> bool:
+    if not old_match or not new_match or old_match == new_match:
+        return False
+    return _strip_decl_annotations(old_match) == _strip_decl_annotations(new_match)
+
+
+def _opposite_operation_pair(old_symbol: str, new_symbol: str) -> bool:
+    old_tokens = _symbol_tokens(old_symbol)
+    new_tokens = _symbol_tokens(new_symbol)
+    for left, right in _OPPOSITE_TOKEN_PAIRS:
+        if left in old_tokens and right in new_tokens:
+            return True
+        if right in old_tokens and left in new_tokens:
+            return True
+    return False
+
+
+def _meaningful_helper_tokens(tokens: set[str]) -> set[str]:
+    return {t for t in tokens if t not in _HELPER_RELATION_STOP_TOKENS}
+
+
+def _allocator_family_relation(old_symbol: str, cand_symbol: str) -> bool:
+    old = (old_symbol or "").lower()
+    cand = (cand_symbol or "").lower()
+    if "alloc" not in old or "alloc" not in cand:
+        return False
+    return cand.endswith(("_obj", "_objs", "_flex"))
+
+
+def _strong_kernel_helper_relation(
+    *,
+    old_symbol: str,
+    cand_symbol: str,
+    old_tokens: set[str],
+    cand_tokens: set[str],
+    context_tokens: set[str],
+) -> tuple[bool, dict[str, int]]:
+    """Conservatively gate kernel-side helper discovery.
+
+    This path must not become a generic "same subsystem changed" signal. It is
+    intended for cases where old/new kernel diffs add a helper that is
+    semantically close to an old-driver callsite, such as soft-reserve helpers.
+    Generic shared tokens like lock/mutex/list/drm/bpf are ignored.
+    """
+    meaningful_old = _meaningful_helper_tokens(old_tokens)
+    meaningful_cand = _meaningful_helper_tokens(cand_tokens)
+    meaningful_context = _meaningful_helper_tokens(context_tokens)
+    overlap = meaningful_old & meaningful_cand
+    context_overlap = meaningful_context & meaningful_cand
+    distinct_context_overlap = context_overlap - meaningful_old
+    stats = {
+        "meaningful_old": len(meaningful_old),
+        "meaningful_candidate": len(meaningful_cand),
+        "meaningful_overlap": len(overlap),
+        "meaningful_context_overlap": len(context_overlap),
+        "distinct_context_overlap": len(distinct_context_overlap),
+    }
+    if not meaningful_old or not meaningful_cand:
+        return False, stats
+
+    if _allocator_family_relation(old_symbol, cand_symbol):
+        # Allocator helpers remain source-compatible modernization signals.
+        # Require at least allocator-family relation plus old-driver context
+        # using a size/object idiom before allowing the signal.
+        allocator_context = meaningful_context & {"object", "obj", "objs", "flex", "struct", "sizeof"}
+        return bool(context_overlap or allocator_context), stats
+
+    # Require a non-generic relation to the old symbol and an extra contextual
+    # token from the old driver. This keeps dax/hmem-style soft-reserve helper
+    # discovery while filtering generic lock/list/refcount helper additions.
+    if not overlap:
+        return False, stats
+    if not distinct_context_overlap:
+        return False, stats
+    return True, stats
 
 
 def _guess_change_type(kind: str, definition_changed: bool, old_exists: bool, new_exists: bool, blob: str) -> str:
@@ -232,6 +701,7 @@ def _merge_replacement_candidates(
             return
         score = int(item.get("score", 1) or 1)
         ev = [str(x) for x in (item.get("evidence", []) or []) if str(x).strip()]
+        paths = [str(x) for x in (item.get("paths", []) or []) if str(x).strip()]
         if source == "table":
             ev = ["semantic_obligation_table"] + ev
         rec = merged.get(sym)
@@ -240,10 +710,12 @@ def _merge_replacement_candidates(
                 "symbol": sym,
                 "score": score,
                 "evidence": dedupe_list(ev)[:8],
+                "paths": dedupe_list(paths)[:8],
             }
             return
         rec["score"] = max(int(rec.get("score", 1) or 1), score)
         rec["evidence"] = dedupe_list(list(rec.get("evidence", [])) + ev)[:8]
+        rec["paths"] = dedupe_list(list(rec.get("paths", [])) + paths)[:8]
 
     for c in base or []:
         add_one(c, "base")
@@ -253,6 +725,71 @@ def _merge_replacement_candidates(
     out = list(merged.values())
     out.sort(key=lambda x: (-int(x.get("score", 1) or 1), str(x.get("symbol", ""))))
     return out[:max_candidates]
+
+
+def _guess_return_type_from_line(line: str, symbol: str) -> str:
+    text = (line or "").strip().rstrip(";")
+    text = re.sub(r"^(?:extern|static|inline|__always_inline)\s+", "", text)
+    m = re.match(rf"(?P<ret>.+?)\b{re.escape(symbol)}\s*\(", text)
+    if not m:
+        return ""
+    return _norm(m.group("ret")).strip()
+
+
+def _enrich_replacement_candidates(
+    accessor: RepositoryAccessor,
+    candidates: list[dict[str, Any]],
+    *,
+    module_path: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for cand in candidates or []:
+        rec = dict(cand)
+        symbol = str(rec.get("symbol", "") or "")
+        if not symbol:
+            out.append(rec)
+            continue
+        raw_paths = [str(p) for p in (rec.get("paths", []) or []) if _safe_kernel_evidence_path(str(p), module_path)]
+        pathspecs = raw_paths or None
+        hits = accessor.search(
+            "new",
+            rf"\b{re.escape(symbol)}\s*\(",
+            regex=True,
+            pathspecs=pathspecs,
+            max_hits=40,
+        )
+        hits = [h for h in hits if _safe_kernel_evidence_path(h.path, module_path)]
+        if not hits:
+            out.append(rec)
+            continue
+
+        def hit_score(hit) -> tuple[int, int]:
+            text = hit.text.strip()
+            score = 0
+            if Path(hit.path).suffix == ".c":
+                score += 30
+            if re.match(rf"^(?:extern\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*\b{re.escape(symbol)}\s*\(", text):
+                score += 20
+            if "EXPORT_SYMBOL" in text:
+                score -= 20
+            return (score, -hit.line)
+
+        best = max(hits, key=hit_score)
+        rec["new_location"] = {
+            "path": best.path,
+            "line": best.line,
+            "match": best.text.strip(),
+            "locator": best.locator,
+        }
+        rec["new_definition_excerpt"] = truncate_text(
+            accessor.file_excerpt("new", best.path, int(best.line or 1), context=10),
+            max_chars=5000,
+        )
+        ret = _guess_return_type_from_line(best.text, symbol)
+        if ret:
+            rec["return_type_guess"] = ret
+        out.append(rec)
+    return out
 
 
 def _table_row_votes(table_hits: list[dict[str, Any]]) -> tuple[bool, str, list[dict[str, Any]], list[str], str]:
@@ -290,6 +827,237 @@ def _confidence_with_table(base_conf: str, table_hits: list[dict[str, Any]], tab
     return out
 
 
+def _build_driver_context_index(locations_payload: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    """Group old-driver symbol uses by file/function without reading new driver code."""
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in locations_payload.get("items", []) or []:
+        symbol = _symbol_base_name(str(item.get("symbol", "") or ""))
+        if not symbol:
+            continue
+        for use in item.get("used_by_driver", []) or []:
+            file_rel = str(use.get("file", "") or "")
+            func = str(use.get("enclosing_function", "") or "")
+            if not file_rel or not func:
+                continue
+            key = (file_rel, func)
+            rec = out.setdefault(key, {"symbols": set(), "tokens": set(), "paths": set()})
+            rec["symbols"].add(symbol)
+            rec["tokens"].update(_symbol_tokens(symbol))
+            rec["tokens"].update(_symbol_tokens(str(use.get("code", "") or "")))
+            for loc in item.get("old_locations", []) or []:
+                path = str(loc.get("path", "") or "")
+                if path:
+                    rec["paths"].add(path)
+            for loc in item.get("new_locations", []) or []:
+                path = str(loc.get("path", "") or "")
+                if path:
+                    rec["paths"].add(path)
+    return out
+
+
+def _context_tokens_for_item(item: dict[str, Any], context_index: dict[tuple[str, str], dict[str, Any]]) -> set[str]:
+    tokens: set[str] = set()
+    for use in item.get("used_by_driver", []) or []:
+        key = (str(use.get("file", "") or ""), str(use.get("enclosing_function", "") or ""))
+        rec = context_index.get(key)
+        if not rec:
+            continue
+        tokens.update(rec.get("tokens", set()))
+    return tokens
+
+
+def _context_paths_for_item(item: dict[str, Any], context_index: dict[tuple[str, str], dict[str, Any]], module_path: str) -> set[str]:
+    paths: set[str] = set()
+    for loc_key in ("old_locations", "new_locations"):
+        for loc in item.get(loc_key, []) or []:
+            path = str(loc.get("path", "") or "")
+            if _safe_kernel_evidence_path(path, module_path):
+                paths.add(path)
+    for use in item.get("used_by_driver", []) or []:
+        key = (str(use.get("file", "") or ""), str(use.get("enclosing_function", "") or ""))
+        rec = context_index.get(key)
+        if not rec:
+            continue
+        for raw in rec.get("paths", set()):
+            path = str(raw or "")
+            if _safe_kernel_evidence_path(path, module_path):
+                paths.add(path)
+    return paths
+
+
+def _kernel_diff_paths(locations_payload: dict[str, Any], module_path: str, max_paths: int = 128) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in locations_payload.get("items", []) or []:
+        for loc_key in ("old_locations", "new_locations"):
+            for loc in item.get(loc_key, []) or []:
+                path = str(loc.get("path", "") or "")
+                if not _safe_kernel_evidence_path(path, module_path):
+                    continue
+                if path in seen:
+                    continue
+                seen.add(path)
+                paths.append(path)
+
+    def priority(path: str) -> tuple[int, str]:
+        if path.startswith("kernel/"):
+            return (0, path)
+        if path.startswith("mm/"):
+            return (1, path)
+        if path.startswith("include/linux/"):
+            return (2, path)
+        if path.startswith("include/"):
+            return (3, path)
+        if path.startswith("arch/"):
+            return (8, path)
+        return (5, path)
+
+    return sorted(paths, key=priority)[:max_paths]
+
+
+def _extract_added_kernel_helpers(accessor: RepositoryAccessor, paths: list[str]) -> list[dict[str, Any]]:
+    """Extract newly added helper declarations/definitions from kernel-side file diffs."""
+    out: dict[str, dict[str, Any]] = {}
+    if not paths:
+        return []
+    for path in paths:
+        diff_text = accessor.refs_diff([path], max_chars=70000)
+        if not diff_text:
+            continue
+        cur_new_line = 0
+        pending_decl_prefix = False
+        for raw in diff_text.splitlines():
+            if raw.startswith("@@"):
+                m = re.search(r"\+(\d+)", raw)
+                cur_new_line = int(m.group(1)) - 1 if m else 0
+                pending_decl_prefix = False
+                continue
+            if raw.startswith("+") and not raw.startswith("+++"):
+                cur_new_line += 1
+                text = raw[1:].strip()
+                names: list[str] = []
+                m_decl = _HELPER_DECL_RE.match(text)
+                if m_decl:
+                    names.append(m_decl.group("name"))
+                elif pending_decl_prefix:
+                    m_cont = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(", text)
+                    if m_cont:
+                        names.append(m_cont.group(1))
+                m_export = _EXPORT_RE.search(text)
+                if m_export:
+                    names.append(m_export.group(1))
+                pending_decl_prefix = bool(
+                    not names
+                    and re.match(r"^(?:extern\s+|static\s+inline\s+|static\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*$", text)
+                )
+                for name in names:
+                    if name in {"if", "for", "while", "switch", "return", "sizeof"}:
+                        continue
+                    rec = out.setdefault(
+                        name,
+                        {
+                            "symbol": name,
+                            "score": 0,
+                            "tokens": sorted(_symbol_tokens(name)),
+                            "paths": set(),
+                            "evidence": [],
+                        },
+                    )
+                    rec["score"] = int(rec.get("score", 0) or 0) + 1
+                    rec["paths"].add(path)
+                    rec["evidence"].append(f"{path}:{cur_new_line}:{text[:180]}")
+            elif raw.startswith("-") and not raw.startswith("---"):
+                pending_decl_prefix = False
+                continue
+            else:
+                pending_decl_prefix = False
+                if not raw.startswith("\\"):
+                    cur_new_line += 1
+    helpers = list(out.values())
+    for rec in helpers:
+        rec["paths"] = sorted(rec.get("paths", set()))
+        rec["evidence"] = dedupe_list(list(rec.get("evidence", [])))[:6]
+    return helpers
+
+
+def _detect_kernel_side_helper_signal(
+    *,
+    symbol: str,
+    kind: str,
+    definition_changed: bool,
+    old_exists: bool,
+    new_exists: bool,
+    context_tokens: set[str],
+    context_paths: set[str],
+    helper_candidates: list[dict[str, Any]],
+) -> tuple[bool, list[dict[str, Any]], list[str]]:
+    """Find source-compatible replacement helpers added in kernel-side diffs.
+
+    This uses only old-driver usage plus old/new kernel diffs. It does not read
+    target-driver new-version diffs or other driver migration examples.
+    """
+    if definition_changed or (old_exists and not new_exists):
+        return False, [], []
+    if kind != "function":
+        return False, [], []
+    old_tokens = _symbol_tokens(symbol)
+    if not old_tokens:
+        return False, [], []
+
+    scored: list[dict[str, Any]] = []
+    for cand in helper_candidates:
+        cand_sym = str(cand.get("symbol", "") or "")
+        if not cand_sym or cand_sym == symbol:
+            continue
+        if _opposite_operation_pair(symbol, cand_sym):
+            continue
+        cand_paths = set(str(p) for p in (cand.get("paths", []) or []))
+        if context_paths and cand_paths and not (context_paths & cand_paths):
+            continue
+        cand_tokens = set(cand.get("tokens", []) or _symbol_tokens(cand_sym))
+        relation_ok, relation_stats = _strong_kernel_helper_relation(
+            old_symbol=symbol,
+            cand_symbol=cand_sym,
+            old_tokens=old_tokens,
+            cand_tokens=cand_tokens,
+            context_tokens=context_tokens,
+        )
+        if not relation_ok:
+            continue
+        direct_overlap = _meaningful_helper_tokens(old_tokens) & _meaningful_helper_tokens(cand_tokens)
+        context_overlap = _meaningful_helper_tokens(context_tokens) & _meaningful_helper_tokens(cand_tokens)
+        distinct_context_overlap = context_overlap - _meaningful_helper_tokens(old_tokens)
+        name_relation = _is_plausible_replacement(symbol, cand_sym)
+        score = 3 * len(direct_overlap) + len(context_overlap) + 2 * len(distinct_context_overlap)
+        if name_relation:
+            score += 1
+        if symbol.lower() in cand_sym.lower() or cand_sym.lower() in symbol.lower():
+            score += 2
+        if _allocator_family_relation(symbol, cand_sym):
+            score += 2
+        if score < 4:
+            continue
+        evidence = list(cand.get("evidence", []) or [])
+        scored.append(
+            {
+                "symbol": cand_sym,
+                "score": int(score),
+                "evidence": ["kernel_side_helper_diff"] + evidence[:5],
+                "paths": sorted(cand_paths),
+                "relation_stats": relation_stats,
+            }
+        )
+
+    if not scored:
+        return False, [], []
+    scored.sort(key=lambda x: (-int(x.get("score", 0) or 0), str(x.get("symbol", ""))))
+    reasons = [
+        "kernel-side diff added helper-like symbols related to old driver usage tokens",
+        "source-compatible old symbol remains available; helper signal is semantic, not a hard API break",
+    ]
+    return True, scored[:6], reasons
+
+
 def run_kernel_diff_builder(
     accessor: RepositoryAccessor,
     extracted_dir,
@@ -323,6 +1091,11 @@ def run_kernel_diff_builder(
         semantic_obligation_table = None
 
     semantic_table = _load_semantic_obligation_table(semantic_obligation_table)
+    context_index = _build_driver_context_index(locations_payload)
+    visible_includes, module_system_headers = _visible_includes_by_file(extracted_dir, module_path)
+    transitive_include_loss_cache: dict[tuple[str, str], bool] = {}
+    helper_diff_paths = _kernel_diff_paths(locations_payload, module_path)
+    kernel_side_helpers = _extract_added_kernel_helpers(accessor, helper_diff_paths)
     items_out = []
     patch_chunks = []
 
@@ -409,29 +1182,74 @@ def run_kernel_diff_builder(
             new_exists=new_exists,
             commits=commits,
         )
+        helper_signal, helper_repls, helper_reasons = _detect_kernel_side_helper_signal(
+            symbol=str(symbol or ""),
+            kind=str(kind or "unknown"),
+            definition_changed=definition_changed,
+            old_exists=old_exists,
+            new_exists=new_exists,
+            context_tokens=_context_tokens_for_item(item, context_index),
+            context_paths=_context_paths_for_item(item, context_index, module_path),
+            helper_candidates=kernel_side_helpers,
+        )
         table_migration, table_change_type, table_repls, table_row_ids, table_strength = _table_row_votes(table_hits)
-        migration_signal = bool(migration_signal or table_migration)
+        direct_include_requirements = _detect_direct_include_requirements(
+            accessor=accessor,
+            item=item,
+            symbol=str(symbol or ""),
+            module_path=module_path,
+            visible_includes=visible_includes,
+            module_system_headers=module_system_headers,
+            transitive_include_loss_cache=transitive_include_loss_cache,
+        )
+        migration_signal = bool(migration_signal or helper_signal or table_migration)
+        replacement_candidates = _merge_replacement_candidates(replacement_candidates, helper_repls, second_source="kernel_side_helper")
         replacement_candidates = _merge_replacement_candidates(replacement_candidates, table_repls)
+        replacement_candidates = _enrich_replacement_candidates(
+            accessor,
+            replacement_candidates,
+            module_path=module_path,
+        )
 
         commit_blob = "\n".join([c.get("subject", "") + "\n" + c.get("message", "") for c in commits])
         change_type = _guess_change_type(kind, definition_changed, old_exists, new_exists, diff_text)
+        if not definition_changed and not (old_exists and not new_exists) and kind != "include":
+            change_type = "unknown"
+        if kind == "function" and _signature_annotation_only(old_match_cmp, new_match_cmp):
+            change_type = "annotation_only"
         # Conservative: table should mainly reinforce migration semantics (replacement signals),
         # not broaden generic change-type noise.
         if change_type == "unknown" and table_change_type != "unknown" and (table_migration or bool(table_repls)):
             change_type = table_change_type
         if migration_signal and change_type == "unknown":
             change_type = "api_migration_signal"
+        if direct_include_requirements and change_type == "unknown":
+            change_type = "include_dependency"
+        helper_signal_paths = sorted(
+            {
+                str(path)
+                for repl in helper_repls
+                for path in (repl.get("paths", []) or [])
+                if path
+            }
+        )
 
         open_questions = []
         if old_exists and not new_exists:
             open_questions.append("old symbol found but missing in new_ref; replacement symbol likely needed")
         if migration_signal:
             open_questions.extend(migration_reasons)
+            open_questions.extend(helper_reasons)
             if replacement_candidates:
                 repl = ", ".join(c["symbol"] for c in replacement_candidates[:5])
                 open_questions.append(f"candidate replacement symbols from in-tree migrations: {repl}")
         if table_row_ids:
             open_questions.append(f"semantic obligation table hits: {', '.join(table_row_ids[:8])}")
+        for req in direct_include_requirements[:6]:
+            open_questions.append(
+                f"direct include required: {req.get('file')} should include {req.get('required_include')} "
+                f"for {req.get('symbol')}"
+            )
 
         for kw in KEYWORDS_PRIORITY:
             if kw in f"{diff_text}\n{commit_blob}".lower():
@@ -452,7 +1270,10 @@ def run_kernel_diff_builder(
             "change_type_guess": change_type,
             "commits": commits,
             "migration_signal": migration_signal,
+            "kernel_side_helper_signal": helper_signal,
             "replacement_candidates": replacement_candidates,
+            "kernel_side_helper_diff_paths": helper_signal_paths[:20] if helper_signal else [],
+            "direct_include_requirements": direct_include_requirements,
             "semantic_table_hit_rows": table_row_ids,
             "confidence": confidence,
             "open_questions": dedupe_list(open_questions),
@@ -477,6 +1298,12 @@ def run_kernel_diff_builder(
         ),
         "commit_exclude_prefixes": exclude_prefixes,
         "semantic_obligation_table": semantic_obligation_table,
+        "kernel_side_helper_discovery": {
+            "enabled": True,
+            "diff_paths": helper_diff_paths,
+            "candidate_count": len(kernel_side_helpers),
+            "policy": "old_driver_usage_plus_kernel_side_diffs_only",
+        },
         "items": items_out,
     }
     write_json(extracted_dir / "kernel_definition_diffs.json", payload)

@@ -27,6 +27,13 @@ def _stage_map(validation: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(x.get("stage")): x for x in validation.get("validation_stage_results", []) if isinstance(x, dict)}
 
 
+def _stage_lookup(stages: dict[str, dict[str, Any]], *names: str) -> dict[str, Any]:
+    for name in names:
+        if name in stages:
+            return stages[name]
+    return {}
+
+
 def _map_stage_status(raw: str) -> str:
     raw = str(raw or "").lower()
     if raw == "passed":
@@ -134,7 +141,8 @@ def _level0_patch_sanity(validation: dict[str, Any], patch_generation: dict[str,
     cand = _selected_candidate(patch_generation)
     no_op = bool(cand.get("no_op_candidate"))
     migration_scope_present = bool(semantic_validation.get("migration_scope_present"))
-    no_op_status = FAIL if (no_op and migration_scope_present) else PASS
+    effective_patch_required = bool(semantic_validation.get("effective_patch_required"))
+    no_op_status = FAIL if (no_op and effective_patch_required) else PASS
     checks = [
         {
             "id": "L0-PATCH-APPLY",
@@ -150,8 +158,9 @@ def _level0_patch_sanity(validation: dict[str, Any], patch_generation: dict[str,
                 "candidate_id": cand.get("candidate_id"),
                 "no_op_candidate": no_op,
                 "migration_scope_present": migration_scope_present,
+                "effective_patch_required": effective_patch_required,
             },
-            "note": "No-op is a patch-sanity failure only when there is a migration obligation or affected edit scope.",
+            "note": "No-op is a patch-sanity failure only when an actionable migration obligation requires an effective patch.",
         },
         {
             "id": "L0-STAGE-PATCHED-FILES",
@@ -266,7 +275,7 @@ def _level4_spec(validation: dict[str, Any], stages: dict[str, dict[str, Any]]) 
                 "name": "post_reasoning_as_spec_consistency",
                 "status": status,
                 "evidence": {
-                    "stage": stages.get("post_reasoning", {}),
+                    "stage": _stage_lookup(stages, "spec_consistency", "post_reasoning"),
                     "parse_status": parse_status,
                     "overall_verdict": verdict,
                     "confidence": pr.get("confidence", ""),

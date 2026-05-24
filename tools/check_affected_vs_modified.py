@@ -298,6 +298,7 @@ def _eval_one_case(idx: int, row: dict[str, str], cfg: EvalConfig) -> CaseResult
             extracted_dir,
             filtered_symbols,
             module_path=module_path,
+            exclude_driver_paths=(cfg.affected_func_signal_mode == "kernel_only"),
         )
         kernel_diffs = run_kernel_diff_builder(
             accessor,

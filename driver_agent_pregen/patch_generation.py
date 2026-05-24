@@ -194,6 +194,49 @@ def _extract_function_block(
     }
 
 
+def _extract_file_include_block(
+    *,
+    extracted_dir: Path,
+    rel_file: str,
+    roles: list[str],
+    editable: bool,
+    with_line_numbers: bool,
+    max_lines: int = 80,
+) -> dict[str, Any] | None:
+    src_path = extracted_dir / "old_module_sources" / rel_file
+    if not src_path.exists() or not src_path.is_file():
+        return None
+    lines = read_text(src_path).splitlines()
+    if not lines:
+        return None
+
+    last_include_idx = -1
+    for idx, line in enumerate(lines[:max_lines]):
+        if line.lstrip().startswith("#include"):
+            last_include_idx = idx
+    if last_include_idx < 0:
+        return None
+
+    # Include enough surrounding top-of-file context for unified diffs that add
+    # a missing direct header, but do not fall back to full-file source.
+    end = min(len(lines), max(last_include_idx + 3, min(max_lines, 30)))
+    raw_text = "\n".join(lines[:end])
+    content = _render_with_line_numbers(raw_text, start_line=1) if with_line_numbers else raw_text
+    return {
+        "path": rel_file,
+        "function": None,
+        "start_line": 1,
+        "end_line": end,
+        "roles": sorted(set(roles)),
+        "content": content,
+        "source_item_kind": "file_include_block",
+        "editable": editable,
+        "edit_scope": "edit_required" if editable else "context_only",
+        "candidate_reasons": [],
+        "context_reasons": ["file include block for direct include dependency edits"],
+    }
+
+
 def _record_to_source_candidate(item: dict[str, Any], role: str) -> dict[str, Any] | None:
     fn = str(item.get("function", "") or "").strip()
     rel_file = str(item.get("file", "") or "").strip()
@@ -340,6 +383,34 @@ def _build_focused_old_sources(
             if len(blocks) >= max_blocks:
                 return blocks
 
+    # Focused mode still needs top-of-file include context when obligations
+    # require adding direct kernel headers. Add one include block per file that
+    # already has editable source slices.
+    file_roles: dict[str, set[str]] = defaultdict(set)
+    file_editable: dict[str, bool] = defaultdict(bool)
+    for block in blocks:
+        rel = str(block.get("path", "") or "")
+        if not rel:
+            continue
+        for role in block.get("roles", []) or []:
+            file_roles[rel].add(str(role))
+        if bool(block.get("editable")):
+            file_editable[rel] = True
+    include_blocks: list[dict[str, Any]] = []
+    for rel in sorted(file_roles):
+        ib = _extract_file_include_block(
+            extracted_dir=extracted_dir,
+            rel_file=rel,
+            roles=["file_include_context"] + sorted(file_roles[rel]),
+            editable=bool(file_editable[rel]),
+            with_line_numbers=with_line_numbers,
+        )
+        if ib:
+            include_blocks.append(ib)
+
+    blocks = include_blocks + blocks
+    if len(blocks) > max_blocks:
+        return blocks[:max_blocks]
     return blocks
 
 
@@ -392,6 +463,112 @@ def _edit_scope_payload(impact_graph: dict[str, Any]) -> dict[str, Any]:
             "edit_required functions are default edit targets; edit_candidate functions may be edited only "
             "when candidate evidence is cited; context_only functions are non-editable reasoning context."
         ),
+    }
+
+
+def _compact_obligation_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for ev in (evidence or [])[:3]:
+        value = ev.get("value")
+        if isinstance(value, str):
+            value = truncate_text(value, max_chars=250)
+        elif isinstance(value, dict):
+            value = {
+                k: v
+                for k, v in value.items()
+                if k in {"file", "required_include", "provider", "line", "symbol", "path"}
+            }
+        out.append({"type": ev.get("type"), "value": value})
+    return out
+
+
+def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "affected_kernel_symbol": item.get("affected_kernel_symbol"),
+        "affected_driver_functions": item.get("affected_driver_functions", []),
+        "statement": item.get("statement"),
+        "kind": item.get("kind"),
+        "strength": item.get("strength"),
+        "recommended_action": item.get("recommended_action"),
+        "hard_checks": item.get("hard_checks", []),
+        "semantic_checks": item.get("semantic_checks", []),
+        "confidence": item.get("confidence"),
+        "semantic_strength": item.get("semantic_strength"),
+        "migration_signal": item.get("migration_signal", False),
+        "replacement_candidates": item.get("replacement_candidates", [])[:3],
+        "patch_guidance_seed": item.get("patch_guidance_seed"),
+        "open_questions": item.get("open_questions", [])[:4],
+        "evidence": _compact_obligation_evidence(item.get("evidence", []) or []),
+    }
+
+
+def _compact_agent_obligations(compatibility_obligations: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "obligations": [
+            _compact_obligation(x)
+            for x in compatibility_obligations.get("obligations", []) or []
+            if x.get("hard_checks") or str(x.get("semantic_strength", "")).lower() == "strong"
+        ],
+        "semantic_obligations": [
+            _compact_obligation(x)
+            for x in compatibility_obligations.get("semantic_obligations", []) or []
+            if str(x.get("strength", "")).lower() == "strong"
+        ],
+        "semantic_obligation_summary": compatibility_obligations.get("semantic_obligation_summary", {}),
+        "semantic_obligations_omitted_from_llm": {
+            "count": sum(
+                1
+                for x in compatibility_obligations.get("semantic_obligations", []) or []
+                if str(x.get("strength", "")).lower() != "strong"
+            )
+            + sum(
+                1
+                for x in compatibility_obligations.get("obligations", []) or []
+                if not (x.get("hard_checks") or str(x.get("semantic_strength", "")).lower() == "strong")
+            ),
+            "reason": "medium/low semantic guidance is not a required edit and is omitted from LLM payload",
+        },
+        "llm_payload_filter": "compact obligations; full evidence remains in extracted/compatibility_obligations.json",
+    }
+
+
+def _compact_pre_reasoning(pre_reasoning: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "overall_verdict": pre_reasoning.get("overall_verdict"),
+        "required_changes": pre_reasoning.get("required_changes", [])[:12],
+        "optional_changes": pre_reasoning.get("optional_changes", [])[:8],
+        "unsupported_assumptions": pre_reasoning.get("unsupported_assumptions", [])[:8],
+        "evidence_used": pre_reasoning.get("evidence_used", [])[:12],
+        "confidence": pre_reasoning.get("confidence"),
+        "function_results": [],
+        "llm_payload_filter": "compact pre-reasoning; full output remains in llm_calls/02_pre_reasoner/parsed_output.json",
+    }
+    for item in pre_reasoning.get("function_results", []) or []:
+        out["function_results"].append(
+            {
+                "function": item.get("function"),
+                "verdict": item.get("verdict"),
+                "spec_claim": truncate_text(str(item.get("spec_claim", "") or ""), max_chars=600),
+                "actual_behavior": truncate_text(str(item.get("actual_behavior", "") or ""), max_chars=600),
+                "trigger_condition": truncate_text(str(item.get("trigger_condition", "") or ""), max_chars=400),
+                "patch_guidance": truncate_text(str(item.get("patch_guidance", "") or ""), max_chars=900),
+                "required_changes": item.get("required_changes", [])[:6],
+                "optional_changes": item.get("optional_changes", [])[:4],
+                "evidence_used": item.get("evidence_used", [])[:6],
+                "confidence": item.get("confidence"),
+            }
+        )
+    return out
+
+
+def _compact_context_packet_for_patch(context_packet: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
+        "patch_generation_guidance": (context_packet.get("patch_generation_guidance", []) or [])[:20],
+        "hard_validation_plan": (context_packet.get("hard_validation_plan", []) or [])[:12],
+        "semantic_validation_plan": (context_packet.get("semantic_validation_plan", []) or [])[:12],
+        "open_questions": (context_packet.get("open_questions", []) or [])[:12],
     }
 
 
@@ -852,25 +1029,67 @@ def _should_emit_auto_noop(
     compatibility_obligations: dict[str, Any],
     impact_graph: dict[str, Any],
 ) -> bool:
-    obligations = compatibility_obligations.get("obligations", [])
-    sem_obligations = compatibility_obligations.get("semantic_obligations", [])
-    if obligations:
-        return False
-    if sem_obligations:
-        return False
-
-    affected = impact_graph.get("affected_functions", [])
-    if affected:
-        return False
-
-    return True
+    # A deterministic no-op is valid only when no hard requirement and no
+    # strong replacement obligation exists. Medium semantic guidance is kept as
+    # context/evidence, not a required edit.
+    return not _requires_effective_patch(compatibility_obligations)
 
 
-def _has_strong_semantic_obligations(compatibility_obligations: dict[str, Any]) -> bool:
+def _requires_effective_patch(compatibility_obligations: dict[str, Any]) -> bool:
+    for item in compatibility_obligations.get("obligations", []) or []:
+        if item.get("hard_checks"):
+            return True
+        if item.get("replacement_candidates") and str(item.get("semantic_strength", "")).lower() == "strong":
+            return True
     for item in compatibility_obligations.get("semantic_obligations", []):
-        if str(item.get("strength", "")).lower() == "strong":
+        if str(item.get("strength", "")).lower() == "strong" and item.get("replacement_candidates"):
             return True
     return False
+
+
+def _required_symbol_keys(compatibility_obligations: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for item in compatibility_obligations.get("obligations", []) or []:
+        if item.get("hard_checks") or str(item.get("semantic_strength", "")).lower() == "strong":
+            sym = str(item.get("affected_kernel_symbol", "")).strip()
+            if sym:
+                keys.add(sym)
+    for item in compatibility_obligations.get("semantic_obligations", []) or []:
+        if str(item.get("strength", "")).lower() == "strong":
+            sym = str(item.get("affected_kernel_symbol", "")).strip()
+            if sym:
+                keys.add(sym)
+    return keys
+
+
+def _filter_impact_graph_for_symbols(impact_graph: dict[str, Any], symbol_keys: set[str]) -> dict[str, Any]:
+    if not symbol_keys:
+        return impact_graph
+
+    def keep(item: dict[str, Any]) -> bool:
+        uses = {str(x) for x in item.get("uses_changed_kernel_symbols", []) or []}
+        return bool(uses.intersection(symbol_keys))
+
+    out = dict(impact_graph)
+    for key in [
+        "affected_functions",
+        "edit_required_functions",
+        "edit_candidate_functions",
+        "context_only_functions",
+        "context_functions",
+    ]:
+        out[key] = [x for x in impact_graph.get(key, []) or [] if keep(x)]
+
+    kept_functions = {str(x.get("function", "")) for x in out.get("affected_functions", []) or []}
+    out["edges"] = [
+        e
+        for e in impact_graph.get("edges", []) or []
+        if str(e.get("from", "")) in kept_functions
+        or str(e.get("to", "")) in kept_functions
+        or str(e.get("to", "")) in symbol_keys
+    ]
+    out["llm_payload_filter"] = "hard/strong required symbols only; full graph remains in extracted/impact_graph.json"
+    return out
 
 
 def _slim_kernel_definition_diffs(kernel_definition_diffs: dict[str, Any] | None) -> dict[str, Any]:
@@ -984,6 +1203,12 @@ def run_patch_generation_agent(
         compatibility_obligations=compatibility_obligations,
         impact_graph=impact_graph,
     )
+    required_symbol_keys = _required_symbol_keys(compatibility_obligations) if generation_mode == "agent" else set()
+    llm_impact_graph = (
+        _filter_impact_graph_for_symbols(impact_graph, required_symbol_keys)
+        if generation_mode == "agent" and not deterministic_noop
+        else impact_graph
+    )
 
     source_payload_summary_override: dict[str, Any] | None = None
     if deterministic_noop:
@@ -1007,7 +1232,7 @@ def run_patch_generation_agent(
         old_sources = _build_focused_old_sources(
             extracted_dir=extracted_dir,
             module_path=module_path,
-            impact_graph=impact_graph,
+            impact_graph=llm_impact_graph,
             with_line_numbers=bool(source_with_line_numbers),
         )
         # Defensive fallback: keep pipeline usable if focused extraction returns empty.
@@ -1026,32 +1251,64 @@ def run_patch_generation_agent(
         )
 
     if generation_mode == "agent":
-        input_payload = {
-            "case_id": case_id,
-            "module_path": module_path,
-            "max_candidates": max_candidates,
-            "patch_generation_mode": generation_mode,
-            "patch_source_mode": mode,
-            "patch_source_with_line_numbers": bool(source_with_line_numbers),
-            "source_payload_summary": source_payload_summary_override or _source_payload_summary(
-                mode=mode,
-                requested_mode=requested_source_mode,
-                old_sources=old_sources,
-            ),
-            "compatibility_obligations": compatibility_obligations,
-            "impact_graph": impact_graph,
-            "edit_scope_policy": _edit_scope_payload(impact_graph),
-            "pre_reasoning": pre_reasoning,
-            "context_packet": {
-                "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
-                "patch_generation_guidance": context_packet.get("patch_generation_guidance", []),
-                "hard_validation_plan": context_packet.get("hard_validation_plan", []),
-                "semantic_validation_plan": context_packet.get("semantic_validation_plan", []),
-                "open_questions": context_packet.get("open_questions", []),
-            },
-            "old_module_sources": old_sources,
-            "instruction": "Generate unified diff patch candidate(s) for migration. Keep patch minimal and evidence-grounded.",
-        }
+        if deterministic_noop:
+            input_payload = {
+                "case_id": case_id,
+                "module_path": module_path,
+                "max_candidates": max_candidates,
+                "patch_generation_mode": generation_mode,
+                "patch_source_mode": "none",
+                "patch_source_with_line_numbers": bool(source_with_line_numbers),
+                "source_payload_summary": source_payload_summary_override,
+                "compatibility_obligations": {
+                    "obligation_count": len(compatibility_obligations.get("obligations", []) or []),
+                    "semantic_obligation_count": len(compatibility_obligations.get("semantic_obligations", []) or []),
+                    "required_obligation_count": 0,
+                    "llm_payload_filter": "full obligations remain in extracted/compatibility_obligations.json",
+                },
+                "impact_graph": {
+                    "tier_counts": impact_graph.get("tier_counts", {}),
+                    "llm_payload_filter": "omitted because no required migration edit exists",
+                },
+                "edit_scope_policy": {
+                    "rule_summary": "no editable target is needed because no hard or strong migration edit exists"
+                },
+                "pre_reasoning": {
+                    "overall_verdict": pre_reasoning.get("overall_verdict"),
+                    "llm_payload_filter": "omitted because no required migration edit exists",
+                },
+                "context_packet": {
+                    "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
+                    "llm_payload_filter": "omitted because no required migration edit exists",
+                },
+                "old_module_sources": [],
+                "instruction": "No hard or strong semantic migration edit exists; emit deterministic no-op candidate.",
+            }
+        else:
+            input_payload = {
+                "case_id": case_id,
+                "module_path": module_path,
+                "max_candidates": max_candidates,
+                "patch_generation_mode": generation_mode,
+                "patch_source_mode": mode,
+                "patch_source_with_line_numbers": bool(source_with_line_numbers),
+                "source_payload_summary": source_payload_summary_override or _source_payload_summary(
+                    mode=mode,
+                    requested_mode=requested_source_mode,
+                    old_sources=old_sources,
+                ),
+                "compatibility_obligations": _compact_agent_obligations(compatibility_obligations),
+                "impact_graph": {
+                    "tier_counts": llm_impact_graph.get("tier_counts", {}),
+                    "edit_scope": _edit_scope_payload(llm_impact_graph),
+                    "llm_payload_filter": "compact impact graph; full graph remains in extracted/impact_graph.json",
+                },
+                "edit_scope_policy": _edit_scope_payload(llm_impact_graph),
+                "pre_reasoning": _compact_pre_reasoning(pre_reasoning),
+                "context_packet": _compact_context_packet_for_patch(context_packet),
+                "old_module_sources": old_sources,
+                "instruction": "Generate unified diff patch candidate(s) for migration. Keep patch minimal and evidence-grounded.",
+            }
     else:
         input_payload = {
             "case_id": case_id,
@@ -1117,7 +1374,7 @@ def run_patch_generation_agent(
             "stage": "patch_generation",
             "patch_candidates": [],
             "module_level_notes": [
-                "deterministic_noop_short_circuit: pre_reasoning=MATCH and both obligations/affected_functions are empty"
+                "deterministic_noop_short_circuit: no hard or strong semantic migration edit is required"
             ],
             "parse_status": "skipped_auto_noop",
         }
@@ -1135,9 +1392,8 @@ def run_patch_generation_agent(
     normalized: list[dict[str, Any]] = []
     policy_rejections: list[dict[str, Any]] = []
     rejected_noop_candidates: list[dict[str, Any]] = []
-    strong_semantic_required = (
-        _has_strong_semantic_obligations(compatibility_obligations) if generation_mode == "agent" else False
-    )
+    effective_patch_required = _requires_effective_patch(compatibility_obligations) if generation_mode == "agent" else False
+    strong_semantic_required = effective_patch_required
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
         cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
@@ -1168,8 +1424,8 @@ def run_patch_generation_agent(
             # Keep touched_files for downstream staging of old sources, but avoid emitting invalid no-op hunks.
             candidate_patch = ""
             fix_msgs.append("detected_no_effective_diff; normalized_to_noop_candidate")
-            if strong_semantic_required:
-                fix_msgs.append("rejected_noop_due_to_strong_semantic_obligation")
+            if effective_patch_required:
+                fix_msgs.append("rejected_noop_due_to_required_migration_obligation")
                 fix_report = {
                     "candidate_id": cid,
                     "raw_patch_nonempty": bool(raw_diff.strip()),
@@ -1183,7 +1439,7 @@ def run_patch_generation_agent(
                 policy_rejections.append(
                     {
                         "candidate_id": cid,
-                        "reason": "strong_semantic_obligation_disallows_noop_candidate",
+                        "reason": "required_migration_obligation_disallows_noop_candidate",
                     }
                 )
                 rejected_noop_candidates.append(
@@ -1335,8 +1591,8 @@ def run_patch_generation_agent(
             if no_op_candidate:
                 candidate_patch = ""
                 fix_msgs.append("detected_no_effective_diff; normalized_to_noop_candidate")
-                if strong_semantic_required:
-                    fix_msgs.append("rejected_noop_due_to_strong_semantic_obligation")
+                if effective_patch_required:
+                    fix_msgs.append("rejected_noop_due_to_required_migration_obligation")
                     fix_report = {
                         "candidate_id": cid,
                         "raw_patch_nonempty": bool(raw_patch.strip()),
@@ -1351,7 +1607,7 @@ def run_patch_generation_agent(
                     policy_rejections.append(
                         {
                             "candidate_id": cid,
-                            "reason": "strong_semantic_obligation_disallows_noop_candidate",
+                            "reason": "required_migration_obligation_disallows_noop_candidate",
                             "fallback": "heuristic",
                         }
                     )
@@ -1491,11 +1747,11 @@ def run_patch_generation_agent(
             {
                 "candidate_id": cid,
                 "strategy": "auto_noop_fallback",
-                "rationale": "No patch candidate available; pre_reasoning MATCH with empty obligations and no affected functions.",
+                "rationale": "No hard or strong semantic migration edit is required; keep old source unchanged for validation continuity.",
                 "evidence": [
                     f"pre_reasoning.overall_verdict={pre_reasoning.get('overall_verdict', '')}",
-                    "compatibility_obligations.obligations is empty",
-                    "impact_graph.affected_functions is empty",
+                    "compatibility_obligations contains no hard checks",
+                    "compatibility_obligations contains no strong replacement obligation",
                 ],
                 "open_questions": [
                     "LLM patch generation produced no usable candidate; auto no-op fallback used for compile/runtime validation continuity."
@@ -1556,6 +1812,7 @@ def run_patch_generation_agent(
         "selected_candidate_id": normalized[0]["candidate_id"] if normalized else None,
         "policy_rejections": policy_rejections,
         "strong_semantic_required": strong_semantic_required,
+        "effective_patch_required": effective_patch_required,
     }
 
     write_json(run_dir / "patch_generation.json", out)

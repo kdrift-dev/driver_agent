@@ -143,9 +143,11 @@ def _symbol_tier(item: dict[str, Any]) -> str | None:
         return "semantic"
 
     ct = str(item.get("change_type_guess", "unknown"))
+    if ct == "annotation_only":
+        return "context"
     if item.get("definition_changed"):
         if ct == "include_dependency":
-            return "context"
+            return "hard" if item.get("direct_include_requirements") else "context"
         if ct in SEMANTIC_CHANGE_TYPES:
             return "semantic"
         return "hard"
@@ -153,7 +155,7 @@ def _symbol_tier(item: dict[str, Any]) -> str | None:
     if ct in SEMANTIC_CHANGE_TYPES:
         return "semantic"
     if ct == "include_dependency":
-        return "context"
+        return "hard" if item.get("direct_include_requirements") else "context"
     return None
 
 

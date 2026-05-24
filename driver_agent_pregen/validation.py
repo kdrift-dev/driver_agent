@@ -142,12 +142,56 @@ def _extract_slice(text: str, start_line: int, end_line: int, pad: int = 20) -> 
     return "\n".join(out)
 
 
-def _collect_patched_slices(new_tree: Path, impact_graph: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_include_block(text: str, *, max_lines: int = 140) -> str:
+    lines = text.splitlines()
+    out: list[str] = []
+    saw_include = False
+    for n, line in enumerate(lines[:max_lines], start=1):
+        stripped = line.strip()
+        if stripped.startswith("#include"):
+            saw_include = True
+            out.append(f"{n:5d}: {line}")
+            continue
+        if not saw_include:
+            if not stripped or stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+                out.append(f"{n:5d}: {line}")
+                continue
+            if stripped.startswith("#") and not stripped.startswith("#include"):
+                out.append(f"{n:5d}: {line}")
+                continue
+        else:
+            if not stripped or stripped.startswith("#include"):
+                out.append(f"{n:5d}: {line}")
+                continue
+            break
+    return "\n".join(out)
+
+
+def _direct_include_requirement_files(compatibility_obligations: dict[str, Any]) -> set[str]:
+    files: set[str] = set()
+    for obl in compatibility_obligations.get("obligations", []) or []:
+        for ev in obl.get("evidence", []) or []:
+            if ev.get("type") != "direct_include_requirement":
+                continue
+            value = ev.get("value") or {}
+            rel = str(value.get("file") or "").strip()
+            if rel:
+                files.add(rel)
+    return files
+
+
+def _collect_patched_slices(
+    new_tree: Path,
+    impact_graph: dict[str, Any],
+    compatibility_obligations: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
+    include_files: set[str] = set()
     for afn in impact_graph.get("affected_functions", []):
         rel = afn.get("file")
         if not rel:
             continue
+        include_files.add(str(rel))
         p = new_tree / rel
         if not p.exists():
             continue
@@ -159,6 +203,22 @@ def _collect_patched_slices(new_tree: Path, impact_graph: dict[str, Any]) -> lis
                 "function": afn.get("function"),
                 "file": rel,
                 "slice": _extract_slice(txt, start, end),
+            }
+        )
+    include_files.update(_direct_include_requirement_files(compatibility_obligations or {}))
+    for rel in sorted(include_files):
+        p = new_tree / rel
+        if not p.exists() or p.suffix not in {".c", ".h", ".rs"}:
+            continue
+        block = _extract_include_block(read_text(p))
+        if not block:
+            continue
+        out.append(
+            {
+                "function": "__file_includes__",
+                "file": rel,
+                "source_item_kind": "patched_file_include_block",
+                "slice": block,
             }
         )
     return out
@@ -177,6 +237,26 @@ def _generate_system_tests(
 ) -> dict[str, Any]:
     stage_dir = llm_calls_dir / "05_system_test_generation"
     stage_dir.mkdir(parents=True, exist_ok=True)
+
+    deterministic = _deterministic_system_tests(case_id=case_id, module_path=module_path)
+    if deterministic:
+        # Prefer known-good deterministic runtime hooks over LLM-generated
+        # scripts. This avoids wasting tokens and prevents test-generation
+        # timeouts for cases that already have a stable KUnit/kselftest entry.
+        write_text(stage_dir / "prompt.md", "")
+        write_json(
+            stage_dir / "input.json",
+            {
+                "case_id": case_id,
+                "module_path": module_path,
+                "stage": "system_test_generation",
+                "generator": "deterministic_fallback",
+                "reason": "known deterministic runtime hook available for this module",
+            },
+        )
+        write_text(stage_dir / "raw_output.txt", "")
+        write_json(stage_dir / "parsed_output.json", deterministic)
+        return deterministic
 
     input_payload = {
         "case_id": case_id,
@@ -213,13 +293,6 @@ def _generate_system_tests(
     )
     if str(generated.get("parse_status", "")) == "ok" and generated.get("suite_commands"):
         return generated
-
-    fallback = _deterministic_system_tests(case_id=case_id, module_path=module_path)
-    if fallback:
-        fallback["llm_fallback_reason"] = generated.get("error") or f"parse_status={generated.get('parse_status')}"
-        fallback["llm_output_parse_status"] = generated.get("parse_status")
-        write_json(stage_dir / "parsed_output.json", fallback)
-        return fallback
 
     return generated
 
@@ -626,7 +699,7 @@ _VALIDATION_STAGE_ORDER = [
     "test_generation",
     "suite_execution",
     "qemu_execution",
-    "post_reasoning",
+    "spec_consistency",
 ]
 
 
@@ -759,6 +832,7 @@ def run_validation_agent(
         "suite_execution": {},
         "qemu": {},
         "post_reasoning": {},
+        "spec_consistency": {},
         "validation_stage_results": stage_results,
         "open_questions": [],
     }
@@ -1111,7 +1185,7 @@ def run_validation_agent(
             reason = _best_failure_reason(first_fail.get("stderr", ""), first_fail.get("stdout", ""), "qemu_run_failed")
             _set_stage_result(stage_results, "qemu_execution", "failed", reason)
 
-    patched_slices = _collect_patched_slices(new_tree, impact_graph)
+    patched_slices = _collect_patched_slices(new_tree, impact_graph, compatibility_obligations)
     post_reasoning = run_post_reasoner_agent(
         llm_client=llm_client,
         llm_calls_dir=llm_calls_dir,
@@ -1136,7 +1210,18 @@ def run_validation_agent(
     else:
         pr_status = "failed"
         pr_reason = f"overall_verdict={pr_verdict}"
-    _set_stage_result(stage_results, "post_reasoning", pr_status, pr_reason)
+    out["spec_consistency"] = {
+        "status": pr_status,
+        "reason": pr_reason,
+        "overall_verdict": pr_verdict,
+        "parse_status": post_reasoning.get("parse_status", ""),
+        "not_a_correctness_proof": True,
+        "caveat": (
+            "This is an LLM consistency check against generated local specs and stated "
+            "obligations; it is not a correctness metric."
+        ),
+    }
+    _set_stage_result(stage_results, "spec_consistency", pr_status, pr_reason)
 
     test_gen_ok = str(test_gen.get("parse_status", "")) == "ok"
     suite_has_real_run = bool(suite_runs) and not all_skipped
@@ -1145,13 +1230,7 @@ def run_validation_agent(
     # the pipeline completed its core apply/build/spec-consistency checks.
     tests_gate_ok = True
     qemu_gate_ok = True
-    overall_ok = bool(
-        compile_result.get("success")
-        and tests_gate_ok
-        and qemu_gate_ok
-        and pr_parse_ok
-        and pr_verdict == "PASS"
-    )
+    overall_ok = bool(compile_result.get("success") and tests_gate_ok and qemu_gate_ok)
     if not compile_result.get("success"):
         out["open_questions"].append("compile_not_success")
     if not skip_system_test_generation:
@@ -1164,9 +1243,9 @@ def run_validation_agent(
         if enable_qemu and not out["qemu"].get("success"):
             out["open_questions"].append("qemu_execution_not_success")
     if not pr_parse_ok:
-        out["open_questions"].append("post_reasoning_not_success")
+        out["open_questions"].append("spec_consistency_not_success")
     elif pr_verdict != "PASS":
-        out["open_questions"].append(f"post_reasoning_verdict_{pr_verdict.lower()}")
+        out["open_questions"].append(f"spec_consistency_verdict_{pr_verdict.lower()}")
 
     final_status = "ok" if overall_ok else "failed"
 

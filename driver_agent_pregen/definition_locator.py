@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from .repo_utils import RepositoryAccessor
@@ -43,6 +44,8 @@ def run_definition_locator(
     extracted_dir,
     driver_used_symbols: dict[str, Any],
     module_path: str | None = None,
+    exclude_driver_paths: bool = False,
+    jobs: int = 1,
 ) -> dict[str, Any]:
     symbols = driver_used_symbols.get("symbols", [])
 
@@ -54,10 +57,10 @@ def run_definition_locator(
         key = (sym.get("name"), sym.get("kind", "unknown"))
         grouped[key].append(sym)
 
-    items = []
-    for (name, kind), uses in sorted(grouped.items()):
+    def locate_one(name: str, kind: str, uses: list[dict[str, Any]]) -> dict[str, Any] | None:
         if not name:
-            continue
+            return None
+        notes = []
         if kind == "include":
             old_locations = _locate_include_header(accessor, "old", name)
             new_locations = _locate_include_header(accessor, "new", name)
@@ -73,45 +76,32 @@ def run_definition_locator(
                 old_locations = []
                 new_locations = []
                 for owner in owner_structs[:4]:
-                    old_locations.extend(_locate_struct_definition(accessor, "old", owner, field_name=name, module_path=module_path))
-                    new_locations.extend(_locate_struct_definition(accessor, "new", owner, field_name=name, module_path=module_path))
+                    old_locations.extend(
+                        _locate_struct_definition(
+                            accessor,
+                            "old",
+                            owner,
+                            field_name=name,
+                            module_path=module_path,
+                            exclude_driver_paths=exclude_driver_paths,
+                        )
+                    )
+                    new_locations.extend(
+                        _locate_struct_definition(
+                            accessor,
+                            "new",
+                            owner,
+                            field_name=name,
+                            module_path=module_path,
+                            exclude_driver_paths=exclude_driver_paths,
+                        )
+                    )
             else:
-                pattern, regex, fixed = _symbol_pattern(name, kind)
-                search_paths = _search_pathspecs_for_kind(kind, module_path)
-                old_hits = accessor.search(
-                    "old",
-                    pattern,
-                    regex=regex,
-                    fixed=fixed,
-                    pathspecs=search_paths,
-                    max_hits=40,
+                old_locations = []
+                new_locations = []
+                notes.append(
+                    "field owner struct unknown; skipped unconstrained field definition search"
                 )
-                new_hits = accessor.search(
-                    "new",
-                    pattern,
-                    regex=regex,
-                    fixed=fixed,
-                    pathspecs=search_paths,
-                    max_hits=40,
-                )
-                old_locations = [
-                    {
-                        "path": h.path,
-                        "line": h.line,
-                        "match": h.text.strip()[:500],
-                        "locator": h.locator,
-                    }
-                    for h in old_hits
-                ]
-                new_locations = [
-                    {
-                        "path": h.path,
-                        "line": h.line,
-                        "match": h.text.strip()[:500],
-                        "locator": h.locator,
-                    }
-                    for h in new_hits
-                ]
         else:
             pattern, regex, fixed = _symbol_pattern(name, kind)
             if kind == "function":
@@ -140,7 +130,7 @@ def run_definition_locator(
                         pattern,
                         regex=regex,
                         fixed=fixed,
-                        pathspecs=_search_pathspecs_for_kind(kind, module_path),
+                        pathspecs=_search_pathspecs_for_kind(kind, module_path, exclude_driver_paths=exclude_driver_paths),
                         max_hits=180,
                     )
                     old_hits = _filter_function_like_hits(old_hits, name)
@@ -150,12 +140,12 @@ def run_definition_locator(
                         pattern,
                         regex=regex,
                         fixed=fixed,
-                        pathspecs=_search_pathspecs_for_kind(kind, module_path),
+                        pathspecs=_search_pathspecs_for_kind(kind, module_path, exclude_driver_paths=exclude_driver_paths),
                         max_hits=180,
                     )
                     new_hits = _filter_function_like_hits(new_hits, name)
             else:
-                search_paths = _search_pathspecs_for_kind(kind, module_path)
+                search_paths = _search_pathspecs_for_kind(kind, module_path, exclude_driver_paths=exclude_driver_paths)
                 old_hits = accessor.search(
                     "old",
                     pattern,
@@ -199,6 +189,9 @@ def run_definition_locator(
             prefix = module_path.rstrip("/") + "/"
             old_locations = [loc for loc in old_locations if not str(loc.get("path", "")).startswith(prefix)]
             new_locations = [loc for loc in new_locations if not str(loc.get("path", "")).startswith(prefix)]
+        if exclude_driver_paths:
+            old_locations = [loc for loc in old_locations if not _is_driver_tree_path(str(loc.get("path", "")))]
+            new_locations = [loc for loc in new_locations if not _is_driver_tree_path(str(loc.get("path", "")))]
 
         used_by_driver = [
             {
@@ -211,25 +204,49 @@ def run_definition_locator(
             for u in uses
         ]
 
-        notes = []
         if not old_locations:
             notes.append("symbol not found in old kernel-side search")
         if not new_locations:
             notes.append("symbol not found in new kernel-side search")
         if kind == "include":
             notes.append("include provider may be indirect; locations are best-effort")
+        if exclude_driver_paths:
+            notes.append("strict kernel-only locator mode excluded drivers/* definition candidates")
 
-        items.append(
-            {
-                "symbol": name,
-                "kind": kind,
-                "used_by_driver": used_by_driver,
-                "old_locations": old_locations,
-                "new_locations": new_locations,
-                "classification_confidence": _confidence(kind, old_locations, new_locations),
-                "notes": notes,
+        return {
+            "symbol": name,
+            "kind": kind,
+            "used_by_driver": used_by_driver,
+            "old_locations": old_locations,
+            "new_locations": new_locations,
+            "classification_confidence": _confidence(kind, old_locations, new_locations),
+            "notes": notes,
+        }
+
+    keys = [(name, kind, uses) for (name, kind), uses in sorted(grouped.items()) if name]
+    items = []
+    workers = max(1, int(jobs or 1))
+    if workers == 1 or len(keys) <= 1:
+        for name, kind, uses in keys:
+            item = locate_one(str(name), str(kind), uses)
+            if item:
+                items.append(item)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {
+                ex.submit(locate_one, str(name), str(kind), uses): (str(name), str(kind))
+                for name, kind, uses in keys
             }
-        )
+            by_key: dict[tuple[str, str], dict[str, Any]] = {}
+            for fut in as_completed(futs):
+                key = futs[fut]
+                item = fut.result()
+                if item:
+                    by_key[key] = item
+            for name, kind, _uses in keys:
+                item = by_key.get((str(name), str(kind)))
+                if item:
+                    items.append(item)
 
     payload = {"items": items}
     write_json(extracted_dir / "kernel_definition_locations.json", payload)
@@ -280,6 +297,7 @@ def _locate_struct_definition(
     *,
     field_name: str | None = None,
     module_path: str | None = None,
+    exclude_driver_paths: bool = False,
 ) -> list[dict]:
     pattern = rf"\bstruct\s+{re.escape(struct_name)}\s*\{{"
     hits = accessor.search(
@@ -287,7 +305,12 @@ def _locate_struct_definition(
         pattern,
         regex=True,
         fixed=False,
-        pathspecs=["include/*", "arch/*/include/*"] + ([_module_family_pathspec(module_path)] if _module_family_pathspec(module_path) else []),
+        pathspecs=["include/*", "arch/*/include/*"]
+        + (
+            [_module_family_pathspec(module_path)]
+            if _module_family_pathspec(module_path) and not exclude_driver_paths
+            else []
+        ),
         max_hits=24,
     )
     out = []
@@ -309,19 +332,28 @@ def _locate_struct_definition(
     return out
 
 
-def _search_pathspecs_for_kind(kind: str, module_path: str | None = None) -> list[str]:
+def _search_pathspecs_for_kind(
+    kind: str,
+    module_path: str | None = None,
+    *,
+    exclude_driver_paths: bool = False,
+) -> list[str]:
     module_family = _module_family_pathspec(module_path)
     if kind in {"enum", "macro", "field", "struct", "global", "unknown"}:
         out = ["include/*", "arch/*/include/*"]
-        if module_family:
+        if module_family and not exclude_driver_paths:
             out.append(module_family)
         return out
     if kind == "function":
         out = ["kernel/*", "arch/*", "fs/*", "mm/*", "net/*", "lib/*", "security/*"]
-        if module_family:
+        if module_family and not exclude_driver_paths:
             out.append(module_family)
         return out
     return []
+
+
+def _is_driver_tree_path(path: str) -> bool:
+    return path == "drivers" or path.startswith("drivers/")
 
 
 def _filter_function_like_hits(hits, symbol_name: str):

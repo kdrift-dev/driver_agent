@@ -68,9 +68,22 @@ def export_external_source(
         cache_root.mkdir(parents=True, exist_ok=True)
         fetch = run(["git", "clone", repo_url, str(cache)], timeout=1200)
 
-    commit = run(["git", "-C", str(cache), "rev-parse", ref], timeout=120, check=True)["stdout"].strip()
+    commit = ""
+    ref_errors = []
+    for candidate in [ref, f"refs/tags/{ref}", f"refs/remotes/origin/{ref}", f"origin/{ref}"]:
+        res = run(["git", "-C", str(cache), "rev-parse", "--verify", candidate], timeout=120)
+        if res.get("ok"):
+            commit = str(res.get("stdout", "")).strip()
+            break
+        ref_errors.append(res)
+    if not commit:
+        raise RuntimeError(json.dumps({"error": "oot_ref_not_found", "ref": ref, "attempts": ref_errors}, indent=2))
+
     if dest.exists():
         shutil.rmtree(dest)
+    tmp = dest.parent / f"{dest.name}_tmp_flat"
+    if tmp.exists():
+        shutil.rmtree(tmp)
     dest.mkdir(parents=True, exist_ok=True)
 
     archive = subprocess.run(
@@ -86,12 +99,13 @@ def export_external_source(
     if extract.returncode != 0:
         raise RuntimeError(extract.stderr.decode(errors="replace"))
 
+    if source_subdir in {"", "."}:
+        return {"repo_url": repo_url, "ref": ref, "commit": commit, "source_subdir": source_subdir, "fetch": fetch}
+
     extracted = dest / source_subdir
-    tmp = dest.parent / f"{dest.name}_tmp_flat"
-    if tmp.exists():
-        shutil.rmtree(tmp)
     shutil.move(str(extracted), str(tmp))
-    shutil.rmtree(dest)
+    if dest.exists():
+        shutil.rmtree(dest)
     shutil.move(str(tmp), str(dest))
     return {"repo_url": repo_url, "ref": ref, "commit": commit, "source_subdir": source_subdir, "fetch": fetch}
 

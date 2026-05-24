@@ -77,6 +77,24 @@ def _patch_has_effective_changes(patch_text: str) -> bool:
     return True
 
 
+def _effective_patch_required(obligations_payload: dict[str, Any]) -> bool:
+    """Return true only for obligations that mechanically require an edit.
+
+    Annotation-only or revalidation-only obligations may be satisfied by the
+    old source. They should keep the case in migration scope, but should not
+    make a no-op candidate fail by themselves.
+    """
+    for item in obligations_payload.get("obligations", []) or []:
+        if item.get("hard_checks"):
+            return True
+        if item.get("replacement_candidates") and str(item.get("semantic_strength", "")).lower() == "strong":
+            return True
+    for item in obligations_payload.get("semantic_obligations", []) or []:
+        if str(item.get("strength", "")).lower() == "strong" and item.get("replacement_candidates"):
+            return True
+    return False
+
+
 def _symbol_name(raw: str) -> str:
     raw = (raw or "").strip()
     m = _SYMBOL_PREFIX_RE.match(raw)
@@ -188,10 +206,10 @@ def _editable_sets(impact_graph: dict[str, Any]) -> tuple[set[tuple[str, str]], 
 
 def _obligation_requires_replacement(obligation: dict[str, Any]) -> bool:
     if obligation.get("replacement_candidates"):
-        if obligation.get("migration_signal"):
+        if obligation.get("migration_signal") and str(obligation.get("semantic_strength", "")).lower() == "strong":
             return True
-        checks = "\n".join(str(x) for x in obligation.get("hard_checks", []) + obligation.get("semantic_checks", [])).lower()
-        if any(x in checks for x in ("replacement", "old symbol should not remain", "should not remain", "adopt replacement")):
+        hard_checks = "\n".join(str(x) for x in obligation.get("hard_checks", [])).lower()
+        if any(x in hard_checks for x in ("replacement", "old symbol should not remain", "should not remain")):
             return True
     return False
 
@@ -239,6 +257,7 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
         or impact_graph.get("editable_functions")
         or obligations_payload.get("semantic_obligations")
     )
+    effective_patch_required = _effective_patch_required(obligations_payload)
 
     checks: list[dict[str, Any]] = []
 
@@ -256,7 +275,7 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
     effective = _patch_has_effective_changes(patch_text)
     noop_status = _STATUS_PASS
     if bool(cand.get("no_op_candidate")) or not effective:
-        noop_status = _STATUS_FAIL if migration_scope_present else _STATUS_SKIPPED
+        noop_status = _STATUS_FAIL if effective_patch_required else _STATUS_SKIPPED
     checks.append(
         {
             "id": "L3-NOOP",
@@ -267,8 +286,9 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
                 f"no_op_candidate={bool(cand.get('no_op_candidate'))}",
                 f"patch_has_effective_changes={effective}",
                 f"migration_scope_present={migration_scope_present}",
+                f"effective_patch_required={effective_patch_required}",
             ],
-            "note": "No-op is only a failure when a migration obligation or affected edit scope exists.",
+            "note": "No-op is only a failure when an actionable migration obligation requires an effective patch.",
         }
     )
 
@@ -378,6 +398,7 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
         "stage": "conservative_migration_obligation_validation",
         "status": _status_from_checks(checks) if migration_scope_present else _STATUS_SKIPPED,
         "migration_scope_present": migration_scope_present,
+        "effective_patch_required": effective_patch_required,
         "scope": "mechanically-checkable subset only",
         "caveat": "PASS only means these conservative symbol/edit-scope checks passed; it does not prove driver correctness.",
         "modified_function_analysis": mod_info,

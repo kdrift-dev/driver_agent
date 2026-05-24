@@ -1,6 +1,6 @@
 # Testable Virtual/Software Driver Dataset Candidates
 
-Scope: v6.19 -> v7.0-rc1. Agent input remains old target module source plus old/new kernel-side definitions/diffs. Target new driver diff is evaluation-only.
+Scope: in-tree cases use v6.19 -> v7.0-rc1. OOT cases may use a case-specific known-good old kernel ref, but the target kernel is v7.0-rc1. Agent input remains old target module source plus old/new kernel-side definitions/diffs. Target new driver diff is evaluation-only.
 
 This note records candidates for pipeline testing and result demonstration. It is not a motivation statistic.
 
@@ -75,6 +75,8 @@ Artifacts:
 - `runs/testcase_inventory_20260524_163207/catalog_final_20260524_190007/run10_validation_results.csv`
 - `runs/testcase_inventory_20260524_163207/catalog_final_20260524_190007/run10_validation_summary.json`
 
+Note: this catalog artifact was generated before the OOT old-ref correction. Regenerate with the current `tools/build_testcase_catalog.py` before using OOT rows in new experiments.
+
 Catalog summary:
 
 - Total catalog cases: 30
@@ -93,7 +95,7 @@ No-QEMU run summary for the recommended first-run subset:
 - `INCOMPLETE_OR_UNKNOWN_EVIDENCE`: 1 (`drivers/target/tcm_remote`)
 - QEMU/system tests: disabled in this batch
 
-The OOT candidates are a feasibility catalog, not paper claims. Each OOT repo still needs build-layout and old-kernel compatibility probing before being promoted into the final dataset. Two probes are already informative:
+The OOT candidates are a feasibility catalog, not paper claims. Unlike in-tree cases, they do not need to use `v6.19` as the old kernel. They need a case-specific old source ref and, when available, a case-specific known-good old kernel ref. The target kernel should remain `v7.0-rc1`.
 
-- `d0u9/Linux-Device-Driver` `5.7.8` / `22_lddbus` exports cleanly, but the old source does not build on `v6.19`; it remains useful for older-kernel OOT studies, not for the unified `v6.19 -> v7.0-rc1` dataset.
-- `v4l2loopback/v4l2loopback` `v0.14.0` exports cleanly, but the old source also does not build on `v6.19`; a newer tag or separate old-ref pairing is needed before using it as a valid OOT migration case.
+- `d0u9/Linux-Device-Driver` `HEAD` / `eg_22_lddbus` has already been validated as an OOT case with `v6.1 -> v7.0-rc1` and QEMU load/interface smoke. It is valid for the OOT setting because the target is `v7.0-rc1`, even though it is not a `v6.19 -> v7.0-rc1` case. This case needs `patch_source_mode=full_module` because the relevant API changes include global callback signatures outside the initially affected function slices.
+- `v4l2loopback/v4l2loopback` `v0.14.0` exports cleanly, but still needs a suitable old kernel pairing or newer source ref before promotion into the runnable OOT dataset.

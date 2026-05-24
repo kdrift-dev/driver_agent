@@ -46,15 +46,18 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _cmd_for_case(row: dict[str, str], args: argparse.Namespace, case_out: Path) -> list[str]:
+    old_ref = row.get("kernel_old_ref") or args.old_ref
+    new_ref = row.get("kernel_new_ref") or args.new_ref
+    patch_source_mode = row.get("patch_source_mode") or args.patch_source_mode
     cmd = [
         sys.executable,
         str(Path(args.workflow_dir) / "pregen_driver_agent.py"),
         "--repo",
         args.repo,
         "--old-ref",
-        args.old_ref,
+        old_ref,
         "--new-ref",
-        args.new_ref,
+        new_ref,
         "--module-path",
         row["module_path"],
         "--out-dir",
@@ -64,7 +67,7 @@ def _cmd_for_case(row: dict[str, str], args: argparse.Namespace, case_out: Path)
         "--patch-candidates",
         str(args.patch_candidates),
         "--patch-source-mode",
-        args.patch_source_mode,
+        patch_source_mode,
         "--patch-prompt-strength",
         args.patch_prompt_strength,
         "--patch-source-with-lineno",

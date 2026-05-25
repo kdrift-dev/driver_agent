@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import time
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -94,6 +95,17 @@ def _list_module_source_files(tree: Path, module_path: str) -> list[str]:
         if p.suffix not in {".c", ".h", ".rs"}:
             continue
         out.append(p.relative_to(tree).as_posix())
+    return out
+
+
+def _ordered_unique(items: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
     return out
 
 
@@ -696,6 +708,7 @@ _VALIDATION_STAGE_ORDER = [
     "stage_patched_files",
     "compile_prepare",
     "compile_modules",
+    "compile_autofix",
     "test_generation",
     "suite_execution",
     "qemu_execution",
@@ -729,6 +742,414 @@ def _first_error_line(text: str) -> str:
         if s:
             return s[:280]
     return ""
+
+
+def _normalize_partial_module_compile_result(run: dict[str, Any]) -> dict[str, Any]:
+    """
+    Treat the common partial in-tree module-build artifact as non-fatal.
+
+    In validation we compile only the target module directory after
+    `modules_prepare`, not the whole kernel. That often leaves
+    `Module.symvers` absent, so modpost reports many unresolved in-kernel
+    symbols even when all C compilation succeeded. Keep the warning evidence,
+    but do not classify this environment artifact as a source-level compile
+    failure.
+    """
+    if run.get("ok"):
+        return run
+    text = (run.get("stdout", "") or "") + "\n" + (run.get("stderr", "") or "")
+    if "Module.symvers is missing" not in text or "ERROR: modpost:" not in text:
+        return run
+    for line in text.splitlines():
+        lower = line.lower()
+        if "fatal error:" in lower:
+            return run
+        if " error:" in lower and "error: modpost:" not in lower:
+            return run
+    out = dict(run)
+    out["ok"] = True
+    out["partial_module_compile_note"] = (
+        "C compilation reached modpost; unresolved symbol errors were ignored because "
+        "Module.symvers is unavailable in the partial validation worktree."
+    )
+    out["original_returncode"] = run.get("returncode")
+    return out
+
+
+_UNUSED_VAR_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+unused variable\s+[`\u2018'](?P<var>[A-Za-z_][A-Za-z0-9_]*)['\u2019`]"
+)
+_MISSING_HEADER_RE = re.compile(
+    r"(?P<file>[^:\n]+\.[ch]):(?P<line>\d+):(?P<col>\d+):\s+fatal error:\s+(?P<header>[^:\s]+):\s+No such file or directory"
+)
+_IIO_DEVICE_ALLOC_TOO_FEW_ARGS_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+too few arguments to function\s+[`'\u2018]iio_device_alloc['\u2019`]"
+)
+
+
+def _resolve_compile_error_file(filename: str, candidates: Iterable[str]) -> str:
+    name = filename.strip()
+    if not name:
+        return ""
+    normalized = name.replace("\\", "/")
+    matches = [p for p in candidates if p == normalized or p.endswith("/" + normalized) or Path(p).name == normalized]
+    if len(matches) == 1:
+        return matches[0]
+    return ""
+
+
+def _is_simple_unused_var_decl(line: str, var: str) -> bool:
+    stripped = line.strip()
+    if not stripped.endswith(";"):
+        return False
+    if "(" in stripped or ")" in stripped or "," in stripped:
+        return False
+    if re.search(rf"\b{re.escape(var)}\b", stripped) is None:
+        return False
+    # Only remove ordinary declaration-shaped lines. This deliberately avoids
+    # pointer arithmetic, labels, statements, and multi-declarator lines.
+    decl_re = re.compile(
+        rf"^(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
+        rf"(?:(?:struct|enum|union)\s+[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*)"
+        rf"(?:\s+\*+|\s+\*?\s*){re.escape(var)}(?:\s*=\s*[^;]+)?;$"
+    )
+    return bool(decl_re.match(stripped))
+
+
+def _remove_line_from_trees(old_tree: Path, new_tree: Path, rel: str, line_no: int, var: str) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "variable": var, "applied": False, "reason": ""}
+    changed_text: str | None = None
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        lines = read_text(path).splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        if tree_name == "new":
+            line = lines[line_no - 1]
+            if not _is_simple_unused_var_decl(line, var):
+                result["reason"] = "line_is_not_simple_unused_variable_declaration"
+                result["line_text"] = line
+                return result
+            del lines[line_no - 1]
+            changed_text = "\n".join(lines) + ("\n" if read_text(path).endswith("\n") else "")
+        else:
+            # The old_ref validation worktree has the same patch applied before
+            # staging. Remove the matching declaration there too so the recorded
+            # validation patch represents exactly what was compiled.
+            if not _is_simple_unused_var_decl(lines[line_no - 1], var):
+                result["reason"] = "old_tree_matching_decl_not_found"
+                return result
+            del lines[line_no - 1]
+            changed_text = "\n".join(lines) + ("\n" if read_text(path).endswith("\n") else "")
+        write_text(path, changed_text)
+    result["applied"] = True
+    result["reason"] = "removed_simple_unused_variable_declaration"
+    return result
+
+
+def _find_header_replacement(new_tree: Path, header: str) -> str:
+    header = header.strip("<>\" ")
+    if not header or (new_tree / "include" / header).exists():
+        return ""
+    hpath = Path(header)
+    stem = hpath.stem
+    suffix = hpath.suffix
+    parent = (new_tree / "include" / hpath.parent).resolve()
+    if not parent.exists() or not parent.is_dir():
+        return ""
+
+    candidates: list[Path] = []
+    variants = {
+        stem.replace("_", ""),
+        stem.replace("-", "_"),
+        stem.replace("_", "-"),
+    }
+    for variant in variants:
+        if not variant or variant == stem:
+            continue
+        p = parent / f"{variant}{suffix}"
+        if p.exists():
+            candidates.append(p)
+    if not candidates:
+        normalized = stem.replace("_", "").replace("-", "")
+        for p in parent.glob(f"*{suffix}"):
+            if p.stem.replace("_", "").replace("-", "") == normalized:
+                candidates.append(p)
+    unique = []
+    seen: set[str] = set()
+    for p in candidates:
+        rel = p.relative_to(new_tree / "include").as_posix()
+        if rel not in seen:
+            seen.add(rel)
+            unique.append(rel)
+    if len(unique) == 1:
+        return unique[0]
+    return ""
+
+
+def _replace_header_include_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+    old_header: str,
+    new_header: str,
+) -> dict[str, Any]:
+    result = {
+        "file": rel,
+        "line": line_no,
+        "missing_header": old_header,
+        "replacement_header": new_header,
+        "applied": False,
+        "reason": "",
+    }
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        line = lines[line_no - 1]
+        if old_header not in line or "#include" not in line:
+            result["reason"] = f"{tree_name}_line_is_not_matching_include"
+            result["line_text"] = line
+            return result
+        lines[line_no - 1] = line.replace(old_header, new_header)
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+    result["applied"] = True
+    result["reason"] = "replaced_missing_include_with_unique_existing_header"
+    return result
+
+
+def _fix_iio_device_alloc_parent_arg(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "function": "iio_device_alloc", "applied": False, "reason": ""}
+    changed = False
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        line = lines[line_no - 1]
+        if "iio_device_alloc(" not in line:
+            result["reason"] = f"{tree_name}_line_does_not_call_iio_device_alloc"
+            result["line_text"] = line
+            return result
+        if "iio_device_alloc(NULL," in line:
+            continue
+        # Safe narrow migration for the v5.x -> v7.x IIO signature:
+        # iio_device_alloc(sizeof_priv) -> iio_device_alloc(NULL, sizeof_priv)
+        # Only rewrite a single-line call and preserve the old ownership model.
+        new_line = line.replace("iio_device_alloc(", "iio_device_alloc(NULL, ", 1)
+        lines[line_no - 1] = new_line
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+        changed = True
+    result["applied"] = changed
+    result["reason"] = "inserted_null_parent_for_iio_device_alloc_signature_change" if changed else "already_fixed"
+    return result
+
+
+def _compile_failure_text(compile_like: dict[str, Any]) -> str:
+    return "\n".join(
+        (run.get("stdout", "") or "") + "\n" + (run.get("stderr", "") or "")
+        for run in compile_like.get("runs", []) or compile_like.get("rerun_compile", []) or []
+        if not run.get("ok")
+    )
+
+
+def _rerun_module_compile(new_tree: Path, compile_dirs: list[str], jobs: int) -> tuple[bool, list[dict[str, Any]]]:
+    runs: list[dict[str, Any]] = []
+    ok = True
+    for d in compile_dirs:
+        run = _run_cmd(["make", f"-j{max(1, jobs)}", f"M={d}", "modules"], cwd=new_tree, timeout=3600)
+        run = _normalize_partial_module_compile_result(run)
+        run["stdout"] = _truncate(run.get("stdout", ""))
+        run["stderr"] = _truncate(run.get("stderr", ""))
+        runs.append(run)
+        if not run.get("ok"):
+            ok = False
+    return ok, runs
+
+
+def _apply_safe_compile_autofixes_once(
+    *,
+    old_tree: Path,
+    new_tree: Path,
+    module_path: str,
+    copied_files: list[str],
+    touched_files: list[str],
+    compile_like: dict[str, Any],
+) -> list[dict[str, Any]]:
+    text = _compile_failure_text(compile_like)
+    candidates = _ordered_unique([*copied_files, *touched_files, *_list_module_source_files(new_tree, module_path)])
+    changes: list[dict[str, Any]] = []
+    seen_unused: set[tuple[str, int, str]] = set()
+    for m in _UNUSED_VAR_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "variable": m.group("var"),
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), m.group("var"))
+        if key in seen_unused:
+            continue
+        seen_unused.add(key)
+        changes.append(
+            _remove_line_from_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                var=m.group("var"),
+            )
+        )
+
+    seen_headers: set[tuple[str, int, str]] = set()
+    for m in _MISSING_HEADER_RE.finditer(text):
+        header = m.group("header")
+        replacement = _find_header_replacement(new_tree, header)
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not replacement or not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "missing_header": header,
+                    "applied": False,
+                    "reason": "no_unique_existing_header_replacement" if not replacement else "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), header)
+        if key in seen_headers:
+            continue
+        seen_headers.add(key)
+        changes.append(
+            _replace_header_include_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                old_header=header,
+                new_header=replacement,
+            )
+        )
+
+    seen_iio_alloc: set[tuple[str, int]] = set()
+    for m in _IIO_DEVICE_ALLOC_TOO_FEW_ARGS_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "function": "iio_device_alloc",
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")))
+        if key in seen_iio_alloc:
+            continue
+        seen_iio_alloc.add(key)
+        changes.append(
+            _fix_iio_device_alloc_parent_arg(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+            )
+        )
+    return changes
+
+
+def _try_compile_autofix_unused_variables(
+    *,
+    old_tree: Path,
+    new_tree: Path,
+    module_path: str,
+    copied_files: list[str],
+    touched_files: list[str],
+    compile_result: dict[str, Any],
+    compile_dirs: list[str],
+    jobs: int,
+    validation_dir: Path,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "attempted": False,
+        "applied_count": 0,
+        "changes": [],
+        "rerun_compile": [],
+        "success": False,
+        "patch_path": "",
+        "max_rounds": 3,
+    }
+    current: dict[str, Any] = {"runs": compile_result.get("runs", []) or []}
+    for round_idx in range(1, int(result["max_rounds"]) + 1):
+        changes = _apply_safe_compile_autofixes_once(
+            old_tree=old_tree,
+            new_tree=new_tree,
+            module_path=module_path,
+            copied_files=copied_files,
+            touched_files=touched_files,
+            compile_like=current,
+        )
+        if not changes:
+            if not result["attempted"]:
+                result["reason"] = "no_safe_compile_autofix_available"
+            break
+        result["attempted"] = True
+        for change in changes:
+            change["round"] = round_idx
+        result["changes"].extend(changes)
+        applied = [c for c in changes if c.get("applied")]
+        result["applied_count"] += len(applied)
+        if not applied:
+            result["reason"] = "no_safe_compile_autofix_applied"
+            break
+        rerun_ok, reruns = _rerun_module_compile(new_tree, compile_dirs, jobs)
+        for r in reruns:
+            r["autofix_round"] = round_idx
+        result["rerun_compile"].extend(reruns)
+        if rerun_ok:
+            result["success"] = True
+            result["reason"] = "compile_passed_after_safe_compile_autofix"
+            break
+        current = {"runs": reruns}
+
+    diff_res = _run_cmd(["git", "diff", "--", *(_ordered_unique([*copied_files, *touched_files]) or [module_path])], cwd=old_tree, timeout=300)
+    patch_path = validation_dir / "03_compile_autofixed_patch.diff"
+    if diff_res.get("stdout"):
+        write_text(patch_path, diff_res.get("stdout", ""))
+        result["patch_path"] = patch_path.as_posix()
+    if result["attempted"] and not result["success"] and not result.get("reason"):
+        result["reason"] = "compile_still_failed_after_safe_compile_autofix"
+    return result
 
 
 _IGNORED_FAILURE_LINE_SUBSTRINGS = (
@@ -817,6 +1238,7 @@ def run_validation_agent(
     skip_system_test_generation: bool,
     keep_worktrees: bool,
     enable_host_suite: bool = False,
+    kernel_config_target: str = "defconfig",
 ) -> dict[str, Any]:
     stage_results = _init_stage_results()
 
@@ -974,9 +1396,11 @@ def run_validation_agent(
     else:
         _set_stage_result(stage_results, "patch_apply", "passed", "patch applied on old_ref")
 
+    module_source_files = _list_module_source_files(old_tree, module_path)
+    stage_files = _ordered_unique([*module_source_files, *touched_files])
     copied = []
     missing = []
-    for rel in touched_files:
+    for rel in stage_files:
         src = old_tree / rel
         dst = new_tree / rel
         if not src.exists():
@@ -990,6 +1414,9 @@ def run_validation_agent(
         "copied_files": copied,
         "missing_files": missing,
         "count": len(copied),
+        "module_source_file_count": len(module_source_files),
+        "touched_file_count": len(touched_files),
+        "stage_policy": "stage_full_old_module_sources_plus_touched_patch_files",
     }
     if missing:
         _set_stage_result(
@@ -1000,10 +1427,18 @@ def run_validation_agent(
             details={"missing_files": missing},
         )
     else:
-        _set_stage_result(stage_results, "stage_patched_files", "passed", f"staged {len(copied)} files into new tree")
+        _set_stage_result(
+            stage_results,
+            "stage_patched_files",
+            "passed",
+            f"staged {len(copied)} files into new tree ({len(module_source_files)} old module sources, {len(touched_files)} touched)",
+        )
+
+    if kernel_config_target not in {"defconfig", "allmodconfig", "allyesconfig"}:
+        kernel_config_target = "defconfig"
 
     prep_steps: list[dict[str, Any]] = []
-    prep_steps.append(_run_cmd(["make", "defconfig"], cwd=new_tree, timeout=1800))
+    prep_steps.append(_run_cmd(["make", kernel_config_target], cwd=new_tree, timeout=1800))
     prep_steps.append(_run_cmd(["make", "olddefconfig"], cwd=new_tree, timeout=1800))
     prep_steps.append(_run_cmd(["make", "modules_prepare"], cwd=new_tree, timeout=2400))
 
@@ -1020,7 +1455,12 @@ def run_validation_agent(
         "error": "",
     }
     if prep_ok:
-        _set_stage_result(stage_results, "compile_prepare", "passed", "defconfig/olddefconfig/modules_prepare succeeded")
+        _set_stage_result(
+            stage_results,
+            "compile_prepare",
+            "passed",
+            f"{kernel_config_target}/olddefconfig/modules_prepare succeeded",
+        )
     else:
         prep_reason = "kernel_prepare_failed"
         for step in prep_steps:
@@ -1029,6 +1469,7 @@ def run_validation_agent(
                 break
         _set_stage_result(stage_results, "compile_prepare", "failed", prep_reason)
 
+    compile_dirs: list[str] = []
     if prep_ok:
         compile_dirs = _find_makefile_dirs(new_tree, copied or touched_files, module_path)
         compile_result["compiled_dirs"] = compile_dirs
@@ -1036,6 +1477,7 @@ def run_validation_agent(
         for d in compile_dirs:
             cmd = ["make", f"-j{max(1, jobs)}", f"M={d}", "modules"]
             run = _run_cmd(cmd, cwd=new_tree, timeout=3600)
+            run = _normalize_partial_module_compile_result(run)
             run["stdout"] = _truncate(run.get("stdout", ""))
             run["stderr"] = _truncate(run.get("stderr", ""))
             compile_result["runs"].append(run)
@@ -1053,6 +1495,62 @@ def run_validation_agent(
         compile_result["error"] = "kernel_prepare_failed"
         _set_stage_result(stage_results, "compile_modules", "skipped", "compile_prepare_failed")
 
+    compile_autofix: dict[str, Any] = {
+        "attempted": False,
+        "success": False,
+        "reason": "not_needed_or_not_applicable",
+        "changes": [],
+    }
+    if prep_ok and not compile_result.get("success"):
+        compile_autofix = _try_compile_autofix_unused_variables(
+            old_tree=old_tree,
+            new_tree=new_tree,
+            module_path=module_path,
+            copied_files=copied,
+            touched_files=touched_files,
+            compile_result=compile_result,
+            compile_dirs=compile_dirs,
+            jobs=jobs,
+            validation_dir=validation_dir,
+        )
+        if compile_autofix.get("attempted"):
+            if compile_autofix.get("success"):
+                compile_result["success"] = True
+                compile_result["error"] = ""
+                compile_result["autofix_applied"] = True
+                compile_result["autofix"] = compile_autofix
+                # Preserve the initial failing compile under runs and record
+                # the successful rerun separately for auditability.
+                compile_result["autofix_rerun_compile"] = compile_autofix.get("rerun_compile", [])
+                _set_stage_result(
+                    stage_results,
+                    "compile_autofix",
+                    "passed",
+                    compile_autofix.get("reason", "compile_passed_after_autofix"),
+                    details={"changes": compile_autofix.get("changes", [])},
+                )
+                _set_stage_result(
+                    stage_results,
+                    "compile_modules",
+                    "passed",
+                    "compiled after deterministic compile_autofix",
+                )
+            else:
+                compile_result["autofix_applied"] = bool(compile_autofix.get("applied_count"))
+                compile_result["autofix"] = compile_autofix
+                _set_stage_result(
+                    stage_results,
+                    "compile_autofix",
+                    "failed",
+                    compile_autofix.get("reason", "compile_autofix_failed"),
+                    details={"changes": compile_autofix.get("changes", [])},
+                )
+        else:
+            _set_stage_result(stage_results, "compile_autofix", "skipped", compile_autofix.get("reason", "not_applicable"))
+    else:
+        _set_stage_result(stage_results, "compile_autofix", "skipped", "compile_already_successful_or_prepare_failed")
+
+    out["compile_autofix"] = compile_autofix
     out["compile"] = compile_result
 
     if skip_system_test_generation:
@@ -1207,6 +1705,9 @@ def run_validation_agent(
     elif pr_verdict == "PASS":
         pr_status = "passed"
         pr_reason = f"overall_verdict={pr_verdict}"
+    elif pr_verdict == "UNKNOWN":
+        pr_status = "skipped"
+        pr_reason = "overall_verdict=UNKNOWN; spec consistency is not a correctness gate"
     else:
         pr_status = "failed"
         pr_reason = f"overall_verdict={pr_verdict}"

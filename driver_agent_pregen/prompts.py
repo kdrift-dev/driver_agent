@@ -16,6 +16,9 @@ Constraints:
 6. Do not require caller/sibling edits unless evidence shows caller-visible contract/resource/locking/cleanup changes.
 7. Respect edit_scope: edit_required functions need function-level specs; edit_candidate functions need conditional specs; context_only functions provide lifecycle/resource context and must not become required edits without evidence.
 8. Output MUST be strict JSON matching the required schema.
+9. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
+10. Keep output compact: emit specs only for edit_required and edit_candidate functions; do not emit specs for context_only functions.
+11. Keep each text field concise and evidence-grounded. Limit evidence/open_questions/required_changes/optional_changes to the most important 5 items per function.
 """.strip()
 
 
@@ -33,6 +36,9 @@ Constraints:
 8. Do not require caller/sibling edits unless evidence shows caller-visible contract/resource/locking/cleanup changes.
 9. Respect edit_scope: only edit_required functions can be required by default; edit_candidate functions require explicit cross-function evidence; context_only functions are non-editable reasoning context.
 10. Output MUST be strict JSON matching the required schema.
+11. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
+12. Keep output compact: emit function_results only for edit_required/edit_candidate functions with MATCH/MISMATCH/UNKNOWN that matters to migration; summarize context_only evidence in module_level_findings only when necessary.
+13. Limit evidence_used, required_changes, optional_changes, and unsupported_assumptions to the most important 8 items.
 """.strip()
 
 
@@ -48,9 +54,15 @@ Constraints:
    - edit_required functions are default edit targets.
    - edit_candidate functions may be edited only when rationale cites their candidate evidence.
    - context_only functions must not be edited.
+4a. If input contains target_edit_checklist, every item with required=true is a required compatibility edit.
+    The patch must remove the old_symbol usage from the listed affected_driver_functions, or explicitly
+    return a no-op/open_question if the source payload lacks the editable code needed to do so.
+    When replacement_candidates are present, prefer those exact candidates over invented alternatives.
 5. If a needed edit appears outside edit_required/edit_candidate scope, emit no-op with open_questions instead of patching outside scope.
 6. Output MUST be strict JSON matching the required schema.
 7. Patch text must be valid unified diff with diff --git headers.
+8. Do not invent include header paths. If you add or replace a #include, use an exact header path present in old source or kernel evidence.
+9. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
 """.strip()
 
 
@@ -67,11 +79,11 @@ Patch source mode: full_module
 PATCH_GEN_SOURCE_FOCUSED_APPENDIX = """
 Patch source mode: focused
 1. Input provides focused code blocks, not full module source.
-2. Blocks with source_item_kind=function_block and editable=true are the only patchable source blocks.
+2. Blocks with editable=true are patchable source blocks. This includes function_block and file_preamble_block items.
 3. Blocks with source_item_kind=context_function_block or editable=false are read-only context; do not edit them.
 4. Line prefixes like `L123:` are location hints and are NOT part of real source code.
 5. Do not emit line-prefix tokens inside the patch diff.
-6. Do not infer edits outside edit_required/edit_candidate blocks.
+6. Do not infer edits outside editable blocks.
 7. If a correct patch seems to require code outside the provided editable blocks, emit a no-op candidate with open_questions instead of guessing.
 """.strip()
 
@@ -98,6 +110,7 @@ Constraints:
 5. Do not invent kernel APIs. In kernel-evidence mode, use only APIs appearing in the supplied kernel evidence or old module source.
 6. Output MUST be strict JSON matching the required schema.
 7. Patch text must be valid unified diff with diff --git headers.
+8. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
 """.strip()
 
 
@@ -127,7 +140,8 @@ Constraints:
 4. Post-patch MATCH/PASS means the patch satisfies stated compatibility obligations, not global correctness.
 5. Separate required compatibility changes from optional modernization/cleanup.
 6. If evidence is insufficient for semantic correctness, prefer UNKNOWN and list unsupported assumptions.
-4. Output MUST be strict JSON matching the required schema.
+7. Output MUST be strict JSON matching the required schema.
+8. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
 """.strip()
 
 
@@ -143,6 +157,7 @@ Constraints:
    - use per-test return-code handling
    - on missing hardware/platform prerequisites, mark test as SKIP instead of FAIL
 5. Output MUST be strict JSON matching the required schema.
+6. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
 """.strip()
 
 
@@ -160,6 +175,7 @@ Constraints:
 8. On failure, print a DRIVER_AGENT_*_FAIL marker before poweroff.
 9. On unavailable optional interface/hardware, prefer a clear SKIP marker only when module load itself succeeds.
 10. Output MUST be strict JSON matching the required schema.
+11. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
 """.strip()
 
 

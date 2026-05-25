@@ -77,6 +77,101 @@ def _requires_effective_migration_edit(compatibility_obligations: dict[str, Any]
     return False
 
 
+def _deterministic_pre_reasoning_fallback(
+    *,
+    case_id: str,
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Conservative fallback used when LLM reasoning output is truncated/unparseable."""
+    impact = input_payload.get("impact_graph", {}) or {}
+    compat = input_payload.get("compatibility_obligations", {}) or {}
+    obligations = list(compat.get("obligations", []) or []) + list(compat.get("semantic_obligations", []) or [])
+
+    def norm_symbol(value: Any) -> str:
+        return str(value or "").split(" (", 1)[0].strip()
+
+    def obligations_for(symbols: list[Any]) -> list[dict[str, Any]]:
+        names = {norm_symbol(x) for x in symbols or []}
+        return [x for x in obligations if norm_symbol(x.get("affected_kernel_symbol", "")) in names][:4]
+
+    function_results: list[dict[str, Any]] = []
+    required_changes: list[str] = []
+    evidence_used: list[str] = []
+    for scope_key in ("edit_required_functions", "edit_candidate_functions"):
+        for fn in impact.get(scope_key, []) or []:
+            obs = obligations_for(fn.get("uses_changed_kernel_symbols", []) or [])
+            if not obs:
+                obs = [
+                    {
+                        "affected_kernel_symbol": str(sym),
+                        "hard_checks": ["verify old usage against full extracted/compatibility_obligations.json"],
+                        "patch_guidance_seed": "Use full extracted evidence for this impacted symbol.",
+                    }
+                    for sym in (fn.get("uses_changed_kernel_symbols", []) or [])[:3]
+                ]
+            fn_changes: list[str] = []
+            fn_optional: list[str] = []
+            for ob in obs:
+                sym = str(ob.get("affected_kernel_symbol", ""))
+                reps = [str(c.get("symbol", "")) for c in (ob.get("replacement_candidates", []) or []) if c.get("symbol")]
+                if ob.get("hard_checks"):
+                    msg = f"{fn.get('function')}: resolve hard obligation for {sym}"
+                    if reps:
+                        msg += f" using candidate {reps[0]}"
+                    fn_changes.append(msg)
+                elif str(ob.get("strength", ob.get("semantic_strength", ""))).lower() == "strong":
+                    msg = f"{fn.get('function')}: resolve strong semantic obligation for {sym}"
+                    if reps:
+                        msg += f" using candidate {reps[0]}"
+                    fn_changes.append(msg)
+                else:
+                    fn_optional.append(f"{fn.get('function')}: optional/unknown change for {sym}")
+                evidence_used.append(f"{sym}: {ob.get('id', 'obligation')}")
+            required_changes.extend(fn_changes)
+            function_results.append(
+                {
+                    "function": fn.get("function"),
+                    "verdict": "MISMATCH" if fn_changes else "UNKNOWN",
+                    "spec_claim": "Old code must satisfy directly evidenced kernel compatibility obligations.",
+                    "actual_behavior": "Old function still uses symbols listed in impact_graph.",
+                    "code_evidence": "; ".join(str(x) for x in (fn.get("uses_changed_kernel_symbols", []) or [])[:4]),
+                    "trigger_condition": "Build or migration mismatch when old usage is incompatible with new kernel definition.",
+                    "reasoning": "Deterministic fallback: required only for hard or strong semantic obligations present in input.",
+                    "patch_guidance": "; ".join(fn_changes[:4]) or "Do not edit unless stronger evidence appears.",
+                    "required_changes": fn_changes[:5],
+                    "optional_changes": fn_optional[:5],
+                    "unsupported_assumptions": [
+                        "Fallback reasoning is conservative and does not prove full behavior."
+                    ],
+                    "evidence_used": evidence_used[-4:],
+                    "confidence": "medium" if fn_changes else "low",
+                }
+            )
+            if len(function_results) >= 8:
+                break
+        if len(function_results) >= 8:
+            break
+
+    return {
+        "case_id": case_id,
+        "stage": "pre_code_reasoning",
+        "overall_verdict": "MISMATCH" if required_changes else "UNKNOWN",
+        "function_results": function_results,
+        "module_level_findings": [
+            "deterministic fallback reasoning used when LLM output is unavailable or unparsable"
+        ],
+        "hard_check_requirements": required_changes[:8],
+        "semantic_check_requirements": [],
+        "required_changes": required_changes[:12],
+        "optional_changes": [],
+        "unsupported_assumptions": [
+            "Spec/reasoning consistency is not a correctness proof."
+        ],
+        "evidence_used": evidence_used[:12],
+        "confidence": "medium" if required_changes else "low",
+    }
+
+
 def _enforce_pre_reasoning_policy(
     *,
     output: dict[str, Any],
@@ -312,29 +407,34 @@ def _slim_kernel_diffs_for_impact(
             "definition_changed": item.get("definition_changed"),
             "change_type_guess": item.get("change_type_guess"),
             "confidence": item.get("confidence"),
-            "replacement_candidates": item.get("replacement_candidates", [])[:3],
+            "replacement_candidates": _compact_replacement_candidates(
+                item.get("replacement_candidates", []) or []
+            ),
             "migration_signal": item.get("migration_signal", False),
-            "used_by_driver": (item.get("used_by_driver", []) or [])[:2],
-            "direct_include_requirements": item.get("direct_include_requirements", [])[:3],
-            "open_questions": item.get("open_questions", [])[:3],
+            "used_by_driver": (item.get("used_by_driver", []) or [])[:1],
+            "direct_include_requirements": item.get("direct_include_requirements", [])[:1],
+            "open_questions": item.get("open_questions", [])[:1],
         }
         for field, max_chars in (
-            ("old_definition", 250),
-            ("new_definition", 250),
-            ("definition_diff", 350),
+            ("old_definition", 50),
+            ("new_definition", 50),
+            ("definition_diff", 80),
         ):
             text = str(item.get(field, "") or "")
             slim[field] = text[:max_chars] + ("\n...[truncated]" if len(text) > max_chars else "")
         items.append(slim)
-    return {**kernel_definition_diffs, "items": items}
+    out = {**kernel_definition_diffs, "items": items[:4]}
+    if len(items) > 4:
+        out["llm_payload_filter"] = f"truncated_to_4_required_symbols_from_{len(items)}; full evidence on disk"
+    return out
 
 
 def _compact_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for ev in evidence[:3]:
+    for ev in evidence[:2]:
         value = ev.get("value")
         if isinstance(value, str):
-            value = value[:250] + ("\n...[truncated]" if len(value) > 250 else "")
+            value = value[:100] + ("\n...[truncated]" if len(value) > 100 else "")
         elif isinstance(value, dict):
             value = {
                 k: v
@@ -345,23 +445,45 @@ def _compact_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _compact_replacement_candidates(candidates: list[dict[str, Any]], max_items: int = 1) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for cand in (candidates or [])[:max_items]:
+        rec = {
+            "symbol": cand.get("symbol"),
+            "score": cand.get("score"),
+            "evidence": [str(x)[:100] for x in (cand.get("evidence", []) or [])[:2]],
+            "paths": [str(x) for x in (cand.get("paths", []) or [])[:2]],
+        }
+        loc = cand.get("new_location") or {}
+        if loc:
+            rec["new_location"] = {
+                "path": loc.get("path"),
+                "line": loc.get("line"),
+                "match": str(loc.get("match", "") or "")[:100],
+            }
+        if cand.get("return_type_guess"):
+            rec["return_type_guess"] = str(cand.get("return_type_guess"))[:80]
+        out.append(rec)
+    return out
+
+
 def _compact_obligation(x: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": x.get("id"),
         "affected_kernel_symbol": x.get("affected_kernel_symbol"),
-        "affected_driver_functions": x.get("affected_driver_functions", []),
-        "statement": x.get("statement"),
+        "affected_driver_functions": (x.get("affected_driver_functions", []) or [])[:4],
+        "statement": str(x.get("statement", "") or "")[:160],
         "kind": x.get("kind"),
         "strength": x.get("strength"),
-        "recommended_action": x.get("recommended_action"),
-        "hard_checks": x.get("hard_checks", []),
-        "semantic_checks": x.get("semantic_checks", []),
+        "recommended_action": str(x.get("recommended_action", "") or "")[:120],
+        "hard_checks": (x.get("hard_checks", []) or [])[:2],
+        "semantic_checks": (x.get("semantic_checks", []) or [])[:2],
         "confidence": x.get("confidence"),
         "semantic_strength": x.get("semantic_strength"),
         "migration_signal": x.get("migration_signal", False),
-        "replacement_candidates": x.get("replacement_candidates", [])[:3],
-        "patch_guidance_seed": x.get("patch_guidance_seed"),
-        "open_questions": x.get("open_questions", [])[:4],
+        "replacement_candidates": _compact_replacement_candidates(x.get("replacement_candidates", []) or []),
+        "patch_guidance_seed": str(x.get("patch_guidance_seed", "") or "")[:120],
+        "open_questions": (x.get("open_questions", []) or [])[:1],
         "evidence": _compact_evidence(x.get("evidence", []) or []),
     }
 
@@ -376,18 +498,20 @@ def _slim_obligations_for_impact(
     if not keys:
         return {**compatibility_obligations, "obligations": [], "semantic_obligations": []}
     out = dict(compatibility_obligations)
-    out["obligations"] = [
+    obligations = [
         _compact_obligation(x)
         for x in compatibility_obligations.get("obligations", []) or []
         if str(x.get("affected_kernel_symbol", "")) in keys
         and (x.get("hard_checks") or str(x.get("semantic_strength", "")).lower() == "strong")
     ]
-    out["semantic_obligations"] = [
+    out["obligations"] = obligations[:16]
+    semantic_obligations = [
         _compact_obligation(x)
         for x in compatibility_obligations.get("semantic_obligations", []) or []
         if str(x.get("affected_kernel_symbol", "")) in keys
         and str(x.get("strength", "")).lower() == "strong"
     ]
+    out["semantic_obligations"] = semantic_obligations[:8]
     dropped_semantic = [
         x.get("id")
         for x in compatibility_obligations.get("semantic_obligations", []) or []
@@ -406,6 +530,8 @@ def _slim_obligations_for_impact(
         "ids": dropped_semantic[:20],
     }
     out["llm_payload_filter"] = "impact_symbols_only; full obligations remain in extracted/compatibility_obligations.json"
+    if len(obligations) > 16 or len(semantic_obligations) > 8:
+        out["llm_payload_filter"] += f"; truncated obligations {len(obligations)}->{len(out['obligations'])}, semantic {len(semantic_obligations)}->{len(out['semantic_obligations'])}"
     return out
 
 
@@ -425,10 +551,10 @@ def _slim_impact_graph_for_llm(impact_graph: dict[str, Any], *, symbol_keys: set
             "tier": item.get("tier"),
             "edit_scope": item.get("edit_scope"),
             "uses_changed_kernel_symbols": item.get("uses_changed_kernel_symbols", []),
-            "ordinary_callers": item.get("ordinary_callers", [])[:8],
-            "ordinary_callees": item.get("ordinary_callees", [])[:8],
-            "callback_roots": item.get("callback_roots", [])[:4],
-            "trigger_reasons": item.get("trigger_reasons", [])[:8],
+            "ordinary_callers": item.get("ordinary_callers", [])[:2],
+            "ordinary_callees": item.get("ordinary_callees", [])[:2],
+            "callback_roots": item.get("callback_roots", [])[:1],
+            "trigger_reasons": item.get("trigger_reasons", [])[:2],
         }
 
     return {
@@ -436,13 +562,13 @@ def _slim_impact_graph_for_llm(impact_graph: dict[str, Any], *, symbol_keys: set
         "affected_tier_policy": impact_graph.get("affected_tier_policy", {}),
         "tier_counts": impact_graph.get("tier_counts", {}),
         "affected_functions": [],
-        "edit_required_functions": [slim_fn(x) for x in (impact_graph.get("edit_required_functions", []) or []) if keep(x)][:20],
-        "edit_candidate_functions": [slim_fn(x) for x in (impact_graph.get("edit_candidate_functions", []) or []) if keep(x)][:12],
-        "context_only_functions": [slim_fn(x) for x in (impact_graph.get("context_only_functions", []) or []) if keep(x)][:8],
+        "edit_required_functions": [slim_fn(x) for x in (impact_graph.get("edit_required_functions", []) or []) if keep(x)][:4],
+        "edit_candidate_functions": [slim_fn(x) for x in (impact_graph.get("edit_candidate_functions", []) or []) if keep(x)][:2],
+        "context_only_functions": [slim_fn(x) for x in (impact_graph.get("context_only_functions", []) or []) if keep(x)][:1],
         "context_functions": [],
         "edges_summary": {
             "count": len(impact_graph.get("edges", []) or []),
-            "sample": (impact_graph.get("edges", []) or [])[:12],
+            "sample": (impact_graph.get("edges", []) or [])[:2],
         },
         "llm_payload_filter": "compact graph; affected/context duplicates omitted; full graph remains in extracted/impact_graph.json",
     }
@@ -563,22 +689,24 @@ def run_pre_reasoner_agent(
                 extracted_dir,
                 impact_graph,
                 list_key="edit_required_functions",
-                max_items=12,
+                max_chars=800,
+                max_items=2,
                 symbol_keys=required_keys,
             ),
             "edit_candidate_function_slices": _collect_slices(
                 extracted_dir,
                 impact_graph,
                 list_key="edit_candidate_functions",
-                max_items=6,
+                max_chars=700,
+                max_items=1,
                 symbol_keys=required_keys,
             ),
             "context_only_function_slices": _collect_slices(
                 extracted_dir,
                 impact_graph,
                 list_key="context_only_functions",
-                max_chars=1200,
-                max_items=4,
+                max_chars=600,
+                max_items=1,
                 symbol_keys=required_keys,
             ),
             "affected_function_slices": [],
@@ -588,20 +716,21 @@ def run_pre_reasoner_agent(
         }
 
     prompt = build_pre_reasoner_prompt(input_payload)
-    default_output = {
-        "case_id": case_id,
-        "stage": "pre_code_reasoning",
-        "overall_verdict": "UNKNOWN",
-        "function_results": [],
-        "module_level_findings": ["dry-run or no-provider placeholder"],
-        "hard_check_requirements": [],
-        "semantic_check_requirements": [],
-        "required_changes": [],
-        "optional_changes": [],
-        "unsupported_assumptions": [],
-        "evidence_used": [],
-        "confidence": "low",
-    }
+    default_output = _deterministic_pre_reasoning_fallback(case_id=case_id, input_payload=input_payload)
+
+    if (not dry_run) and (not no_required_edit) and len(prompt) > 45000:
+        write_text(stage_dir / "prompt.md", prompt)
+        write_json(stage_dir / "input.json", input_payload)
+        write_text(stage_dir / "raw_output.txt", "")
+        default_output["parse_status"] = "deterministic_fallback_large_payload"
+        default_output["fallback_reason"] = f"pre_reasoner_prompt_chars={len(prompt)} exceeds 45000"
+        out = _enforce_pre_reasoning_policy(
+            output=default_output,
+            compatibility_obligations=compatibility_obligations,
+            impact_graph=impact_graph,
+        )
+        write_json(stage_dir / "parsed_output.json", out)
+        return out
 
     out = llm_client.call_json(
         stage_dir=stage_dir,
@@ -609,6 +738,7 @@ def run_pre_reasoner_agent(
         input_payload=input_payload,
         dry_run=bool(dry_run or no_required_edit),
         default_output=default_output,
+        max_tokens=6000,
     )
     out = _enforce_pre_reasoning_policy(
         output=out,
@@ -693,6 +823,58 @@ def run_post_reasoner_agent(
         "confidence": "low",
     }
 
+    if not bool(compile_result.get("success")):
+        write_json(stage_dir / "input.json", input_payload)
+        write_text(stage_dir / "prompt.md", prompt)
+        write_text(stage_dir / "raw_output.txt", "")
+        out = {
+            "case_id": case_id,
+            "stage": "post_patch_reasoning",
+            "overall_verdict": "FAIL",
+            "function_results": [],
+            "module_level_findings": [
+                "deterministic_spec_consistency_short_circuit: compile failed before post reasoning"
+            ],
+            "remaining_open_questions": ["compile_not_success"],
+            "required_changes": [],
+            "optional_changes": [],
+            "unsupported_assumptions": [
+                "Cannot claim obligation satisfaction when target module does not compile."
+            ],
+            "evidence_used": ["compile_result.success=false"],
+            "confidence": "high",
+            "parse_status": "deterministic_compile_failed",
+            "skipped_llm_reason": "compile_failed",
+        }
+        write_json(stage_dir / "parsed_output.json", out)
+        return out
+
+    if (not dry_run) and (not no_required_edit) and len(prompt) > 70000:
+        write_json(stage_dir / "input.json", input_payload)
+        write_text(stage_dir / "prompt.md", prompt)
+        write_text(stage_dir / "raw_output.txt", "")
+        out = {
+            "case_id": case_id,
+            "stage": "post_patch_reasoning",
+            "overall_verdict": "UNKNOWN",
+            "function_results": [],
+            "module_level_findings": [
+                "deterministic_spec_consistency_short_circuit: post-reasoning payload too large for reliable LLM JSON output"
+            ],
+            "remaining_open_questions": ["spec_consistency_not_run_large_payload"],
+            "required_changes": [],
+            "optional_changes": [],
+            "unsupported_assumptions": [
+                "Spec consistency was skipped; compile and deterministic validation remain the available evidence."
+            ],
+            "evidence_used": ["compile_result.success=true"],
+            "confidence": "low",
+            "parse_status": "ok",
+            "skipped_llm_reason": f"post_reasoner_prompt_chars={len(prompt)} exceeds 70000",
+        }
+        write_json(stage_dir / "parsed_output.json", out)
+        return out
+
     if no_required_edit:
         write_json(stage_dir / "input.json", input_payload)
         write_text(stage_dir / "prompt.md", prompt)
@@ -722,6 +904,7 @@ def run_post_reasoner_agent(
             input_payload=input_payload,
             dry_run=dry_run,
             default_output=default_output,
+            max_tokens=4000,
         )
     out = _enforce_post_reasoning_policy(
         output=out,

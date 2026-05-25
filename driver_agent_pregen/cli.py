@@ -65,6 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--llm-base-url", type=str, default=None, help="override LLM API base URL")
     p.add_argument("--config-ini", type=str, default=default_config, help="config file path for provider keys")
     p.add_argument("--llm-timeout-sec", type=int, default=300, help="LLM request timeout in seconds")
+    p.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        default=10000,
+        help="maximum output tokens per LLM call; keep bounded to avoid oversized JSON/spec outputs",
+    )
     p.add_argument("--llm-max-retries", type=int, default=2, help="LLM request max retries")
     p.add_argument("--llm-retry-backoff-sec", type=int, default=3, help="LLM retry backoff seconds")
     p.add_argument(
@@ -146,6 +152,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable qemu/kunit runtime command execution",
     )
     p.add_argument("--qemu-timeout-sec", type=int, default=3600, help="timeout seconds for suite/qemu commands")
+    p.add_argument(
+        "--kernel-config-target",
+        type=str,
+        choices=["defconfig", "allmodconfig", "allyesconfig"],
+        default="defconfig",
+        help=(
+            "kernel config target for validation compile. Use allmodconfig for P0/hard-break "
+            "experiments to avoid false passes from disabled drivers."
+        ),
+    )
     p.add_argument(
         "--semantic-obligation-table",
         type=str,
@@ -259,6 +275,8 @@ def _run_oot_parallel_path(args: argparse.Namespace) -> tuple[Path, bool]:
         args.config_ini,
         "--llm-timeout-sec",
         str(args.llm_timeout_sec),
+        "--llm-max-tokens",
+        str(args.llm_max_tokens),
         "--llm-max-retries",
         str(args.llm_max_retries),
         "--max-patch-iterations",
@@ -411,6 +429,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         "llm_enabled": args.enable_llm,
         "llm_provider": args.llm_provider,
         "llm_model": args.llm_model,
+        "llm_max_tokens": args.llm_max_tokens,
         "affected_func_signal_mode": args.affected_func_signal_mode,
         "include_kernel_commit_info": bool(args.include_kernel_commit_info),
         "commit_info_policy": (
@@ -422,6 +441,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         "patch_source_mode": args.patch_source_mode,
         "patch_source_with_lineno": bool(args.patch_source_with_lineno),
         "patch_generation_mode": args.patch_generation_mode,
+        "kernel_config_target": args.kernel_config_target,
         "oot_pipeline_mode": args.oot_pipeline_mode if args.oot_repo_url else None,
         "oot_repo_url": args.oot_repo_url,
         "oot_repo_ref": args.oot_repo_ref,
@@ -698,6 +718,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             base_url=args.llm_base_url,
             config_ini=args.config_ini,
             timeout_sec=args.llm_timeout_sec,
+            max_tokens=args.llm_max_tokens,
             max_retries=args.llm_max_retries,
             retry_backoff_sec=args.llm_retry_backoff_sec,
         )
@@ -859,6 +880,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
                 skip_system_test_generation=args.skip_system_test_generation,
                 enable_host_suite=args.enable_host_suite,
                 keep_worktrees=not args.cleanup_worktrees,
+                kernel_config_target=args.kernel_config_target,
             ),
         )
 

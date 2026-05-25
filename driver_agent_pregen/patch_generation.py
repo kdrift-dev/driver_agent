@@ -217,9 +217,11 @@ def _extract_file_include_block(
     if last_include_idx < 0:
         return None
 
-    # Include enough surrounding top-of-file context for unified diffs that add
-    # a missing direct header, but do not fall back to full-file source.
-    end = min(len(lines), max(last_include_idx + 3, min(max_lines, 30)))
+    # Include enough top-of-file context for unified diffs that add headers and
+    # update file-level declarations/structs used by editable functions. Keep
+    # read-only context narrower to avoid full-module prompt noise.
+    preamble_limit = max_lines if editable else min(max_lines, 30)
+    end = min(len(lines), max(last_include_idx + 3, preamble_limit))
     raw_text = "\n".join(lines[:end])
     content = _render_with_line_numbers(raw_text, start_line=1) if with_line_numbers else raw_text
     return {
@@ -229,12 +231,30 @@ def _extract_file_include_block(
         "end_line": end,
         "roles": sorted(set(roles)),
         "content": content,
-        "source_item_kind": "file_include_block",
+        "source_item_kind": "file_preamble_block" if editable else "file_include_block",
         "editable": editable,
         "edit_scope": "edit_required" if editable else "context_only",
         "candidate_reasons": [],
         "context_reasons": ["file include block for direct include dependency edits"],
     }
+
+
+def _local_headers_in_source(extracted_dir: Path, rel_file: str, module_path: str, max_lines: int = 120) -> list[str]:
+    src_path = extracted_dir / "old_module_sources" / rel_file
+    if not src_path.exists() or not src_path.is_file():
+        return []
+    base_dir = str(Path(rel_file).parent)
+    out: list[str] = []
+    for line in read_text(src_path).splitlines()[:max_lines]:
+        m = re.match(r'\s*#\s*include\s+"([^"]+)"', line)
+        if not m:
+            continue
+        hdr = (Path(base_dir) / m.group(1)).as_posix()
+        if not hdr.startswith(module_path.rstrip("/") + "/"):
+            continue
+        if hdr not in out:
+            out.append(hdr)
+    return out
 
 
 def _record_to_source_candidate(item: dict[str, Any], role: str) -> dict[str, Any] | None:
@@ -404,9 +424,38 @@ def _build_focused_old_sources(
             roles=["file_include_context"] + sorted(file_roles[rel]),
             editable=bool(file_editable[rel]),
             with_line_numbers=with_line_numbers,
+            max_lines=160 if file_editable[rel] else 80,
         )
         if ib:
             include_blocks.append(ib)
+
+    # If an editable C file declares callbacks/helpers in a local module header,
+    # provide that header preamble as editable context. This keeps focused mode
+    # small while allowing required signature changes to update both the
+    # definition and declaration.
+    seen_include_paths = {str(x.get("path", "")) for x in include_blocks}
+    for rel in sorted(file_roles):
+        if not file_editable.get(rel):
+            continue
+        if Path(rel).suffix.lower() not in {".c", ".cc", ".cpp", ".cxx"}:
+            continue
+        for hdr in _local_headers_in_source(extracted_dir, rel, module_path):
+            if hdr in seen_include_paths:
+                continue
+            ib = _extract_file_include_block(
+                extracted_dir=extracted_dir,
+                rel_file=hdr,
+                roles=["local_header_edit_context"],
+                editable=True,
+                with_line_numbers=with_line_numbers,
+                max_lines=160,
+            )
+            if ib:
+                ib["context_reasons"] = [
+                    f"local header included by editable source {rel}; declarations may need signature-compatible edits"
+                ]
+                include_blocks.append(ib)
+                seen_include_paths.add(hdr)
 
     blocks = include_blocks + blocks
     if len(blocks) > max_blocks:
@@ -482,6 +531,25 @@ def _compact_obligation_evidence(evidence: list[dict[str, Any]]) -> list[dict[st
     return out
 
 
+def _compact_replacement_candidate(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "symbol": item.get("symbol"),
+        "score": item.get("score"),
+        "evidence": [
+            truncate_text(str(x), max_chars=160)
+            for x in (item.get("evidence", []) or [])[:2]
+            if str(x).strip()
+        ],
+        "paths": [str(x) for x in (item.get("paths", []) or [])[:2] if str(x).strip()],
+        "new_location": {
+            k: v
+            for k, v in (item.get("new_location") or {}).items()
+            if k in {"path", "line", "match"}
+        },
+        "return_type_guess": item.get("return_type_guess"),
+    }
+
+
 def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": item.get("id"),
@@ -496,7 +564,11 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
         "confidence": item.get("confidence"),
         "semantic_strength": item.get("semantic_strength"),
         "migration_signal": item.get("migration_signal", False),
-        "replacement_candidates": item.get("replacement_candidates", [])[:3],
+        "replacement_candidates": [
+            _compact_replacement_candidate(x)
+            for x in (item.get("replacement_candidates", []) or [])[:3]
+            if x.get("symbol")
+        ],
         "patch_guidance_seed": item.get("patch_guidance_seed"),
         "open_questions": item.get("open_questions", [])[:4],
         "evidence": _compact_obligation_evidence(item.get("evidence", []) or []),
@@ -533,13 +605,50 @@ def _compact_agent_obligations(compatibility_obligations: dict[str, Any]) -> dic
     }
 
 
+def _target_edit_checklist(compatibility_obligations: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compact required-edit checklist for the patch generator.
+
+    This is intentionally redundant with compatibility_obligations, but much
+    easier for the LLM to follow than a large evidence blob. It contains no new
+    evidence or reference-driver information.
+    """
+    rows: list[dict[str, Any]] = []
+    for item in compatibility_obligations.get("obligations", []) or []:
+        hard = list(item.get("hard_checks", []) or [])
+        strength = str(item.get("semantic_strength", "") or "").lower()
+        if not hard and strength != "strong":
+            continue
+        replacements = [
+            {
+                "symbol": c.get("symbol"),
+                "evidence": (c.get("evidence", []) or [])[:2],
+                "paths": (c.get("paths", []) or [])[:2],
+            }
+            for c in (item.get("replacement_candidates", []) or [])[:3]
+            if c.get("symbol")
+        ]
+        rows.append(
+            {
+                "obligation_id": item.get("id"),
+                "old_symbol": item.get("affected_kernel_symbol"),
+                "affected_driver_functions": item.get("affected_driver_functions", []),
+                "required": True,
+                "hard_checks": hard[:3],
+                "replacement_candidates": replacements,
+                "patch_guidance_seed": item.get("patch_guidance_seed"),
+                "confidence": item.get("confidence"),
+            }
+        )
+    return rows[:40]
+
+
 def _compact_pre_reasoning(pre_reasoning: dict[str, Any]) -> dict[str, Any]:
     out = {
         "overall_verdict": pre_reasoning.get("overall_verdict"),
-        "required_changes": pre_reasoning.get("required_changes", [])[:12],
-        "optional_changes": pre_reasoning.get("optional_changes", [])[:8],
-        "unsupported_assumptions": pre_reasoning.get("unsupported_assumptions", [])[:8],
-        "evidence_used": pre_reasoning.get("evidence_used", [])[:12],
+        "required_changes": [truncate_text(str(x), max_chars=240) for x in (pre_reasoning.get("required_changes", []) or [])[:12]],
+        "optional_changes": [truncate_text(str(x), max_chars=160) for x in (pre_reasoning.get("optional_changes", []) or [])[:6]],
+        "unsupported_assumptions": [truncate_text(str(x), max_chars=160) for x in (pre_reasoning.get("unsupported_assumptions", []) or [])[:6]],
+        "evidence_used": [truncate_text(str(x), max_chars=160) for x in (pre_reasoning.get("evidence_used", []) or [])[:10]],
         "confidence": pre_reasoning.get("confidence"),
         "function_results": [],
         "llm_payload_filter": "compact pre-reasoning; full output remains in llm_calls/02_pre_reasoner/parsed_output.json",
@@ -550,25 +659,45 @@ def _compact_pre_reasoning(pre_reasoning: dict[str, Any]) -> dict[str, Any]:
                 "function": item.get("function"),
                 "verdict": item.get("verdict"),
                 "spec_claim": truncate_text(str(item.get("spec_claim", "") or ""), max_chars=600),
-                "actual_behavior": truncate_text(str(item.get("actual_behavior", "") or ""), max_chars=600),
-                "trigger_condition": truncate_text(str(item.get("trigger_condition", "") or ""), max_chars=400),
-                "patch_guidance": truncate_text(str(item.get("patch_guidance", "") or ""), max_chars=900),
+                "actual_behavior": truncate_text(str(item.get("actual_behavior", "") or ""), max_chars=400),
+                "trigger_condition": truncate_text(str(item.get("trigger_condition", "") or ""), max_chars=260),
+                "patch_guidance": truncate_text(str(item.get("patch_guidance", "") or ""), max_chars=520),
                 "required_changes": item.get("required_changes", [])[:6],
                 "optional_changes": item.get("optional_changes", [])[:4],
-                "evidence_used": item.get("evidence_used", [])[:6],
+                "evidence_used": [truncate_text(str(x), max_chars=140) for x in (item.get("evidence_used", []) or [])[:4]],
                 "confidence": item.get("confidence"),
             }
         )
     return out
 
 
+def _compact_guidance_rows(rows: list[Any], *, max_rows: int, max_text: int = 360) -> list[Any]:
+    out: list[Any] = []
+    for row in (rows or [])[:max_rows]:
+        if isinstance(row, dict):
+            out.append(
+                {
+                    "function": row.get("function"),
+                    "guidance": truncate_text(str(row.get("guidance", "") or row.get("patch_guidance", "") or ""), max_chars=max_text),
+                    "evidence": [truncate_text(str(x), max_chars=140) for x in (row.get("evidence", []) or [])[:3]],
+                }
+            )
+        else:
+            out.append(truncate_text(str(row), max_chars=max_text))
+    return out
+
+
 def _compact_context_packet_for_patch(context_packet: dict[str, Any]) -> dict[str, Any]:
     return {
         "kernel_change_summary": context_packet.get("kernel_change_summary", ""),
-        "patch_generation_guidance": (context_packet.get("patch_generation_guidance", []) or [])[:20],
-        "hard_validation_plan": (context_packet.get("hard_validation_plan", []) or [])[:12],
-        "semantic_validation_plan": (context_packet.get("semantic_validation_plan", []) or [])[:12],
-        "open_questions": (context_packet.get("open_questions", []) or [])[:12],
+        "patch_generation_guidance": _compact_guidance_rows(
+            context_packet.get("patch_generation_guidance", []) or [],
+            max_rows=12,
+            max_text=360,
+        ),
+        "hard_validation_plan": [truncate_text(str(x), max_chars=180) for x in (context_packet.get("hard_validation_plan", []) or [])[:10]],
+        "semantic_validation_plan": [truncate_text(str(x), max_chars=180) for x in (context_packet.get("semantic_validation_plan", []) or [])[:8]],
+        "open_questions": [truncate_text(str(x), max_chars=180) for x in (context_packet.get("open_questions", []) or [])[:8]],
     }
 
 
@@ -1297,6 +1426,7 @@ def run_patch_generation_agent(
                     requested_mode=requested_source_mode,
                     old_sources=old_sources,
                 ),
+                "target_edit_checklist": _target_edit_checklist(compatibility_obligations),
                 "compatibility_obligations": _compact_agent_obligations(compatibility_obligations),
                 "impact_graph": {
                     "tier_counts": llm_impact_graph.get("tier_counts", {}),
@@ -1457,9 +1587,12 @@ def run_patch_generation_agent(
                 )
                 continue
         elif not fixed_ok and _has_effective_changes(raw_diff):
-            # If line-fix validation fails, prefer original raw patch text as a conservative fallback.
-            candidate_patch = raw_diff
-            fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
+            # Do not fall back to raw LLM text: it may contain malformed hunk
+            # fragments that the line fixer already rebuilt into a syntactic
+            # patch. Keep the rebuilt text for validation and surface
+            # line_fix_ok=false in the report.
+            candidate_patch = fixed_text if fixed_text else raw_diff
+            fix_msgs.append("line_fix_failed; using_rebuilt_patch_text_for_validation")
 
         scope_check = (
             _edit_scope_policy_check(
@@ -1626,8 +1759,8 @@ def run_patch_generation_agent(
                     )
                     reject_heur_candidate = True
             elif not fixed_ok and _has_effective_changes(raw_patch):
-                candidate_patch = raw_patch
-                fix_msgs.append("line_fix_failed; fallback_to_raw_patch_text")
+                candidate_patch = fixed_text if fixed_text else raw_patch
+                fix_msgs.append("line_fix_failed; using_rebuilt_patch_text_for_validation")
             if not reject_heur_candidate:
                 scope_check = (
                     _edit_scope_policy_check(

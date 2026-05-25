@@ -106,6 +106,22 @@ def run_definition_locator(
             pattern, regex, fixed = _symbol_pattern(name, kind)
             if kind == "function":
                 include_paths = ["include/*", "arch/*/include/*"]
+                old_macro_hits = accessor.search(
+                    "old",
+                    rf"^\s*#\s*define\s+{re.escape(name)}\b",
+                    regex=True,
+                    fixed=False,
+                    pathspecs=include_paths,
+                    max_hits=40,
+                )
+                new_macro_hits = accessor.search(
+                    "new",
+                    rf"^\s*#\s*define\s+{re.escape(name)}\b",
+                    regex=True,
+                    fixed=False,
+                    pathspecs=include_paths,
+                    max_hits=40,
+                )
                 old_hits = accessor.search(
                     "old",
                     pattern,
@@ -122,8 +138,12 @@ def run_definition_locator(
                     pathspecs=include_paths,
                     max_hits=120,
                 )
-                old_hits = _filter_function_like_hits(old_hits, name)
-                new_hits = _filter_function_like_hits(new_hits, name)
+                old_hits = _dedupe_hits(
+                    old_macro_hits + _filter_function_like_hits(accessor, "old", old_hits, name)
+                )
+                new_hits = _dedupe_hits(
+                    new_macro_hits + _filter_function_like_hits(accessor, "new", new_hits, name)
+                )
                 if not old_hits:
                     old_hits = accessor.search(
                         "old",
@@ -133,7 +153,7 @@ def run_definition_locator(
                         pathspecs=_search_pathspecs_for_kind(kind, module_path, exclude_driver_paths=exclude_driver_paths),
                         max_hits=180,
                     )
-                    old_hits = _filter_function_like_hits(old_hits, name)
+                    old_hits = _filter_function_like_hits(accessor, "old", old_hits, name)
                 if not new_hits:
                     new_hits = accessor.search(
                         "new",
@@ -143,7 +163,7 @@ def run_definition_locator(
                         pathspecs=_search_pathspecs_for_kind(kind, module_path, exclude_driver_paths=exclude_driver_paths),
                         max_hits=180,
                     )
-                    new_hits = _filter_function_like_hits(new_hits, name)
+                    new_hits = _filter_function_like_hits(accessor, "new", new_hits, name)
             else:
                 search_paths = _search_pathspecs_for_kind(kind, module_path, exclude_driver_paths=exclude_driver_paths)
                 old_hits = accessor.search(
@@ -315,14 +335,47 @@ def _locate_struct_definition(
     )
     out = []
     for h in hits:
+        loc_line = h.line
+        loc_match = h.text.strip()[:500]
+        field_found = field_name is None
+        if field_name:
+            try:
+                text = accessor.read_file(side, h.path)
+                lines = text.splitlines()
+                start_idx = max(0, int(h.line or 1) - 1)
+                brace_depth = 0
+                saw_open = False
+                for idx in range(start_idx, min(len(lines), start_idx + 400)):
+                    line = lines[idx]
+                    if "{" in line:
+                        saw_open = True
+                        brace_depth += line.count("{")
+                    if saw_open and re.search(rf"\b{re.escape(field_name)}\b", line):
+                        loc_line = idx + 1
+                        decl_lines = [line.rstrip()]
+                        for j in range(idx + 1, min(len(lines), idx + 16)):
+                            decl_lines.append(lines[j].rstrip())
+                            if ";" in lines[j]:
+                                break
+                        loc_match = "\n".join(x.strip() for x in decl_lines).strip()[:500]
+                        field_found = True
+                        break
+                    if saw_open and "}" in line:
+                        brace_depth -= line.count("}")
+                        if brace_depth <= 0:
+                            break
+            except Exception:
+                pass
+        if field_name and not field_found:
+            continue
         out.append(
             {
                 "path": h.path,
-                "line": h.line,
+                "line": loc_line,
                 "match": (
                     f"struct {struct_name} definition"
                     + (f" provider for field .{field_name}" if field_name else "")
-                    + f": {h.text.strip()[:360]}"
+                    + f": {loc_match[:360]}"
                 ),
                 "locator": h.locator,
                 "owner_struct": struct_name,
@@ -356,11 +409,26 @@ def _is_driver_tree_path(path: str) -> bool:
     return path == "drivers" or path.startswith("drivers/")
 
 
-def _filter_function_like_hits(hits, symbol_name: str):
+def _filter_function_like_hits(accessor: RepositoryAccessor, side: str, hits, symbol_name: str):
     out = []
     for h in hits:
         if _looks_like_decl_or_def(h.text, symbol_name):
             out.append(h)
+            continue
+        if _looks_like_multiline_decl_or_def(accessor, side, h.path, h.line, h.text, symbol_name):
+            out.append(h)
+    return out
+
+
+def _dedupe_hits(hits):
+    out = []
+    seen = set()
+    for h in hits:
+        key = (h.path, h.line, h.text)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
     return out
 
 
@@ -409,11 +477,12 @@ def _looks_like_decl_or_def(line: str, symbol_name: str) -> bool:
         return False
     if text.startswith(symbol_name + "("):
         return False
-    if "," in prefix and "(" in prefix:
+    decl_prefix = _strip_kernel_decl_attributes(prefix)
+    if "," in decl_prefix and "(" in decl_prefix:
         return False
 
     # Heuristic: declaration/definition lines typically carry type qualifiers.
-    tokens = set(prefix.replace("*", " ").split())
+    tokens = set(decl_prefix.replace("*", " ").split())
     typeish = {
         "static",
         "inline",
@@ -444,8 +513,99 @@ def _looks_like_decl_or_def(line: str, symbol_name: str) -> bool:
     if tokens & typeish:
         return True
 
-    # Accept if it still looks like prototype/definition tail.
-    return text.endswith(";") or text.endswith("{")
+    return False
+
+
+def _strip_kernel_decl_attributes(prefix: str) -> str:
+    """Remove leading/inline kernel annotation macros from a declaration prefix.
+
+    Kernel prototypes commonly use attributes before the return type, e.g.
+    ``__printf(2, 3) int dev_set_name(...)``.  The comma in the attribute
+    otherwise looks like a function-call argument list and causes the locator
+    to reject a real declaration as a callsite.
+    """
+
+    out = prefix
+    attr_pat = re.compile(r"\b__[A-Za-z_][A-Za-z0-9_]*\s*(?:\([^)]*\))?")
+    # Apply repeatedly because declarations often stack multiple annotations.
+    prev = None
+    while prev != out:
+        prev = out
+        out = attr_pat.sub(" ", out)
+    return out
+
+
+def _looks_like_multiline_decl_or_def(
+    accessor: RepositoryAccessor,
+    side: str,
+    path: str,
+    line_no: int,
+    line: str,
+    symbol_name: str,
+) -> bool:
+    """Accept split declarations such as:
+
+    static inline void *
+    pci_alloc_consistent(...)
+
+    A plain line starting with the symbol is normally rejected as a call site.
+    For kernel headers many inline wrappers put the return type on the
+    previous line, so inspect a small backward window in the same file.
+    """
+
+    text = (line or "").strip()
+    if not re.match(rf"^{re.escape(symbol_name)}\s*\(", text):
+        return False
+    if not path.startswith(("include/", "arch/")):
+        return False
+    try:
+        src = accessor.read_file(side, path)
+    except Exception:
+        return False
+    lines = src.splitlines()
+    idx = max(0, int(line_no or 1) - 1)
+    prefix_lines: list[str] = []
+    for j in range(idx - 1, max(-1, idx - 5), -1):
+        prev = lines[j].strip()
+        if not prev:
+            continue
+        if prev.startswith(("//", "/*", "*")):
+            continue
+        if any(tok in prev for tok in (";", "{", "}", "=")):
+            break
+        prefix_lines.insert(0, prev)
+    if not prefix_lines:
+        return False
+    prefix = " ".join(prefix_lines)
+    tokens = set(prefix.replace("*", " ").split())
+    typeish = {
+        "static",
+        "inline",
+        "__always_inline",
+        "extern",
+        "const",
+        "unsigned",
+        "signed",
+        "long",
+        "short",
+        "void",
+        "int",
+        "char",
+        "bool",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "s8",
+        "s16",
+        "s32",
+        "s64",
+        "size_t",
+        "ssize_t",
+        "struct",
+        "dma_addr_t",
+    }
+    return bool(tokens & typeish)
 
 
 def _module_family_pathspec(module_path: str | None) -> str | None:

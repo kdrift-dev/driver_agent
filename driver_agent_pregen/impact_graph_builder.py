@@ -139,20 +139,83 @@ def _symbol_tier(item: dict[str, Any]) -> str | None:
         # matches drive affected-function edits. They are too noisy without a
         # precise declaration/provider.
         return None
+
+    ct = str(item.get("change_type_guess", "unknown"))
+    old_locations = item.get("old_locations", []) or []
+    new_locations = item.get("new_locations", []) or []
+    old_definition = str(item.get("old_definition", "") or "").strip()
+    new_definition = str(item.get("new_definition", "") or "").strip()
+    missing_in_new = bool(old_locations and not new_locations) or any(
+        "missing in new_ref" in str(q) for q in item.get("open_questions", []) or []
+    )
+    if missing_in_new:
+        return "hard"
+
+    # A driver mentioning `struct foo *` is not itself evidence that every
+    # internal field change in `struct foo` requires a callsite edit. Concrete
+    # field accesses are emitted separately as kind=field and can still drive
+    # hard obligations.
+    if item.get("kind") == "struct":
+        return None
+
+    # Kernel-side helper discovery can be useful as future semantic evidence,
+    # but it is not enough to edit a target driver by default. It often means
+    # "same subsystem added a helper", not "this old callsite is wrong".
+    if item.get("kernel_side_helper_signal"):
+        return None
+
     if item.get("migration_signal"):
         return "semantic"
 
-    ct = str(item.get("change_type_guess", "unknown"))
+    # Regex fallbacks may attach a broad or nearby kernel hunk to a driver token
+    # without locating the actual old/new definition. Do not use such symbols to
+    # drive edits unless they are a missing-symbol/include/migration case handled
+    # above.
+    if (
+        not old_locations
+        and not new_locations
+        and not old_definition
+        and not new_definition
+        and not item.get("direct_include_requirements")
+        and ct not in {"include_dependency"}
+    ):
+        return None
+
     if ct == "annotation_only":
         return "context"
     if item.get("definition_changed"):
+        if item.get("kind") == "field" and ct == "struct_field_change" and (new_locations or new_definition):
+            symbol = str(item.get("symbol", "") or "")
+            old_definition = str(item.get("old_definition", "") or "")
+            new_definition = str(item.get("new_definition", "") or "")
+            if symbol and (f"(*{symbol})" in old_definition or f"(*{symbol})" in new_definition):
+                return "hard"
+            # The enclosing struct changed, but the concrete field is still
+            # present in the new kernel definition. Treat it as context instead
+            # of forcing an edit that may invent non-existent accessors.
+            return "context"
         if ct == "include_dependency":
             return "hard" if item.get("direct_include_requirements") else "context"
-        if ct in SEMANTIC_CHANGE_TYPES:
+        if ct == "return_value_change":
+            return "context"
+        if ct in {"ownership_change", "locking_change", "api_migration_signal"}:
             return "semantic"
+        if ct in {"signature_change", "struct_field_change", "api_deprecation", "rename"}:
+            return "hard"
+        if item.get("kind") == "macro" and ct != "unknown":
+            return "hard"
+        # A changed function body or nearby struct context is evidence for
+        # reasoning, but not enough to require editing every old-driver caller.
+        # Hard affected functions should correspond to source compatibility
+        # risk: removed symbol, signature/field change, include dependency, or
+        # explicit semantic contract change.
+        if ct == "unknown":
+            return "context"
         return "hard"
 
-    if ct in SEMANTIC_CHANGE_TYPES:
+    if ct == "return_value_change":
+        return "context"
+    if ct in {"ownership_change", "locking_change", "api_migration_signal"}:
         return "semantic"
     if ct == "include_dependency":
         return "hard" if item.get("direct_include_requirements") else "context"
@@ -512,6 +575,80 @@ def run_impact_graph_builder(
                     continue
                 _add_candidate(name, "resource_pairing", f"allocator-seed={seed};cleanup={name}")
                 out_edges.append({"from": seed, "to": name, "kind": "edit_candidate_resource_pairing"})
+
+        # 5) Same driver-state field expansion. Kernel API migrations often
+        # require replacing a local state representation (for example an old
+        # embedded helper object plus a cached base id). Other functions that
+        # access the same object->field are candidate edits, but only as a
+        # conservative, evidence-tagged expansion from an edit_required seed.
+        seed_text_parts: list[str] = []
+        seed_file = str(rec.get("file", "") or "")
+        seed_src = module_result.copied_root / seed_file
+        trigger_lines = [
+            _to_int(((tr.get("use_site") or {}) if isinstance(tr, dict) else {}).get("line"), 0)
+            for tr in rec.get("trigger_reasons", []) or []
+        ]
+        trigger_lines = [ln for ln in trigger_lines if ln > 0]
+        if seed_src.exists() and trigger_lines:
+            src_lines = read_text(seed_src).splitlines()
+            for ln in trigger_lines[:8]:
+                start = max(1, ln - 8)
+                end = min(len(src_lines), ln + 8)
+                seed_text_parts.append("\n".join(src_lines[start - 1 : end]))
+        if not seed_text_parts:
+            seed_slice = rec.get("local_slice_path")
+            if seed_slice:
+                seed_path = extracted_dir / str(seed_slice)
+                if seed_path.exists():
+                    seed_text_parts.append(read_text(seed_path))
+        seed_text = "\n".join(seed_text_parts)
+        raw_state_fields = [
+            (obj, field)
+            for obj, field in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)\b", seed_text)
+            if field not in {"dev", "driver", "parent"}
+        ]
+        trigger_tokens: set[str] = set()
+        for tr in rec.get("trigger_reasons", []) or []:
+            sym_text = str(tr.get("symbol", "") or "")
+            m = re.match(r"^(.*) \(([^()]*)\)$", sym_text)
+            if not m:
+                continue
+            for tok in re.findall(r"[A-Za-z][A-Za-z0-9]*", m.group(1).lower()):
+                if tok not in {"iio", "dev", "device", "get", "set", "put", "alloc", "free"} and len(tok) > 2:
+                    trigger_tokens.add(tok)
+        selected_objects = {
+            obj
+            for obj, field in raw_state_fields
+            if set(re.findall(r"[A-Za-z][A-Za-z0-9]*", field.lower())).intersection(trigger_tokens)
+        }
+        state_fields = {
+            (obj, field)
+            for obj, field in raw_state_fields
+            if obj in selected_objects
+        }
+        if state_fields:
+            added = 0
+            for name, records in fn_index.items():
+                if name == seed or name in edit_required_seed_names or added >= 8:
+                    continue
+                f = _select_function_record(records, [])
+                if not f:
+                    continue
+                file_rel = f.get("file")
+                src_path = module_result.copied_root / file_rel
+                if not src_path.exists():
+                    continue
+                fn_text = _read_line_slice(src_path, int(f.get("start_line", 1)), int(f.get("end_line", f.get("start_line", 1))))
+                hits = sorted(
+                    f"{obj}->{field}"
+                    for obj, field in state_fields
+                    if re.search(rf"\b{re.escape(obj)}\s*->\s*{re.escape(field)}\b", fn_text)
+                )
+                if not hits:
+                    continue
+                _add_candidate(name, "same_driver_state_field", f"seed={seed};fields={','.join(hits[:4])}")
+                out_edges.append({"from": seed, "to": name, "kind": "edit_candidate_same_driver_state_field"})
+                added += 1
 
     # Build required edit records.
     for fn_name in sorted(edit_required_seed_names):

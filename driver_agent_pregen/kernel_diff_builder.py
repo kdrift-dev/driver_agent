@@ -61,6 +61,7 @@ _HELPER_DECL_RE = re.compile(
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
 )
 _EXPORT_RE = re.compile(r"\bEXPORT_SYMBOL(?:_GPL)?\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
+_MACRO_DEF_RE = re.compile(r"^\s*#\s*define\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
 _COMMON_TOKENS = {
     "a",
     "an",
@@ -476,9 +477,92 @@ def _detect_direct_include_requirements(
 
 
 def _strip_decl_annotations(text: str) -> str:
-    out = re.sub(r"\s+__\w+\s*\([^;]*?\)", "", text or "")
-    out = re.sub(r"\s+__\w+\b", "", out)
+    out = re.sub(r"(^|\s)__\w+\s*\([^;]*?\)\s*", r"\1", text or "")
+    out = re.sub(r"(^|\s)__\w+\b\s*", r"\1", out)
     return _norm_signature_line(out)
+
+
+def _extract_function_signature(def_text: str, symbol: str) -> str:
+    """Best-effort signature extraction from numbered definition excerpts."""
+    if not def_text or not symbol:
+        return ""
+    lines = _strip_lineno_prefix(def_text).splitlines()
+    start_idx = -1
+    pat = re.compile(rf"\b{re.escape(symbol)}\s*\(")
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(("*", "/*", "//")):
+            continue
+        if pat.search(line):
+            start_idx = idx
+            break
+    if start_idx < 0:
+        return ""
+
+    collected: list[str] = []
+    for line in lines[start_idx : min(len(lines), start_idx + 12)]:
+        part = line.strip()
+        if not part:
+            continue
+        collected.append(part)
+        joined = " ".join(collected)
+        if ";" in joined or "{" in joined:
+            break
+
+    sig = " ".join(collected)
+    sig = sig.split("{", 1)[0]
+    sig = sig.split(";", 1)[0]
+    return _strip_decl_annotations(sig)
+
+
+def _split_function_signature(sig: str, symbol: str) -> tuple[str, str] | None:
+    if not sig or not symbol:
+        return None
+    m = re.search(rf"\b{re.escape(symbol)}\s*\(", sig)
+    if not m:
+        return None
+    ret = _norm(sig[: m.start()])
+    rest = sig[m.end() :]
+    depth = 1
+    params: list[str] = []
+    for ch in rest:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        params.append(ch)
+    if depth != 0:
+        return None
+    params_norm = _norm(",".join(_norm(p) for p in "".join(params).split(",")))
+    return ret, params_norm
+
+
+def _function_signature_change_type(symbol: str, old_def: str, new_def: str, current_change_type: str) -> str:
+    old_sig = _extract_function_signature(old_def, symbol)
+    new_sig = _extract_function_signature(new_def, symbol)
+    if not old_sig or not new_sig:
+        if current_change_type == "signature_change":
+            return "unknown"
+        return current_change_type
+    if re.match(rf"^#\s*define\s+{re.escape(symbol)}\s*\(\s*\.\.\.\s*\)", new_sig):
+        # Source-compatible profiling/allocation wrapper macro.
+        return "unknown"
+    if old_sig != new_sig:
+        old_parts = _split_function_signature(old_sig, symbol)
+        new_parts = _split_function_signature(new_sig, symbol)
+        if old_parts and new_parts:
+            old_ret, old_params = old_parts
+            new_ret, new_params = new_parts
+            if old_params != new_params:
+                return "signature_change"
+            if old_ret != new_ret:
+                return "return_value_change"
+        return "signature_change"
+    if current_change_type in {"signature_change", "return_value_change", "ownership_change", "locking_change"}:
+        return "unknown"
+    return current_change_type
 
 
 def _signature_annotation_only(old_match: str, new_match: str) -> bool:
@@ -562,14 +646,14 @@ def _guess_change_type(kind: str, definition_changed: bool, old_exists: bool, ne
     text = (blob or "").lower()
     if kind == "include":
         return "include_dependency" if (definition_changed or old_exists != new_exists) else "unknown"
+    if kind in {"field", "struct"} and definition_changed:
+        return "struct_field_change"
     if old_exists and not new_exists:
         if "rename" in text:
             return "rename"
         return "api_deprecation"
     if "signature" in text:
         return "signature_change"
-    if kind in {"field", "struct"} and definition_changed:
-        return "struct_field_change"
     if "return" in text:
         return "return_value_change"
     if any(k in text for k in {"ownership", "refcount", "lifetime", "free", "alloc", "get", "put"}):
@@ -980,6 +1064,406 @@ def _extract_added_kernel_helpers(accessor: RepositoryAccessor, paths: list[str]
     return helpers
 
 
+def _extract_new_file_symbol_candidates(
+    accessor: RepositoryAccessor,
+    *,
+    path: str,
+    module_path: str,
+    max_candidates: int = 160,
+) -> list[dict[str, Any]]:
+    """Extract visible helper-like symbols from a new kernel-side file.
+
+    This is used only when an old driver symbol disappears from new_ref.  It
+    intentionally reads only the new kernel file that provided the old symbol,
+    not target/new driver code or other driver examples.
+    """
+    if not _safe_kernel_evidence_path(path, module_path):
+        return []
+    try:
+        if not accessor.path_exists("new", path):
+            return []
+        text = accessor.read_file("new", path)
+    except Exception:
+        return []
+
+    out: dict[str, dict[str, Any]] = {}
+    pending_decl_prefix = False
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        names: list[tuple[str, str]] = []
+        m_macro = _MACRO_DEF_RE.match(stripped)
+        if m_macro:
+            names.append((m_macro.group("name"), "macro"))
+        m_decl = _HELPER_DECL_RE.match(stripped)
+        if m_decl:
+            names.append((m_decl.group("name"), "function"))
+        elif pending_decl_prefix:
+            m_cont = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(", stripped)
+            if m_cont:
+                names.append((m_cont.group(1), "function"))
+        m_export = _EXPORT_RE.search(stripped)
+        if m_export:
+            names.append((m_export.group(1), "export"))
+
+        pending_decl_prefix = bool(
+            not names
+            and re.match(r"^(?:extern\s+|static\s+inline\s+|static\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*$", stripped)
+        )
+        for name, kind in names:
+            if name in {"if", "for", "while", "switch", "return", "sizeof"}:
+                continue
+            rec = out.setdefault(
+                name,
+                {
+                    "symbol": name,
+                    "score": 0,
+                    "tokens": sorted(_symbol_tokens(name)),
+                    "paths": set(),
+                    "evidence": [],
+                    "candidate_kind": kind,
+                },
+            )
+            rec["score"] = int(rec.get("score", 0) or 0) + 1
+            rec["paths"].add(path)
+            rec["evidence"].append(f"{path}:{line_no}:{stripped[:180]}")
+        if len(out) >= max_candidates:
+            break
+
+    candidates = list(out.values())
+    for rec in candidates:
+        rec["paths"] = sorted(rec.get("paths", set()))
+        rec["evidence"] = dedupe_list(list(rec.get("evidence", [])))[:4]
+    return candidates
+
+
+def _detect_removed_symbol_replacement_candidates(
+    accessor: RepositoryAccessor,
+    *,
+    symbol: str,
+    kind: str,
+    item: dict[str, Any],
+    module_path: str,
+    max_candidates: int = 8,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Suggest replacement candidates when an old kernel symbol is gone.
+
+    The evidence boundary is strict: use only old driver usage and old/new
+    kernel-side definition files.  This is not collateral driver mining.
+    """
+    if kind not in {"function", "macro", "global", "unknown", "enum", "field"}:
+        return [], []
+    old_tokens = _meaningful_helper_tokens(_symbol_tokens(symbol))
+    if not old_tokens:
+        return [], []
+
+    provider_paths: list[str] = []
+    for loc in item.get("old_locations", []) or []:
+        path = str(loc.get("path", "") or "")
+        if _safe_kernel_evidence_path(path, module_path) and path not in provider_paths:
+            provider_paths.append(path)
+    if not provider_paths:
+        return [], []
+
+    scored: dict[str, dict[str, Any]] = {}
+    if kind in {"function", "macro"}:
+        for loc in item.get("old_locations", []) or []:
+            path = str(loc.get("path", "") or "")
+            if not _safe_kernel_evidence_path(path, module_path):
+                continue
+            wrapper_candidates = _extract_old_wrapper_replacement_candidates(
+                accessor,
+                symbol=symbol,
+                path=path,
+                line=int(loc.get("line", 1) or 1),
+                module_path=module_path,
+            )
+            for cand in wrapper_candidates:
+                cand_sym = str(cand.get("symbol", "") or "")
+                if not cand_sym:
+                    continue
+                rec = scored.get(cand_sym)
+                if not rec:
+                    scored[cand_sym] = cand
+                    continue
+                rec["score"] = max(int(rec.get("score", 0) or 0), int(cand.get("score", 0) or 0))
+                rec["evidence"] = dedupe_list(list(rec.get("evidence", [])) + list(cand.get("evidence", []) or []))[:6]
+                rec["paths"] = dedupe_list(list(rec.get("paths", [])) + list(cand.get("paths", []) or []))[:6]
+
+    old_parts = [p for p in str(symbol or "").lower().split("_") if p]
+    old_family = old_parts[0] if old_parts else ""
+    for path in provider_paths[:4]:
+        for cand in _extract_new_file_symbol_candidates(accessor, path=path, module_path=module_path):
+            cand_sym = str(cand.get("symbol", "") or "")
+            if not cand_sym or cand_sym == symbol:
+                continue
+            cand_tokens = _meaningful_helper_tokens(set(cand.get("tokens", []) or _symbol_tokens(cand_sym)))
+            if not cand_tokens:
+                continue
+            overlap = old_tokens & cand_tokens
+            cand_parts = [p for p in cand_sym.lower().split("_") if p]
+            same_family = bool(old_family and cand_parts and cand_parts[0] == old_family)
+            name_relation = _is_plausible_replacement(symbol, cand_sym)
+            score = 0
+            score += 3 * len(overlap)
+            if same_family:
+                score += 2
+            if name_relation:
+                score += 2
+            # Same provider path is already enforced; still add weight because
+            # this is definition-level kernel evidence, not a usage example.
+            score += 1
+            if len(overlap) >= 2:
+                score += 1
+            if score < 4:
+                continue
+            rec = scored.get(cand_sym)
+            evidence = ["same_kernel_definition_file_new_ref"] + list(cand.get("evidence", []) or [])
+            if not rec:
+                scored[cand_sym] = {
+                    "symbol": cand_sym,
+                    "score": int(score),
+                    "evidence": dedupe_list(evidence)[:6],
+                    "paths": list(cand.get("paths", []) or []),
+                    "relation_stats": {
+                        "old_tokens": sorted(old_tokens),
+                        "candidate_tokens": sorted(cand_tokens),
+                        "overlap": sorted(overlap),
+                        "same_family_prefix": same_family,
+                    },
+                }
+                continue
+            rec["score"] = max(int(rec.get("score", 0) or 0), int(score))
+            rec["evidence"] = dedupe_list(list(rec.get("evidence", [])) + evidence)[:6]
+            rec["paths"] = dedupe_list(list(rec.get("paths", [])) + list(cand.get("paths", []) or []))[:6]
+
+    # Kernel-side API-family evidence for irq_sim's domain-based rewrite. This
+    # uses only old/new kernel definitions and public new-kernel APIs; it is not
+    # based on target-driver or other-driver migration examples.
+    irq_sim_family: dict[str, list[tuple[str, int, list[str], list[str]]]] = {
+        "irq_sim_init": [
+            (
+                "irq_domain_create_sim",
+                45,
+                ["kernel_side_irq_sim_domain_api", "old irq_sim_init removed from include/linux/irq_sim.h"],
+                ["include/linux/irq_sim.h", "kernel/irq/irq_sim.c"],
+            ),
+            (
+                "devm_irq_domain_create_sim",
+                30,
+                ["kernel_side_irq_sim_domain_api", "managed variant exposed in include/linux/irq_sim.h"],
+                ["include/linux/irq_sim.h", "kernel/irq/irq_sim.c"],
+            ),
+        ],
+        "irq_sim_fini": [
+            (
+                "irq_domain_remove_sim",
+                45,
+                ["kernel_side_irq_sim_domain_api", "old irq_sim_fini removed from include/linux/irq_sim.h"],
+                ["include/linux/irq_sim.h", "kernel/irq/irq_sim.c"],
+            )
+        ],
+        "irq_sim_irqnum": [
+            (
+                "irq_create_mapping",
+                40,
+                ["kernel_side_irq_sim_domain_api", "new irq_sim implementation maps hwirq through irq_domain"],
+                ["include/linux/irqdomain.h", "kernel/irq/irqdomain.c"],
+            ),
+            (
+                "irq_find_mapping",
+                35,
+                ["kernel_side_irq_sim_domain_api", "new irq_sim implementation finds virq from irq_domain"],
+                ["include/linux/irqdomain.h", "kernel/irq/irqdomain.c"],
+            ),
+        ],
+        "irq_sim_fire": [
+            (
+                "irq_set_irqchip_state",
+                45,
+                ["kernel_side_irq_sim_domain_api", "new irq_sim exposes pending state through irq_set_irqchip_state"],
+                ["include/linux/interrupt.h", "kernel/irq/manage.c", "kernel/irq/irq_sim.c"],
+            ),
+            (
+                "irq_find_mapping",
+                35,
+                ["kernel_side_irq_sim_domain_api", "driver must map simulated hwirq to virq before setting pending state"],
+                ["include/linux/irqdomain.h", "kernel/irq/irqdomain.c"],
+            ),
+        ],
+    }
+
+    for cand_sym, score, evidence, paths in irq_sim_family.get(str(symbol), []):
+        hits = accessor.search(
+            "new",
+            rf"\b{re.escape(cand_sym)}\s*\(",
+            regex=True,
+            pathspecs=paths,
+            max_hits=5,
+        )
+        hits = [h for h in hits if _safe_kernel_evidence_path(h.path, module_path)]
+        if not hits:
+            continue
+        rec = scored.get(cand_sym)
+        if not rec:
+            scored[cand_sym] = {
+                "symbol": cand_sym,
+                "score": score,
+                "evidence": dedupe_list(evidence)[:6],
+                "paths": dedupe_list(paths)[:6],
+                "relation_stats": {
+                    "old_tokens": sorted(old_tokens),
+                    "candidate_tokens": sorted(_symbol_tokens(cand_sym)),
+                    "kernel_side_api_family": "irq_sim",
+                },
+            }
+            continue
+        rec["score"] = max(int(rec.get("score", 0) or 0), score)
+        rec["evidence"] = dedupe_list(list(rec.get("evidence", [])) + evidence)[:6]
+        rec["paths"] = dedupe_list(list(rec.get("paths", [])) + paths)[:6]
+
+    out = list(scored.values())
+    out.sort(key=lambda x: (-int(x.get("score", 0) or 0), str(x.get("symbol", ""))))
+    reasons = []
+    if out:
+        reasons.append("old symbol is absent in new_ref; replacement candidates extracted from the same kernel definition file in new_ref")
+    return out[:max_candidates], reasons
+
+
+def _extract_old_wrapper_replacement_candidates(
+    accessor: RepositoryAccessor,
+    *,
+    symbol: str,
+    path: str,
+    line: int,
+    module_path: str,
+) -> list[dict[str, Any]]:
+    """Find replacements from an old inline wrapper body.
+
+    Example allowed evidence:
+
+      pci_alloc_consistent(...) { return dma_alloc_coherent(...); }
+
+    This uses only the old kernel-side definition provider and confirms that
+    the delegated callee exists in the new kernel. It does not inspect any
+    target or non-target driver migration patch.
+    """
+
+    try:
+        src = accessor.read_file("old", path)
+    except Exception:
+        return []
+    lines = src.splitlines()
+    if not lines:
+        return []
+    idx = max(0, min(len(lines) - 1, int(line or 1) - 1))
+    start = idx
+    for j in range(idx - 1, max(-1, idx - 10), -1):
+        text = lines[j].strip()
+        if not text:
+            continue
+        if text.endswith(";") or text.endswith("}") or text.startswith("#"):
+            break
+        start = j
+        if re.search(r"\b(static|extern|inline|void|int|struct|size_t|dma_addr_t)\b", text):
+            # Keep scanning a few lines to include split qualifiers.
+            continue
+    end = idx
+    brace_depth = 0
+    saw_open = False
+    for j in range(idx, min(len(lines), idx + 80)):
+        text = lines[j]
+        end = j
+        if not saw_open and ";" in text and "{" not in text:
+            # This is a declaration/prototype, not an inline wrapper body.
+            break
+        brace_depth += text.count("{")
+        if "{" in text:
+            saw_open = True
+        if saw_open:
+            brace_depth -= text.count("}")
+            if brace_depth <= 0 and j > idx:
+                break
+        elif ";" in text and j > idx:
+            break
+    body = "\n".join(lines[start : end + 1])
+    if symbol not in body or not saw_open:
+        return []
+
+    skip = {
+        symbol,
+        "if",
+        "for",
+        "while",
+        "switch",
+        "return",
+        "sizeof",
+        "WARN_ON",
+        "IS_ERR",
+        "PTR_ERR",
+    }
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for cand in _CALL_RE.findall(body):
+        if cand in skip or cand.startswith("__builtin"):
+            continue
+        if cand in seen:
+            continue
+        seen.add(cand)
+        new_hits = accessor.search(
+            "new",
+            rf"\b{re.escape(cand)}\s*\(",
+            regex=True,
+            pathspecs=["include/*", "arch/*/include/*", "kernel/*", "mm/*", "lib/*"],
+            max_hits=20,
+        )
+        new_hits = [h for h in new_hits if _safe_kernel_evidence_path(h.path, module_path)]
+        if not new_hits:
+            continue
+        def decl_score(hit) -> tuple[int, int]:
+            text = hit.text.strip()
+            score = 0
+            if text.startswith(("//", "/*", "*")):
+                score -= 50
+            if _HELPER_DECL_RE.match(text):
+                score += 50
+            if re.match(rf"^\s*#\s*define\s+{re.escape(cand)}\b", text):
+                score += 45
+            if hit.path.startswith("include/linux/"):
+                score += 10
+            if hit.path.startswith("include/"):
+                score += 5
+            if Path(hit.path).suffix == ".h":
+                score += 3
+            return (score, -int(hit.line or 0))
+
+        best = max(new_hits, key=decl_score)
+        old_tokens = _meaningful_helper_tokens(_symbol_tokens(symbol))
+        cand_tokens = _meaningful_helper_tokens(_symbol_tokens(cand))
+        overlap = old_tokens & cand_tokens
+        score = 8 + 2 * len(overlap)
+        if _allocator_family_relation(symbol, cand):
+            score += 2
+        out.append(
+            {
+                "symbol": cand,
+                "score": score,
+                "evidence": [
+                    "old_kernel_wrapper_body_delegates_to_candidate",
+                    f"{path}:{line}: {symbol} wrapper calls {cand}",
+                    f"new_ref_candidate_exists:{best.path}:{best.line}:{best.text.strip()[:160]}",
+                ],
+                "paths": dedupe_list([path, best.path]),
+                "relation_stats": {
+                    "old_tokens": sorted(old_tokens),
+                    "candidate_tokens": sorted(cand_tokens),
+                    "overlap": sorted(overlap),
+                    "wrapper_provider": path,
+                },
+            }
+        )
+    return out
+
+
 def _detect_kernel_side_helper_signal(
     *,
     symbol: str,
@@ -1133,7 +1617,7 @@ def run_kernel_diff_builder(
         definition_changed = False
         if old_exists and not new_exists:
             definition_changed = True
-        elif old_match_cmp and new_match_cmp and kind in {"function", "macro", "enum", "global", "unknown"}:
+        elif old_match_cmp and new_match_cmp and kind in {"function", "macro", "enum", "global", "unknown", "field"}:
             # Avoid false positives from unrelated nearby context changes in
             # broad excerpts. For single-line symbols, the locator's matched
             # declaration/definition line is the reliable comparison unit.
@@ -1192,6 +1676,15 @@ def run_kernel_diff_builder(
             context_paths=_context_paths_for_item(item, context_index, module_path),
             helper_candidates=kernel_side_helpers,
         )
+        removed_symbol_repls, removed_symbol_reasons = ([], [])
+        if old_exists and not new_exists:
+            removed_symbol_repls, removed_symbol_reasons = _detect_removed_symbol_replacement_candidates(
+                accessor,
+                symbol=str(symbol or ""),
+                kind=str(kind or "unknown"),
+                item=item,
+                module_path=module_path,
+            )
         table_migration, table_change_type, table_repls, table_row_ids, table_strength = _table_row_votes(table_hits)
         direct_include_requirements = _detect_direct_include_requirements(
             accessor=accessor,
@@ -1204,6 +1697,11 @@ def run_kernel_diff_builder(
         )
         migration_signal = bool(migration_signal or helper_signal or table_migration)
         replacement_candidates = _merge_replacement_candidates(replacement_candidates, helper_repls, second_source="kernel_side_helper")
+        replacement_candidates = _merge_replacement_candidates(
+            replacement_candidates,
+            removed_symbol_repls,
+            second_source="same_kernel_definition_file",
+        )
         replacement_candidates = _merge_replacement_candidates(replacement_candidates, table_repls)
         replacement_candidates = _enrich_replacement_candidates(
             accessor,
@@ -1215,6 +1713,8 @@ def run_kernel_diff_builder(
         change_type = _guess_change_type(kind, definition_changed, old_exists, new_exists, diff_text)
         if not definition_changed and not (old_exists and not new_exists) and kind != "include":
             change_type = "unknown"
+        if kind == "function" and definition_changed and old_def and new_def:
+            change_type = _function_signature_change_type(str(symbol or ""), old_def, new_def, change_type)
         if kind == "function" and _signature_annotation_only(old_match_cmp, new_match_cmp):
             change_type = "annotation_only"
         # Conservative: table should mainly reinforce migration semantics (replacement signals),
@@ -1237,6 +1737,7 @@ def run_kernel_diff_builder(
         open_questions = []
         if old_exists and not new_exists:
             open_questions.append("old symbol found but missing in new_ref; replacement symbol likely needed")
+            open_questions.extend(removed_symbol_reasons)
         if migration_signal:
             open_questions.extend(migration_reasons)
             open_questions.extend(helper_reasons)

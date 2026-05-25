@@ -305,6 +305,8 @@ def run_obligation_builder(
             kind in {"field", "struct"}
             and not (item.get("old_locations") or [])
             and not (item.get("new_locations") or [])
+            and not str(item.get("old_definition", "") or "").strip()
+            and not str(item.get("new_definition", "") or "").strip()
             and not item.get("direct_include_requirements")
             and not missing_new
             and not effective_migration_signal
@@ -325,6 +327,21 @@ def run_obligation_builder(
             continue
         if effective_change_type == "unknown" and not missing_new and not effective_migration_signal:
             continue
+        if (
+            kind == "field"
+            and effective_change_type == "struct_field_change"
+            and not missing_new
+            and ((item.get("new_locations") or []) or str(item.get("new_definition", "") or "").strip())
+        ):
+            old_definition = str(item.get("old_definition", "") or "")
+            new_definition = str(item.get("new_definition", "") or "")
+            if str(symbol) and (f"(*{symbol})" in old_definition or f"(*{symbol})" in new_definition):
+                pass
+            else:
+                # The field is still visible in the new kernel. A surrounding
+                # struct diff is useful context, but not a hard migration
+                # obligation.
+                continue
         if not affected_fns:
             # Skip noisy symbols not linked to any affected function slice.
             continue

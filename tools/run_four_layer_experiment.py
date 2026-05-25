@@ -201,7 +201,7 @@ def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
     result["copied_files"] = copied
 
     steps = [
-        run_cmd(["make", "defconfig"], cwd=new_tree, timeout=1800),
+        run_cmd(["make", args.kernel_config_target], cwd=new_tree, timeout=1800),
         run_cmd(["make", "olddefconfig"], cwd=new_tree, timeout=1800),
         run_cmd(["make", "modules_prepare"], cwd=new_tree, timeout=2400),
     ]
@@ -301,6 +301,8 @@ def pregen_base_cmd(
         args.patch_source_mode,
         "--qemu-timeout-sec",
         str(args.qemu_timeout_sec),
+        "--kernel-config-target",
+        args.kernel_config_target,
         "--llm-timeout-sec",
         str(args.llm_timeout_sec),
         "--llm-max-retries",
@@ -544,6 +546,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--llm-retry-backoff-sec", type=int, default=3)
     p.add_argument("--layer-timeout-sec", type=int, default=7200)
     p.add_argument("--qemu-timeout-sec", type=int, default=1200)
+    p.add_argument(
+        "--kernel-config-target",
+        choices=["defconfig", "allmodconfig", "allyesconfig"],
+        default="defconfig",
+        help="kernel config target for P0 and validation compile; use allmodconfig for hard-break cases",
+    )
     p.add_argument("--disable-qemu", action="store_true")
     p.add_argument(
         "--runtime-policy",

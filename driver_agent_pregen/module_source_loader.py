@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import shutil
 
 from .repo_utils import RepositoryAccessor
@@ -57,8 +58,10 @@ def run_module_source_loader(
     ensure_dir(copied_root)
 
     module_loc = 0
+    source_texts: dict[str, str] = {}
     for rel in files:
         text = accessor.read_file("old", rel)
+        source_texts[rel] = text
         module_loc += len(text.splitlines())
         dst = copied_root / rel
         ensure_dir(dst.parent)
@@ -76,6 +79,7 @@ def run_module_source_loader(
         "source_files_old": files,
         "headers_old": headers,
         "module_loc_old": module_loc,
+        "local_include_scope_risks": _local_include_scope_risks(files, source_texts),
         "note": (
             "module path is user-provided; no buildable unit inference performed"
             if restrict_files_old is None
@@ -95,6 +99,40 @@ def run_module_source_loader(
         module_loc_old=module_loc,
         copied_root=copied_root,
     )
+
+
+def _local_include_scope_risks(files: list[str], source_texts: dict[str, str]) -> list[dict]:
+    """Report quoted includes that are not present in the provided module scope.
+
+    This does not expand the module or read other driver files. It only makes an
+    existing boundary issue explicit so later stages and dataset selection can
+    avoid treating incomplete user-provided paths as fully buildable modules.
+    """
+
+    file_set = set(files)
+    basenames = {Path(f).name: f for f in files}
+    risks: list[dict] = []
+    for rel, text in sorted(source_texts.items()):
+        cur_dir = Path(rel).parent
+        for idx, line in enumerate(text.splitlines(), start=1):
+            m = re.match(r'\s*#\s*include\s+"([^"]+)"', line)
+            if not m:
+                continue
+            inc = m.group(1)
+            direct = (cur_dir / inc).as_posix()
+            if direct in file_set:
+                continue
+            if inc in basenames:
+                continue
+            risks.append(
+                {
+                    "file": rel,
+                    "line": idx,
+                    "include": inc,
+                    "reason": "quoted include is not present under the user-provided module_path source scope",
+                }
+            )
+    return risks
 
 
 def run_external_module_source_loader(

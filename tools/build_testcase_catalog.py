@@ -221,16 +221,26 @@ FIELDNAMES = [
 ]
 
 
-def _read_intree_cases(path: Path, limit: int) -> list[dict[str, Any]]:
+def _safe_ref(ref: str) -> str:
+    return ref.replace("/", "_").replace(".", "_").replace("-", "_")
+
+
+def _intree_case_id(module_path: str, old_ref: str, new_ref: str) -> str:
+    base = module_path.replace("/", "_")
+    if old_ref == "v6.19" and new_ref == "v7.0-rc1":
+        return f"intree_{base}"
+    return f"intree_{base}__{_safe_ref(old_ref)}__{_safe_ref(new_ref)}"
+
+
+def _read_intree_cases(path: Path, limit: int, old_ref: str, new_ref: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     with path.open(newline="") as f:
         for row in csv.DictReader(f):
             if row.get("qemu_scope") not in {"qemu_sufficient", "qemu_partial"}:
                 continue
-            case_id = row["module_path"].replace("/", "_")
             out.append(
                 {
-                    "case_id": f"intree_{case_id}",
+                    "case_id": _intree_case_id(row["module_path"], old_ref, new_ref),
                     "kind": "intree",
                     "module_path": row["module_path"],
                     "modified_loc": row.get("modified_loc", ""),
@@ -242,8 +252,8 @@ def _read_intree_cases(path: Path, limit: int) -> list[dict[str, Any]]:
                     "reason": row.get("reason", ""),
                     "repo_url": "",
                     "repo_ref": "",
-                    "kernel_old_ref": "v6.19",
-                    "kernel_new_ref": "v7.0-rc1",
+                    "kernel_old_ref": old_ref,
+                    "kernel_new_ref": new_ref,
                     "patch_source_mode": "focused",
                     "source_subdir": "",
                     "module_ko": "",
@@ -268,7 +278,7 @@ def _render_md(rows: list[dict[str, Any]]) -> str:
     lines = [
         "# Testcase Catalog",
         "",
-        "Scope: in-tree cases use v6.19 -> v7.0-rc1. OOT cases may use a case-specific known-good old kernel ref, but target v7.0-rc1. Reference/new target-driver diffs are evaluation-only.",
+        "Scope: in-tree cases carry per-case `kernel_old_ref` and `kernel_new_ref`. OOT cases may use a case-specific known-good old kernel ref, but target v7.0-rc1. Reference/new target-driver diffs are evaluation-only.",
         "",
         "| case_id | kind | module_path | scope | confidence | modified_loc | source LOC | test target |",
         "|---|---|---|---|---|---:|---:|---|",
@@ -285,31 +295,49 @@ def _render_md(rows: list[dict[str, Any]]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--intree-csv", required=True)
+    ap.add_argument("--intree-old-ref", default="v6.19")
+    ap.add_argument("--intree-new-ref", default="v7.0-rc1")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--intree-limit", type=int, default=22)
     ap.add_argument("--oot-limit", type=int, default=10)
     ap.add_argument("--catalog-size", type=int, default=30)
     args = ap.parse_args()
 
-    intree = _read_intree_cases(Path(args.intree_csv), args.intree_limit)
+    intree = _read_intree_cases(Path(args.intree_csv), args.intree_limit, args.intree_old_ref, args.intree_new_ref)
     oot = sorted(OOT_CANDIDATES, key=lambda r: (int(r.get("run_priority", 99)), r["case_id"]))[: args.oot_limit]
     rows = (intree + oot)[: args.catalog_size]
 
-    # Mark a small run set: prefer v6.19->v7.0-rc1 in-tree cases that already
-    # passed the current no-QEMU compile flow, plus the OOT lddbus case that has
-    # its own known-good old kernel ref and target v7.0-rc1.
-    preferred = {
-        "intree_drivers_dma-buf_heaps",
-        "intree_drivers_net_wireguard",
-        "intree_drivers_net_netdevsim",
-        "intree_drivers_iio_dummy",
-        "intree_drivers_gpu_drm_ttm_tests",
-        "intree_drivers_block_null_blk",
-        "intree_drivers_vdpa_vdpa_sim",
-        "intree_drivers_gpu_drm_vkms",
-        "intree_drivers_target_tcm_remote",
-        "oot_lddbus_eg22_5_7_8",
+    default_preferred_modules = {
+        "drivers/dma-buf/heaps",
+        "drivers/net/wireguard",
+        "drivers/net/netdevsim",
+        "drivers/iio/dummy",
+        "drivers/gpu/drm/ttm/tests",
+        "drivers/block/null_blk",
+        "drivers/vdpa/vdpa_sim",
+        "drivers/gpu/drm/vkms",
+        "drivers/target/tcm_remote",
     }
+    v60_preferred_modules = {
+        "drivers/dma-buf/heaps",
+        "drivers/base/test",
+        "drivers/s390/virtio",
+        "drivers/iio/dummy",
+        "drivers/vfio/platform/reset",
+        "drivers/dax/pmem",
+        "drivers/ntb/test",
+        "drivers/target/loopback",
+        "drivers/vfio/fsl-mc",
+        "drivers/dax/hmem",
+    }
+    if args.intree_old_ref == "v6.0" and args.intree_new_ref == "v7.0-rc1":
+        preferred = {_intree_case_id(m, args.intree_old_ref, args.intree_new_ref) for m in v60_preferred_modules}
+    else:
+        # Mark a small run set: prefer v6.19->v7.0-rc1 in-tree cases that already
+        # passed the current no-QEMU compile flow, plus the OOT lddbus case that has
+        # its own known-good old kernel ref and target v7.0-rc1.
+        preferred = {_intree_case_id(m, args.intree_old_ref, args.intree_new_ref) for m in default_preferred_modules}
+        preferred.add("oot_lddbus_eg22_5_7_8")
     for row in rows:
         row["recommended_run"] = "yes" if row["case_id"] in preferred else "no"
 

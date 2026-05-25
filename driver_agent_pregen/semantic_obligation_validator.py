@@ -205,12 +205,21 @@ def _editable_sets(impact_graph: dict[str, Any]) -> tuple[set[tuple[str, str]], 
 
 
 def _obligation_requires_replacement(obligation: dict[str, Any]) -> bool:
-    if obligation.get("replacement_candidates"):
+    candidates = obligation.get("replacement_candidates") or []
+    if candidates:
         if obligation.get("migration_signal") and str(obligation.get("semantic_strength", "")).lower() == "strong":
             return True
-        hard_checks = "\n".join(str(x) for x in obligation.get("hard_checks", [])).lower()
-        if any(x in hard_checks for x in ("replacement", "old symbol should not remain", "should not remain")):
-            return True
+        # Deterministic semantic-key validation should not require one of many
+        # weak same-file candidates to appear. That caused false FAILs for
+        # migrations where the correct fix is deleting an ops entry or assigning
+        # a struct field. Require candidate presence only when kernel evidence
+        # gives a single clear replacement.
+        if len(candidates) == 1:
+            ev = "\n".join(str(x) for x in candidates[0].get("evidence", [])).lower()
+            if "same_kernel_definition_file_new_ref" in ev or "kernel_side_helper" in ev:
+                hard_checks = "\n".join(str(x) for x in obligation.get("hard_checks", [])).lower()
+                if any(x in hard_checks for x in ("replacement", "old symbol should not remain", "should not remain")):
+                    return True
     return False
 
 

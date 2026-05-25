@@ -30,6 +30,9 @@ class HunkInfo:
                 new_count += 1
         return old_count, new_count
 
+    def has_effective_changes(self) -> bool:
+        return any(line.startswith(("+", "-")) for line in self.lines if line)
+
     def header(self) -> str:
         old_count, new_count = self.recalculate_counts()
         old_part = f"-{self.old_start}" if old_count <= 1 else f"-{self.old_start},{old_count}"
@@ -49,6 +52,7 @@ class PatchLineFixer:
     def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
         self.hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@\s*(.*)$")
+        self.unmatched_hunks: List[str] = []
 
     def fix_patch(
         self,
@@ -56,6 +60,7 @@ class PatchLineFixer:
         file_contents: Optional[Dict[str, str]] = None,
     ) -> Tuple[bool, str, List[str]]:
         msgs: List[str] = []
+        self.unmatched_hunks = []
         patch_files = self.parse_patch(patch_content)
         if not patch_files:
             return False, patch_content, ["No diff hunks found in patch"]
@@ -65,11 +70,22 @@ class PatchLineFixer:
             if file_contents:
                 content = file_contents.get(pf.file_path)
             pf.hunks = self.fix_file_hunks(pf.hunks, content)
+            before_drop = len(pf.hunks)
+            pf.hunks = [h for h in pf.hunks if h.has_effective_changes()]
+            dropped = before_drop - len(pf.hunks)
             msgs.append(f"fixed_hunks={len(pf.hunks)} file={pf.file_path}")
+            if dropped:
+                msgs.append(f"dropped_noop_hunks={dropped} file={pf.file_path}")
 
+        patch_files = [pf for pf in patch_files if pf.hunks]
         rebuilt = self.rebuild_patch(patch_files)
+        if not patch_files:
+            return False, rebuilt, msgs + ["No effective diff hunks after dropping no-op hunks"]
         ok, vmsgs = self.validate_patch(rebuilt)
         msgs.extend(vmsgs)
+        if self.unmatched_hunks:
+            ok = False
+            msgs.extend([f"unmatched_hunk_with_original_source:{x}" for x in self.unmatched_hunks])
         return ok, rebuilt, msgs
 
     def parse_patch(self, patch_content: str) -> List[PatchFile]:
@@ -174,12 +190,12 @@ class PatchLineFixer:
                 hunk.new_count = new_count
                 cumulative_offset += new_count - old_count
             else:
-                old_count, new_count = hunk.recalculate_counts()
-                hunk.old_count = old_count
-                hunk.new_count = new_count
-                if idx > 0:
-                    hunk.new_start = hunk.old_start + cumulative_offset
-                cumulative_offset += new_count - old_count
+                self.unmatched_hunks.append(f"old_start={hunk.old_start} pattern_lines={len(pattern)}")
+                # If the original file is available and the hunk cannot be
+                # matched, keeping it is worse than dropping it: it commonly
+                # breaks git-apply for the whole patch. Drop the hunk and let
+                # validation/reporting show the missing edit.
+                continue
 
             fixed.append(hunk)
         return fixed

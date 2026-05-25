@@ -16,7 +16,7 @@ from .utils import extract_first_json_object, fenced_json_blocks, write_json, wr
 
 
 class Provider(Protocol):
-    def complete(self, prompt: str) -> str: ...
+    def complete(self, prompt: str, *, max_tokens: int | None = None) -> str: ...
 
 
 class OpenAIProvider:
@@ -29,6 +29,7 @@ class OpenAIProvider:
         timeout_sec: int = 300,
         max_retries: int = 2,
         retry_backoff_sec: int = 3,
+        max_tokens: int | None = None,
     ) -> None:
         from openai import OpenAI
 
@@ -36,21 +37,26 @@ class OpenAIProvider:
         self.timeout_sec = max(30, int(timeout_sec))
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_sec = max(1, int(retry_backoff_sec))
+        self.max_tokens = max_tokens if max_tokens and int(max_tokens) > 0 else None
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"), base_url=base_url or os.getenv("OPENAI_BASE_URL"))
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, *, max_tokens: int | None = None) -> str:
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
+                kwargs = {
+                    "model": self.model,
+                    "messages": [
                         {"role": "system", "content": "You are a precise software analysis assistant."},
                         {"role": "user", "content": prompt},
                     ],
-                    temperature=0,
-                    timeout=self.timeout_sec,
-                )
+                    "temperature": 0,
+                    "timeout": self.timeout_sec,
+                }
+                effective_max_tokens = max_tokens or self.max_tokens
+                if effective_max_tokens:
+                    kwargs["max_tokens"] = effective_max_tokens
+                resp = self.client.chat.completions.create(**kwargs)
                 return resp.choices[0].message.content or ""
             except Exception as exc:
                 last_exc = exc
@@ -72,6 +78,7 @@ class OpenRouterProvider:
         timeout_sec: int = 300,
         max_retries: int = 2,
         retry_backoff_sec: int = 3,
+        max_tokens: int | None = None,
     ) -> None:
         self.model = model
         self.api_key = api_key
@@ -79,8 +86,9 @@ class OpenRouterProvider:
         self.timeout_sec = max(30, int(timeout_sec))
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_sec = max(1, int(retry_backoff_sec))
+        self.max_tokens = max_tokens if max_tokens and int(max_tokens) > 0 else None
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, *, max_tokens: int | None = None) -> str:
         url = f"{self.base_url}/chat/completions"
         body = {
             "model": self.model,
@@ -90,6 +98,9 @@ class OpenRouterProvider:
             ],
             "temperature": 0,
         }
+        effective_max_tokens = max_tokens or self.max_tokens
+        if effective_max_tokens:
+            body["max_tokens"] = effective_max_tokens
         payload = json.dumps(body).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -135,6 +146,7 @@ class LLMConfig:
     timeout_sec: int = 300
     max_retries: int = 2
     retry_backoff_sec: int = 3
+    max_tokens: int = 10000
 
 
 class LLMClient:
@@ -150,6 +162,7 @@ class LLMClient:
                     timeout_sec=config.timeout_sec,
                     max_retries=config.max_retries,
                     retry_backoff_sec=config.retry_backoff_sec,
+                    max_tokens=config.max_tokens,
                 )
             elif config.provider == "openrouter":
                 key = config.api_key or os.getenv("OPEN_ROUTER_KEY")
@@ -164,6 +177,7 @@ class LLMClient:
                     timeout_sec=config.timeout_sec,
                     max_retries=config.max_retries,
                     retry_backoff_sec=config.retry_backoff_sec,
+                    max_tokens=config.max_tokens,
                 )
             else:
                 raise ValueError(f"unsupported provider: {config.provider}")
@@ -176,6 +190,7 @@ class LLMClient:
         input_payload: dict[str, Any],
         dry_run: bool,
         default_output: dict[str, Any],
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         write_text(stage_dir / "prompt.md", prompt_text)
         write_json(stage_dir / "input.json", input_payload)
@@ -200,7 +215,11 @@ class LLMClient:
         timeout_sec = max(30, int(self.config.timeout_sec or 300))
 
         try:
-            raw = self._complete_with_hard_timeout(prompt_text, timeout_sec=timeout_sec)
+            raw = self._complete_with_hard_timeout(
+                prompt_text,
+                timeout_sec=timeout_sec,
+                max_tokens=max_tokens,
+            )
         except Exception as exc:
             raw = ""
             failed = dict(default_output)
@@ -259,7 +278,7 @@ class LLMClient:
 
         return None
 
-    def _complete_with_hard_timeout(self, prompt_text: str, *, timeout_sec: int) -> str:
+    def _complete_with_hard_timeout(self, prompt_text: str, *, timeout_sec: int, max_tokens: int | None = None) -> str:
         if not self._provider:
             raise RuntimeError("LLM provider not configured")
 
@@ -268,7 +287,7 @@ class LLMClient:
             try:
                 ctx = mp.get_context("fork")
                 q = ctx.Queue(maxsize=1)
-                p = ctx.Process(target=_provider_complete_worker, args=(self._provider, prompt_text, q))
+                p = ctx.Process(target=_provider_complete_worker, args=(self._provider, prompt_text, q, max_tokens))
                 p.start()
                 p.join(float(timeout_sec))
                 if p.is_alive():
@@ -296,18 +315,18 @@ class LLMClient:
             signal.signal(signal.SIGALRM, _raise_timeout)
             signal.setitimer(signal.ITIMER_REAL, float(timeout_sec))
             try:
-                return self._provider.complete(prompt_text)
+                return self._provider.complete(prompt_text, max_tokens=max_tokens)
             finally:
                 signal.setitimer(signal.ITIMER_REAL, 0.0)
                 signal.signal(signal.SIGALRM, prev_handler)
 
         # Non-POSIX fallback.
-        return self._provider.complete(prompt_text)
+        return self._provider.complete(prompt_text, max_tokens=max_tokens)
 
 
-def _provider_complete_worker(provider: Provider, prompt_text: str, q) -> None:  # type: ignore[no-untyped-def]
+def _provider_complete_worker(provider: Provider, prompt_text: str, q, max_tokens: int | None = None) -> None:  # type: ignore[no-untyped-def]
     try:
-        out = provider.complete(prompt_text)
+        out = provider.complete(prompt_text, max_tokens=max_tokens)
         q.put(("ok", out))
     except Exception as exc:  # pragma: no cover - defensive path for subprocess boundary
         q.put(("err", str(exc)))

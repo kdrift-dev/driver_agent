@@ -281,11 +281,21 @@ def _extract_calls_from_body(body: str) -> list[str]:
     return names
 
 
-def _extract_fields_from_body(body: str) -> list[str]:
+def _extract_fields_from_body(body: str) -> list[dict]:
     clean = _strip_comments(body)
     out = []
     for m in re.finditer(r"(?:->|\.)\s*([A-Za-z_]\w*)", clean):
-        out.append(m.group(1))
+        # Capture a simple base expression before ->/. for owner-struct inference.
+        prefix = clean[max(0, m.start() - 96) : m.start()]
+        base_match = re.search(r"([A-Za-z_]\w*)\s*$", prefix)
+        out.append(
+            {
+                "name": m.group(1),
+                "base": base_match.group(1) if base_match else "",
+                "rel_line": clean[: m.start()].count("\n"),
+                "code": clean[m.start() : clean.find("\n", m.start()) if "\n" in clean[m.start() :] else len(clean)].strip(),
+            }
+        )
     return out
 
 
@@ -339,6 +349,21 @@ def _extract_parameter_identifiers(signature: str) -> set[str]:
     return out
 
 
+def _extract_struct_var_types(text: str) -> dict[str, str]:
+    """Map simple variable names to `struct foo` from params/local declarations."""
+    out: dict[str, str] = {}
+    clean = _strip_comments(text)
+    for m in re.finditer(
+        r"\bstruct\s+([A-Za-z_]\w*)\s+(?:const\s+)?(?:\*+\s*)?([A-Za-z_]\w*)\b",
+        clean,
+    ):
+        struct_name, var_name = m.group(1), m.group(2)
+        if var_name in {"const", "struct"}:
+            continue
+        out[var_name] = struct_name
+    return out
+
+
 def _extract_fnptr_arg_refs(body: str, local_function_names: set[str]) -> list[str]:
     """
     Find local function names passed as callback/function-pointer arguments.
@@ -381,11 +406,14 @@ def _extract_high_value_global_refs(
     return out
 
 
-def _extract_ops_table_callbacks(text: str, rel_file: str) -> tuple[list[dict], list[dict]]:
+def _extract_ops_table_callbacks(text: str, rel_file: str, local_function_names: set[str]) -> tuple[list[dict], list[dict]]:
     callbacks = []
     symbols = []
 
-    init_pat = re.compile(r"\bstruct\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*=\s*\{")
+    init_pat = re.compile(
+        r"(?m)^\s*(?:(?:static|const|volatile|__maybe_unused)\s+)*"
+        r"struct\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*=\s*\{"
+    )
     for m in init_pat.finditer(text):
         struct_type = m.group(1)
         var_name = m.group(2)
@@ -396,7 +424,7 @@ def _extract_ops_table_callbacks(text: str, rel_file: str) -> tuple[list[dict], 
 
         root_kind = DRIVER_ROOT_STRUCT_KIND.get(struct_type)
 
-        for assign in re.finditer(r"\.\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)", block):
+        for assign in re.finditer(r"\.\s*([A-Za-z_]\w*)\s*=\s*&?\s*([A-Za-z_]\w*)", block):
             field = assign.group(1)
             func = assign.group(2)
             line = _line_number_from_offset(text, m.start() + assign.start())
@@ -406,6 +434,7 @@ def _extract_ops_table_callbacks(text: str, rel_file: str) -> tuple[list[dict], 
                     "name": field,
                     "kind": "field",
                     "owner_struct": struct_type,
+                    "ops_table": var_name,
                     "file": rel_file,
                     "line": line,
                     "code": assign.group(0),
@@ -417,10 +446,34 @@ def _extract_ops_table_callbacks(text: str, rel_file: str) -> tuple[list[dict], 
                 }
             )
 
-            if root_kind:
+            if func not in local_function_names:
+                symbols.append(
+                    {
+                        "name": func,
+                        "kind": "macro" if func.upper() == func and len(func) > 2 else "function",
+                        "owner_struct": struct_type,
+                        "ops_table": var_name,
+                        "callback_field": field,
+                        "file": rel_file,
+                        "line": line,
+                        "code": assign.group(0),
+                        "enclosing_function": None,
+                        "is_driver_local": False,
+                        "definition_location_old": None,
+                        "definition_location_new": None,
+                        "locator": "regex_ops_table_rhs",
+                    }
+                )
+
+            # Known Linux driver root structs are callback roots.  For other
+            # kernel ops/info structs (e.g. struct iio_info), still record the
+            # local function assignment as an ops-table callback.  This lets a
+            # struct field prototype change mark the assigned function as an
+            # edit target without relying on target-driver new diffs.
+            if root_kind or func in local_function_names:
                 callbacks.append(
                     {
-                        "root_kind": root_kind,
+                        "root_kind": root_kind or "ops_table",
                         "root_struct_type": struct_type,
                         "root_variable": var_name,
                         "root_function": func,
@@ -730,6 +783,7 @@ def run_symbol_scanner(module_result: ModuleSourceResult, extracted_dir: Path) -
         struct_types = _extract_struct_types_from_body(body_only)
         enums = _extract_enum_constants_from_body(body_only)
         param_names = _extract_parameter_identifiers(fn.signature)
+        struct_var_types = _extract_struct_var_types(fn.signature + "\n" + body_only)
         fnptr_arg_local_refs = _extract_fnptr_arg_refs(body_only, local_function_names)
         global_refs = _extract_high_value_global_refs(
             body_only,
@@ -780,15 +834,21 @@ def run_symbol_scanner(module_result: ModuleSourceResult, extracted_dir: Path) -
                 }
             )
 
-        for fld in fields:
+        for fld_info in fields:
+            fld = str(fld_info.get("name", ""))
+            base = str(fld_info.get("base", ""))
+            rel_line = int(fld_info.get("rel_line", 0) or 0)
+            code = str(fld_info.get("code", "") or fn.signature)
             used_symbols.append(
                 {
                     "name": fld,
                     "kind": "field",
                     "file": fn.file,
-                    "line": start_line,
-                    "code": fn.signature,
+                    "line": start_line + rel_line,
+                    "code": code,
                     "enclosing_function": fn.name,
+                    "owner_struct": struct_var_types.get(base),
+                    "field_base": base,
                     "is_driver_local": False,
                     "definition_location_old": None,
                     "definition_location_new": None,
@@ -846,9 +906,27 @@ def run_symbol_scanner(module_result: ModuleSourceResult, extracted_dir: Path) -
 
     # ops table callbacks.
     for rel, text in file_texts.items():
-        cb_items, cb_symbols = _extract_ops_table_callbacks(text, rel)
+        cb_items, cb_symbols = _extract_ops_table_callbacks(text, rel, local_function_names)
         callbacks.extend(cb_items)
-        used_symbols.extend(cb_symbols)
+        for sym in cb_symbols:
+            if sym.get("enclosing_function") or not sym.get("ops_table"):
+                used_symbols.append(sym)
+                continue
+            table_name = str(sym.get("ops_table") or "")
+            attributed = False
+            for fn in all_functions:
+                if fn.file != rel:
+                    continue
+                if re.search(rf"\b{re.escape(table_name)}\b", _strip_comments(fn.body)):
+                    cp = dict(sym)
+                    cp["enclosing_function"] = fn.name
+                    cp["line"] = fn.start_line
+                    cp["code"] = fn.signature
+                    cp["locator"] = "regex_ops_table_rhs_attributed"
+                    used_symbols.append(cp)
+                    attributed = True
+            if not attributed:
+                used_symbols.append(sym)
 
     callbacks.extend(_extract_irq_callbacks(all_functions))
     for rel, text in file_texts.items():

@@ -350,6 +350,31 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
         ]
         cmds = [cmd]
         notes = ["deterministic KUnit fallback for drivers/iio/test"]
+    elif module_path == "drivers/iio/dummy":
+        runner = (Path(__file__).resolve().parents[1] / "tools" / "run_intree_iio_dummy_qemu.py").as_posix()
+        cmd = (
+            f"python {shlex.quote(runner)} "
+            "--kernel-tree . "
+            "--out-dir ../iio_dummy_qemu "
+            "--jobs 8 "
+            "--timeout-sec 900"
+        )
+        cases = [
+            {
+                "id": "DET-QEMU-IIO-DUMMY-001",
+                "name": "IIO dummy configfs smoke test in QEMU",
+                "entry_kind": "boot",
+                "intent": "Create an IIO dummy software device through configfs inside an isolated QEMU guest.",
+                "preconditions": ["qemu-system-x86_64, busybox, cpio, and gcc are available on the host."],
+                "steps": [{"cmd": cmd, "why": "Builds a small x86_64 kernel and creates /sys/kernel/config/iio/devices/dummy/driver_agent_dummy0 in guest."}],
+                "assertions": ["runner exits successfully and prints DRIVER_AGENT_QEMU_IIO_DUMMY_PASS"],
+                "timeout_sec": 900,
+                "skip_if": ["QEMU or required host build tools unavailable"],
+                "artifacts": ["worktrees/iio_dummy_qemu/result.json", "worktrees/iio_dummy_qemu/qemu_output.txt"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic isolated-QEMU smoke test for drivers/iio/dummy"]
     elif module_path == "drivers/gpu/drm/ttm/tests":
         cmd = "make ARCH=um mrproper >/dev/null 2>&1 || true; ./tools/testing/kunit/kunit.py run --kunitconfig=drivers/gpu/drm/ttm/tests"
         cases = [
@@ -698,7 +723,12 @@ def _qemu_or_kunit_commands(suite_commands: list[str]) -> list[str]:
         cmd = (raw or "").strip()
         if not cmd or cmd.startswith("#"):
             continue
-        if "kunit.py run" not in cmd and "qemu-system-" not in cmd and "run_intree_kselftest_qemu.py" not in cmd:
+        if (
+            "kunit.py run" not in cmd
+            and "qemu-system-" not in cmd
+            and "run_intree_kselftest_qemu.py" not in cmd
+            and "run_intree_iio_dummy_qemu.py" not in cmd
+        ):
             continue
         if not _safe_command_for_exec(cmd):
             continue

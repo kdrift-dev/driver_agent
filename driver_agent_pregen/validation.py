@@ -386,6 +386,24 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
         ]
         cmds = [cmd]
         notes = ["deterministic KUnit fallback for drivers/gpu/drm/vkms"]
+    elif module_path == "drivers/gpu/drm/vc4":
+        cmd = "make ARCH=um mrproper >/dev/null 2>&1 || true; ./tools/testing/kunit/kunit.py run --kunitconfig=drivers/gpu/drm/vc4/tests"
+        cases = [
+            {
+                "id": "DET-KUNIT-VC4-001",
+                "name": "VC4 KUnit tests",
+                "entry_kind": "boot",
+                "intent": "Run VC4 mock-device KUnit tests without Raspberry Pi VC4 hardware.",
+                "preconditions": ["drivers/gpu/drm/vc4/tests/.kunitconfig exists."],
+                "steps": [{"cmd": cmd, "why": "Uses the in-tree VC4 mock KUnit configuration."}],
+                "assertions": ["kunit.py exits successfully"],
+                "timeout_sec": 600,
+                "skip_if": ["KUnit/UML tooling unavailable"],
+                "artifacts": ["KUnit stdout/stderr"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic KUnit fallback for drivers/gpu/drm/vc4"]
     else:
         runner = (Path(__file__).resolve().parents[1] / "tools" / "run_intree_kselftest_qemu.py").as_posix()
         if module_path == "drivers/dma-buf/heaps":
@@ -543,6 +561,14 @@ def _is_hardware_unavailable_failure(stdout_text: str, stderr_text: str) -> bool
         "no ux500 compatible",
     )
     return any(m in merged for m in markers)
+
+
+def _is_kunit_config_unavailable_failure(stdout_text: str, stderr_text: str) -> bool:
+    merged = ((stdout_text or "") + "\n" + (stderr_text or "")).lower()
+    return (
+        "not all kconfig options selected in kunitconfig" in merged
+        and ("unsatisfied dependencies" in merged or "aren't available on uml" in merged)
+    )
 
 
 def _suite_requires_root(script_text: str) -> bool:
@@ -785,6 +811,18 @@ _MISSING_HEADER_RE = re.compile(
 _IIO_DEVICE_ALLOC_TOO_FEW_ARGS_RE = re.compile(
     r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+too few arguments to function\s+[`'\u2018]iio_device_alloc['\u2019`]"
 )
+_STRUCT_FIELD_MISSING_RE = re.compile(
+    r"(?P<file>[^:\n]+\.[ch]):(?P<line>\d+):(?P<col>\d+):\s+error:\s+[`'\u2018](?:const\s+)?struct\s+(?P<struct>[A-Za-z_][A-Za-z0-9_]*)[`'\u2019]\s+has no member named\s+[`'\u2018](?P<field>[A-Za-z_][A-Za-z0-9_]*)['\u2019`]"
+)
+_UNUSED_LABEL_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+label\s+[`'\u2018](?P<label>[A-Za-z_][A-Za-z0-9_]*)['\u2019`]\s+defined but not used"
+)
+_UNUSED_FUNCTION_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+[`'\u2018](?P<function>[A-Za-z_][A-Za-z0-9_]*)['\u2019`]\s+defined but not used"
+)
+_VOID_VALUE_NOT_IGNORED_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+void value not ignored as it ought to be"
+)
 
 
 def _resolve_compile_error_file(filename: str, candidates: Iterable[str]) -> str:
@@ -816,6 +854,46 @@ def _is_simple_unused_var_decl(line: str, var: str) -> bool:
     return bool(decl_re.match(stripped))
 
 
+def _remove_unused_var_from_decl_line(line: str, var: str) -> tuple[bool, str]:
+    """Remove an unused variable from a conservative declaration shape.
+
+    Returns (changed, replacement_line). An empty replacement_line means the
+    whole declaration should be deleted.
+    """
+    if _is_simple_unused_var_decl(line, var):
+        return True, ""
+
+    indent = line[: len(line) - len(line.lstrip())]
+    stripped = line.strip()
+    if not stripped.endswith(";"):
+        return False, line
+    if "(" in stripped or ")" in stripped or "=" in stripped:
+        return False, line
+    body = stripped[:-1].strip()
+    if "," not in body:
+        return False, line
+
+    parts = [p.strip() for p in body.split(",")]
+    if len(parts) < 2 or any(not p for p in parts):
+        return False, line
+
+    # Only handle the low-risk case where the unused variable is not the first
+    # declarator, so we do not have to reconstruct the type prefix.
+    keep = [parts[0]]
+    removed = False
+    var_decl_re = re.compile(rf"^\*?\s*{re.escape(var)}(?:\s*\[[^\]]+\])?$")
+    for part in parts[1:]:
+        if var_decl_re.match(part):
+            removed = True
+            continue
+        keep.append(part)
+    if not removed:
+        return False, line
+    if len(keep) == len(parts):
+        return False, line
+    return True, indent + ", ".join(keep) + ";"
+
+
 def _remove_line_from_trees(old_tree: Path, new_tree: Path, rel: str, line_no: int, var: str) -> dict[str, Any]:
     result = {"file": rel, "line": line_no, "variable": var, "applied": False, "reason": ""}
     changed_text: str | None = None
@@ -830,24 +908,32 @@ def _remove_line_from_trees(old_tree: Path, new_tree: Path, rel: str, line_no: i
             return result
         if tree_name == "new":
             line = lines[line_no - 1]
-            if not _is_simple_unused_var_decl(line, var):
+            changed, replacement = _remove_unused_var_from_decl_line(line, var)
+            if not changed:
                 result["reason"] = "line_is_not_simple_unused_variable_declaration"
                 result["line_text"] = line
                 return result
-            del lines[line_no - 1]
+            if replacement:
+                lines[line_no - 1] = replacement
+            else:
+                del lines[line_no - 1]
             changed_text = "\n".join(lines) + ("\n" if read_text(path).endswith("\n") else "")
         else:
             # The old_ref validation worktree has the same patch applied before
             # staging. Remove the matching declaration there too so the recorded
             # validation patch represents exactly what was compiled.
-            if not _is_simple_unused_var_decl(lines[line_no - 1], var):
+            changed, replacement = _remove_unused_var_from_decl_line(lines[line_no - 1], var)
+            if not changed:
                 result["reason"] = "old_tree_matching_decl_not_found"
                 return result
-            del lines[line_no - 1]
+            if replacement:
+                lines[line_no - 1] = replacement
+            else:
+                del lines[line_no - 1]
             changed_text = "\n".join(lines) + ("\n" if read_text(path).endswith("\n") else "")
         write_text(path, changed_text)
     result["applied"] = True
-    result["reason"] = "removed_simple_unused_variable_declaration"
+    result["reason"] = "removed_or_reduced_unused_variable_declaration"
     return result
 
 
@@ -963,6 +1049,153 @@ def _fix_iio_device_alloc_parent_arg(
         changed = True
     result["applied"] = changed
     result["reason"] = "inserted_null_parent_for_iio_device_alloc_signature_change" if changed else "already_fixed"
+    return result
+
+
+def _remove_missing_struct_field_initializer_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+    field: str,
+) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "field": field, "applied": False, "reason": ""}
+    line_re = re.compile(rf"^\s*\.{re.escape(field)}\s*=.*,\s*$")
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        line = lines[line_no - 1]
+        if not line_re.match(line):
+            result["reason"] = f"{tree_name}_line_is_not_matching_field_initializer"
+            result["line_text"] = line
+            return result
+        del lines[line_no - 1]
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+    result["applied"] = True
+    result["reason"] = "removed_missing_struct_field_initializer"
+    return result
+
+
+def _remove_unused_label_in_trees(old_tree: Path, new_tree: Path, rel: str, line_no: int, label: str) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "label": label, "applied": False, "reason": ""}
+    label_re = re.compile(rf"^\s*{re.escape(label)}:\s*$")
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        if not label_re.match(lines[line_no - 1]):
+            result["reason"] = f"{tree_name}_line_is_not_matching_label"
+            result["line_text"] = lines[line_no - 1]
+            return result
+        del lines[line_no - 1]
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+    result["applied"] = True
+    result["reason"] = "removed_unused_label"
+    return result
+
+
+def _remove_unused_static_function_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+    function: str,
+) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "function": function, "applied": False, "reason": ""}
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        start = line_no - 1
+        signature = "\n".join(lines[start : min(len(lines), start + 8)])
+        if "static" not in signature or re.search(rf"\b{re.escape(function)}\s*\(", signature) is None:
+            result["reason"] = f"{tree_name}_line_is_not_static_function_definition"
+            result["line_text"] = lines[start]
+            return result
+        open_idx = None
+        for idx in range(start, min(len(lines), start + 20)):
+            if "{" in lines[idx]:
+                open_idx = idx
+                break
+        if open_idx is None:
+            result["reason"] = f"{tree_name}_function_open_brace_not_found"
+            return result
+        depth = 0
+        end_idx = None
+        for idx in range(open_idx, len(lines)):
+            depth += lines[idx].count("{")
+            depth -= lines[idx].count("}")
+            if depth == 0:
+                end_idx = idx
+                break
+        if end_idx is None:
+            result["reason"] = f"{tree_name}_function_end_not_found"
+            return result
+        del lines[start : end_idx + 1]
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+    result["applied"] = True
+    result["reason"] = "removed_unused_static_function"
+    return result
+
+
+def _fix_pm_runtime_put_void_assignment_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "function": "pm_runtime_put", "applied": False, "reason": ""}
+    assign_re = re.compile(r"^(?P<indent>\s*)ret\s*=\s*(?P<call>pm_runtime_put\s*\(.*\);\s*)$")
+    if_re = re.compile(r"^\s*if\s*\(\s*ret\s*<\s*0\s*\)\s*$")
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+        m = assign_re.match(lines[line_no - 1])
+        if not m:
+            result["reason"] = f"{tree_name}_line_is_not_pm_runtime_put_ret_assignment"
+            result["line_text"] = lines[line_no - 1]
+            return result
+        # Only apply the narrow legacy pattern:
+        # ret = pm_runtime_put(...);
+        # if (ret < 0)
+        #     log(... ret ...);
+        if line_no + 1 > len(lines) or not if_re.match(lines[line_no]):
+            result["reason"] = f"{tree_name}_following_ret_check_not_found"
+            return result
+        if line_no + 2 > len(lines) or "ret" not in lines[line_no + 1]:
+            result["reason"] = f"{tree_name}_following_ret_log_not_found"
+            return result
+        lines[line_no - 1] = f"{m.group('indent')}{m.group('call')}"
+        del lines[line_no : line_no + 2]
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+    result["applied"] = True
+    result["reason"] = "removed_pm_runtime_put_return_value_check"
     return result
 
 
@@ -1083,6 +1316,117 @@ def _apply_safe_compile_autofixes_once(
                 new_tree=new_tree,
                 rel=rel,
                 line_no=int(m.group("line")),
+            )
+        )
+
+    seen_missing_fields: set[tuple[str, int, str]] = set()
+    for m in _STRUCT_FIELD_MISSING_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "field": m.group("field"),
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), m.group("field"))
+        if key in seen_missing_fields:
+            continue
+        seen_missing_fields.add(key)
+        changes.append(
+            _remove_missing_struct_field_initializer_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                field=m.group("field"),
+            )
+        )
+
+    seen_void_pm_put: set[tuple[str, int]] = set()
+    for m in _VOID_VALUE_NOT_IGNORED_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "function": "pm_runtime_put",
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")))
+        if key in seen_void_pm_put:
+            continue
+        seen_void_pm_put.add(key)
+        changes.append(
+            _fix_pm_runtime_put_void_assignment_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+            )
+        )
+
+    seen_unused_labels: set[tuple[str, int, str]] = set()
+    for m in _UNUSED_LABEL_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "label": m.group("label"),
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), m.group("label"))
+        if key in seen_unused_labels:
+            continue
+        seen_unused_labels.add(key)
+        changes.append(
+            _remove_unused_label_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                label=m.group("label"),
+            )
+        )
+
+    seen_unused_functions: set[tuple[str, int, str]] = set()
+    for m in _UNUSED_FUNCTION_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "function": m.group("function"),
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), m.group("function"))
+        if key in seen_unused_functions:
+            continue
+        seen_unused_functions.add(key)
+        changes.append(
+            _remove_unused_static_function_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                function=m.group("function"),
             )
         )
     return changes
@@ -1553,7 +1897,45 @@ def run_validation_agent(
     out["compile_autofix"] = compile_autofix
     out["compile"] = compile_result
 
-    if skip_system_test_generation:
+    if not compile_result.get("success"):
+        test_gen = {
+            "case_id": case_id,
+            "stage": "system_test_generation",
+            "parse_status": "skipped_compile_failed",
+            "test_cases": [],
+            "suite_commands": [],
+            "notes": ["skipped because patched module did not compile"],
+        }
+        out["test_generation"] = test_gen
+        _set_stage_result(stage_results, "test_generation", "skipped", "compile failed")
+
+        test_bundle = {
+            "manifest_path": "",
+            "runner_script_path": "",
+            "test_case_count": 0,
+            "suite_command_count": 0,
+            "skipped": True,
+            "reason": "compile_failed",
+        }
+        out["test_bundle"] = test_bundle
+
+        suite_exec = {"success": True, "runs": [], "skipped": True, "reason": "compile_failed"}
+        out["suite_execution"] = suite_exec
+        _set_stage_result(stage_results, "suite_execution", "skipped", "compile failed")
+
+        out["qemu"] = {
+            "enabled": enable_qemu,
+            "detected_qemu_runs": 0,
+            "runs": [],
+            "success": False,
+            "skipped": True,
+            "reason": "compile_failed",
+            "note": "skipped because patched module did not compile",
+        }
+        _set_stage_result(stage_results, "qemu_execution", "skipped", "compile failed")
+        suite_runs = []
+        all_skipped = True
+    elif skip_system_test_generation:
         test_gen = {
             "case_id": case_id,
             "stage": "system_test_generation",
@@ -1671,11 +2053,19 @@ def run_validation_agent(
                 run["timeout_hint"] = True
                 if not run.get("reason"):
                     run["reason"] = "timeout_detected_in_qemu_output"
+            if not run.get("ok") and _is_kunit_config_unavailable_failure(run.get("stdout", ""), run.get("stderr", "")):
+                run["original_returncode"] = run.get("returncode")
+                run["returncode"] = 0
+                run["ok"] = True
+                run["skipped"] = True
+                run["reason"] = "kunit_config_unsatisfied_dependencies"
         out["qemu"]["success"] = all(r.get("ok") for r in qemu_runs) if qemu_runs else False
         if not enable_qemu:
             _set_stage_result(stage_results, "qemu_execution", "skipped", "qemu disabled by flag")
         elif not qemu_runs:
             _set_stage_result(stage_results, "qemu_execution", "skipped", "qemu enabled but no standalone qemu/kunit command generated")
+        elif all(r.get("skipped") for r in qemu_runs):
+            _set_stage_result(stage_results, "qemu_execution", "skipped", _summarize_skip_reason(qemu_runs, "all_qemu_or_kunit_runs_skipped"))
         elif all(r.get("ok") for r in qemu_runs):
             _set_stage_result(stage_results, "qemu_execution", "passed", f"runs={len(qemu_runs)}")
         else:

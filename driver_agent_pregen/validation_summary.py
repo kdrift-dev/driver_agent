@@ -91,6 +91,9 @@ def _run_is_effectively_skipped(run: dict[str, Any]) -> bool:
         "hardware-dependent tests",
         "no compatible device",
         "module not available in this build",
+        "not all kconfig options selected in kunitconfig",
+        "unsatisfied dependencies",
+        "aren't available on uml",
         "exit status 77",
     )
     return any(marker in text for marker in skip_markers)
@@ -217,6 +220,16 @@ def _level2_runtime(validation: dict[str, Any], stages: dict[str, dict[str, Any]
     suite_status, suite_ev = _real_suite_status(validation, stages)
     qemu_status, qemu_ev = _real_qemu_status(validation, stages)
     test_generation_status = _map_stage_status(stages.get("test_generation", {}).get("status"))
+    if test_generation_status == FAIL:
+        runtime_status = FAIL
+    elif suite_status == FAIL or qemu_status == FAIL:
+        runtime_status = FAIL
+    elif PASS in {suite_status, qemu_status}:
+        runtime_status = PASS
+    elif suite_status == SKIPPED and qemu_status == SKIPPED:
+        runtime_status = SKIPPED
+    else:
+        runtime_status = UNKNOWN
     checks = [
         {
             "id": "L2-TEST-GENERATION",
@@ -230,7 +243,7 @@ def _level2_runtime(validation: dict[str, Any], stages: dict[str, dict[str, Any]
     return {
         "level": 2,
         "name": "runtime_hooks",
-        "status": _combine_status([suite_status, qemu_status], pass_if_any_pass=True) if test_generation_status != FAIL else FAIL,
+        "status": runtime_status,
         "proves": "Only that generated runtime hooks executed successfully when real suite/QEMU runs occurred.",
         "does_not_prove": "Hardware-dependent probe/IRQ/PM paths unless the test actually exercises that hardware path.",
         "checks": checks,
@@ -300,12 +313,24 @@ def _future_level(level: int, name: str, note: str) -> dict[str, Any]:
 
 
 def _overall_evidence_status(levels: list[dict[str, Any]]) -> str:
+    return _overall_validation_result(levels)
+
+
+def _overall_validation_result(levels: list[dict[str, Any]]) -> str:
     critical = [levels[0].get("status"), levels[1].get("status"), levels[3].get("status")]
     if any(s == FAIL for s in critical):
-        return "FAILED_CORE_EVIDENCE"
-    if all(s == PASS for s in critical):
-        return "PASSED_CORE_EVIDENCE_NOT_PROVEN"
-    return "INCOMPLETE_OR_UNKNOWN_EVIDENCE"
+        return "FAILED_VALIDATION"
+    if not all(s == PASS for s in critical):
+        return "INCOMPLETE_VALIDATION"
+
+    runtime_status = levels[2].get("status")
+    if runtime_status == FAIL:
+        return "PASS_CORE_RUNTIME_FAILED"
+    if runtime_status in {SKIPPED, UNKNOWN, NOT_IMPLEMENTED}:
+        return "PASS_CORE_RUNTIME_NOT_RUN"
+    if runtime_status == PASS:
+        return "PASS_ALL_VALIDATION"
+    return "INCOMPLETE_VALIDATION"
 
 
 def build_validation_summary_v2(run_dir: str | Path, *, write_outputs: bool = True) -> dict[str, Any]:
@@ -339,6 +364,7 @@ def build_validation_summary_v2(run_dir: str | Path, *, write_outputs: bool = Tr
             "evaluation_only": "reference/new target driver diff and manual verdicts, if used, must stay outside agent input",
             "spec_consistency_caveat": SPEC_CONSISTENCY_CAVEAT,
         },
+        "overall_validation_result": _overall_validation_result(levels),
         "overall_evidence_status": _overall_evidence_status(levels),
         "not_a_correctness_proof": True,
         "levels": levels,
@@ -356,7 +382,7 @@ def render_validation_summary_markdown(summary: dict[str, Any]) -> str:
         f"# Validation Summary v2: {summary.get('case_id') or ''}",
         "",
         f"- Module: `{summary.get('module_path') or ''}`",
-        f"- Overall evidence status: `{summary.get('overall_evidence_status')}`",
+        f"- Overall validation result: `{summary.get('overall_validation_result') or summary.get('overall_evidence_status')}`",
         f"- Not a correctness proof: `{summary.get('not_a_correctness_proof')}`",
         "",
         "## Caveat",
@@ -427,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
             dest = out_root / case
             write_json(dest / "validation_summary_v2.json", summary)
             write_text(dest / "validation_summary_v2.md", render_validation_summary_markdown(summary))
-        print(f"[validation-summary-v2] {summary.get('overall_evidence_status')} {rd}")
+        print(f"[validation-summary-v2] {summary.get('overall_validation_result') or summary.get('overall_evidence_status')} {rd}")
     return 1 if failed else 0
 
 

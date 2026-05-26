@@ -46,6 +46,14 @@ def _selected_candidate(patch_generation: dict[str, Any]) -> dict[str, Any]:
 
 
 def _patch_text(run_dir: Path, patch_generation: dict[str, Any], validation: dict[str, Any]) -> str:
+    # Validate the exact effective patch that was compiled. If deterministic
+    # compile_autofix adjusted the selected LLM patch, its recorded diff is the
+    # artifact that downstream validation should inspect.
+    autofix_path = ((validation.get("compile_autofix") or {}).get("patch_path") or "")
+    if autofix_path:
+        p = Path(autofix_path)
+        if p.exists():
+            return read_text(p)
     cand = _selected_candidate(patch_generation)
     rel = cand.get("fixed_patch_path") or cand.get("raw_patch_path")
     if rel:

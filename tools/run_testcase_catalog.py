@@ -26,7 +26,7 @@ FIELDNAMES = [
     "returncode",
     "duration_sec",
     "run_dir",
-    "overall_evidence_status",
+    "overall_validation_result",
     "not_a_correctness_proof",
     "stage_summary",
     "error",
@@ -125,7 +125,7 @@ def _summarize_run_dir(run_dir: str) -> tuple[str, str, str]:
         return "", "", ""
     rd = Path(run_dir)
     summary = _read_json(rd / "validation_summary_v2.json")
-    status = str(summary.get("overall_evidence_status", ""))
+    status = str(summary.get("overall_validation_result") or summary.get("overall_evidence_status", ""))
     proof = str(summary.get("not_a_correctness_proof", ""))
     stage_summary = ""
     p = rd / "validation" / "stage_summary.txt"
@@ -210,7 +210,7 @@ def main() -> int:
                 "returncode": proc.returncode,
                 "duration_sec": duration,
                 "run_dir": run_dir,
-                "overall_evidence_status": status,
+                "overall_validation_result": status,
                 "not_a_correctness_proof": proof,
                 "stage_summary": stage_summary,
                 "error": "" if proc.returncode == 0 else "command_failed",
@@ -228,12 +228,12 @@ def main() -> int:
     summary = {
         "total": len(results),
         "returncode_ok": sum(int(r["returncode"]) == 0 for r in results),
-        "overall_status_counts": {},
+        "overall_validation_result_counts": {},
         "results_csv": str(out_dir / "case_results.csv"),
     }
     for row in results:
-        key = row.get("overall_evidence_status") or "missing"
-        summary["overall_status_counts"][key] = summary["overall_status_counts"].get(key, 0) + 1
+        key = row.get("overall_validation_result") or "missing"
+        summary["overall_validation_result_counts"][key] = summary["overall_validation_result_counts"].get(key, 0) + 1
     (out_dir / "run_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
     return 0

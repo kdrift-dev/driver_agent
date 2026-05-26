@@ -153,7 +153,10 @@ def run_final_report_builder(
 
     md.append("## Validation Summary v2")
     if validation_summary:
-        md.append(f"- overall_evidence_status: {validation_summary.get('overall_evidence_status', 'unknown')}")
+        md.append(
+            f"- overall_validation_result: "
+            f"{validation_summary.get('overall_validation_result') or validation_summary.get('overall_evidence_status', 'unknown')}"
+        )
         md.append(f"- not_a_correctness_proof: {validation_summary.get('not_a_correctness_proof', True)}")
         for level in validation_summary.get("levels", []):
             md.append(f"- L{level.get('level')} {level.get('name')}: {level.get('status')}")

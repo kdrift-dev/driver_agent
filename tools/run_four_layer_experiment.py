@@ -299,6 +299,8 @@ def pregen_base_cmd(
         args.patch_prompt_strength,
         "--patch-source-mode",
         args.patch_source_mode,
+        "--max-patch-iterations",
+        str(args.max_patch_iterations),
         "--qemu-timeout-sec",
         str(args.qemu_timeout_sec),
         "--kernel-config-target",
@@ -401,6 +403,7 @@ def summarize_pipeline_run(layer: str, mode: str, out_dir: Path, cmd: list[str],
         "run_dir": latest.as_posix() if latest else "",
         "metadata_status": (read_json(latest / "metadata.json", {}) or {}).get("status") if latest else "",
         "validation_status": validation.get("status", ""),
+        "overall_validation_result": summary_v2.get("overall_validation_result", ""),
         "overall_evidence_status": summary_v2.get("overall_evidence_status", ""),
         "compile_success": bool(compile_payload.get("success")),
         "qemu_enabled": bool(qemu.get("enabled")),
@@ -465,7 +468,7 @@ def write_summary(run_dir: Path, args: argparse.Namespace, p0: dict[str, Any], l
             "run_dir",
             "process_ok",
             "validation_status",
-            "overall_evidence_status",
+            "overall_validation_result",
             "compile_success",
             "qemu_success",
             "qemu_runs",
@@ -491,7 +494,7 @@ def write_summary(run_dir: Path, args: argparse.Namespace, p0: dict[str, Any], l
         f"- P0 status: `{p0.get('status')}`",
         f"- P0 hard break reproduced: `{p0.get('hard_break_reproduced')}`",
         "",
-        "| Layer | Mode | Process | Validation | Evidence | Compile | QEMU | Post | No-op |",
+        "| Layer | Mode | Process | Validation | Overall | Compile | QEMU | Post | No-op |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in layers:
@@ -503,7 +506,7 @@ def write_summary(run_dir: Path, args: argparse.Namespace, p0: dict[str, Any], l
                     f"`{row.get('patch_generation_mode')}`",
                     str(row.get("process_ok")),
                     f"`{row.get('validation_status')}`",
-                    f"`{row.get('overall_evidence_status')}`",
+                    f"`{row.get('overall_validation_result') or row.get('overall_evidence_status')}`",
                     str(row.get("compile_success")),
                     f"{row.get('qemu_success')} ({row.get('qemu_runs')})",
                     f"`{row.get('post_verdict') or row.get('post_parse_status')}`",
@@ -535,6 +538,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", required=True)
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--patch-candidates", type=int, default=1)
+    p.add_argument(
+        "--max-patch-iterations",
+        type=int,
+        default=1,
+        help="max in-tree LLM patch/validation repair iterations passed to pregen_driver_agent.py",
+    )
     p.add_argument("--patch-prompt-strength", choices=["normal", "strict"], default="strict")
     p.add_argument("--patch-source-mode", choices=["focused", "full_module"], default="focused")
     p.add_argument("--enable-llm", action="store_true")

@@ -91,8 +91,8 @@ No-QEMU run summary for the recommended first-run subset:
 
 - Selected cases: 10
 - Return code OK: 10 / 10
-- `PASSED_CORE_EVIDENCE_NOT_PROVEN`: 9
-- `INCOMPLETE_OR_UNKNOWN_EVIDENCE`: 1 (`drivers/target/tcm_remote`)
+- `PASS_ALL_VALIDATION`: 9
+- `INCOMPLETE_VALIDATION`: 1 (`drivers/target/tcm_remote`)
 - QEMU/system tests: disabled in this batch
 
 The OOT candidates are a feasibility catalog, not paper claims. Unlike in-tree cases, they do not need to use `v6.19` as the old kernel. They need a case-specific old source ref and, when available, a case-specific known-good old kernel ref. The target kernel should remain `v7.0-rc1`.

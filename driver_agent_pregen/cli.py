@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -83,6 +84,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument("--patch-candidates", type=int, default=1, help="number of patch candidates to request from LLM")
+    p.add_argument(
+        "--max-patch-iterations",
+        type=int,
+        default=1,
+        help=(
+            "max in-tree LLM patch/validation repair iterations. "
+            "Each repair emits a complete replacement patch against the original old source."
+        ),
+    )
     p.add_argument(
         "--patch-prompt-strength",
         type=str,
@@ -323,6 +333,132 @@ def _extract_touched_files_from_patch(patch_text: str) -> list[str]:
     return out
 
 
+def _compact_text(text: str, max_chars: int = 16000) -> str:
+    text = str(text or "")
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:] + "\n...[truncated]"
+
+
+def _validation_stage(validation: dict[str, Any], name: str) -> dict[str, Any]:
+    for item in validation.get("validation_stage_results", []) or []:
+        if item.get("name") == name:
+            return item
+    return {}
+
+
+def _validation_repair_reason(validation: dict[str, Any]) -> str | None:
+    apply_stage = _validation_stage(validation, "patch_apply")
+    if str(apply_stage.get("status", "")).lower() == "failed":
+        return "patch_apply_failed"
+    compile_stage = _validation_stage(validation, "compile_modules")
+    if str(compile_stage.get("status", "")).lower() == "failed":
+        return "compile_failed"
+    compile_prepare = _validation_stage(validation, "compile_prepare")
+    if str(compile_prepare.get("status", "")).lower() == "failed":
+        return "kernel_prepare_failed"
+    if not bool((validation.get("compile") or {}).get("success")):
+        return "compile_not_success"
+    return None
+
+
+def _validation_feedback_for_repair(validation: dict[str, Any], iteration: int, reason: str) -> dict[str, Any]:
+    compile_payload = validation.get("compile") or {}
+    failed_runs: list[dict[str, Any]] = []
+    for run in compile_payload.get("runs", []) or []:
+        if run.get("ok"):
+            continue
+        failed_runs.append(
+            {
+                "cmd": run.get("cmd", ""),
+                "returncode": run.get("returncode"),
+                "stderr": _compact_text(run.get("stderr", ""), max_chars=18000),
+                "stdout": _compact_text(run.get("stdout", ""), max_chars=6000),
+            }
+        )
+    prepare_failures: list[dict[str, Any]] = []
+    for step in compile_payload.get("prepare_steps", []) or []:
+        if step.get("ok"):
+            continue
+        prepare_failures.append(
+            {
+                "cmd": step.get("cmd", ""),
+                "returncode": step.get("returncode"),
+                "stderr": _compact_text(step.get("stderr", ""), max_chars=12000),
+                "stdout": _compact_text(step.get("stdout", ""), max_chars=4000),
+            }
+        )
+    apply_payload = validation.get("apply") or {}
+    apply_result = apply_payload.get("result") or {}
+    return {
+        "iteration": iteration,
+        "repair_reason": reason,
+        "status": validation.get("status"),
+        "stage_results": validation.get("validation_stage_results", []),
+        "apply": {
+            "no_op_candidate": apply_payload.get("no_op_candidate"),
+            "patch_path": apply_payload.get("patch_path"),
+            "touched_files": apply_payload.get("touched_files", []),
+            "result": {
+                "cmd": apply_result.get("cmd", ""),
+                "returncode": apply_result.get("returncode"),
+                "stderr": _compact_text(apply_result.get("stderr", ""), max_chars=12000),
+                "stdout": _compact_text(apply_result.get("stdout", ""), max_chars=4000),
+            },
+        },
+        "compile": {
+            "success": bool(compile_payload.get("success")),
+            "error": compile_payload.get("error", ""),
+            "compiled_dirs": compile_payload.get("compiled_dirs", []),
+            "prepare_failures": prepare_failures,
+            "failed_runs": failed_runs,
+            "autofix": compile_payload.get("autofix", {}),
+        },
+        "open_questions": validation.get("open_questions", []),
+    }
+
+
+def _write_patch_iteration_snapshot(
+    *,
+    run_dir: Path,
+    iteration: int,
+    patch_generation: dict[str, Any],
+    validation: dict[str, Any],
+    repair_reason: str | None,
+) -> dict[str, Any]:
+    iter_dir = run_dir / "patch_iterations" / f"iter_{iteration:02d}"
+    iter_dir.mkdir(parents=True, exist_ok=True)
+    write_json(iter_dir / "patch_generation.json", patch_generation)
+    write_json(iter_dir / "validation.json", validation)
+    validation_artifacts = run_dir / "validation"
+    if validation_artifacts.exists():
+        shutil.copytree(validation_artifacts, iter_dir / "validation_artifacts", dirs_exist_ok=True)
+    post_reasoner_artifacts = run_dir / "llm_calls" / "04_post_reasoner"
+    if post_reasoner_artifacts.exists():
+        shutil.copytree(post_reasoner_artifacts, iter_dir / "llm_calls" / "04_post_reasoner", dirs_exist_ok=True)
+    selected = {}
+    for cand in patch_generation.get("patch_candidates", []) or []:
+        if cand.get("candidate_id") == patch_generation.get("selected_candidate_id"):
+            selected = cand
+            break
+    if not selected and patch_generation.get("patch_candidates"):
+        selected = patch_generation["patch_candidates"][0]
+    record = {
+        "iteration": iteration,
+        "patch_stage": patch_generation.get("stage"),
+        "patch_generation_mode": patch_generation.get("patch_generation_mode"),
+        "selected_candidate_id": patch_generation.get("selected_candidate_id"),
+        "no_op_candidate": bool(selected.get("no_op_candidate")) if selected else None,
+        "touched_files": selected.get("touched_files", []) if selected else [],
+        "validation_status": validation.get("status"),
+        "compile_success": bool((validation.get("compile") or {}).get("success")),
+        "repair_reason": repair_reason,
+        "will_repair": repair_reason is not None,
+    }
+    write_json(iter_dir / "iteration_result.json", record)
+    return record
+
+
 def _override_patch_generation_with_file(
     *,
     run_dir: Path,
@@ -441,6 +577,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         "patch_source_mode": args.patch_source_mode,
         "patch_source_with_lineno": bool(args.patch_source_with_lineno),
         "patch_generation_mode": args.patch_generation_mode,
+        "max_patch_iterations": max(1, int(args.max_patch_iterations or 1)),
         "kernel_config_target": args.kernel_config_target,
         "oot_pipeline_mode": args.oot_pipeline_mode if args.oot_repo_url else None,
         "oot_repo_url": args.oot_repo_url,
@@ -858,31 +995,128 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             ),
         )
     else:
-        validation = stage(
-            "09c_validation_agent",
-            lambda: run_validation_agent(
-                accessor=accessor,
-                llm_client=llm_client,
-                llm_calls_dir=llm_calls_dir,
-                run_dir=run_dir,
-                case_id=case_id,
-                module_path=args.module_path,
-                old_ref=args.old_ref,
-                new_ref=args.new_ref,
-                patch_generation_result=patch_generation,
-                context_packet=context_packet,
-                impact_graph=impact_graph,
-                compatibility_obligations=obligations,
-                dry_run=args.dry_run,
-                jobs=args.jobs,
-                enable_qemu=args.enable_qemu,
-                qemu_timeout_sec=args.qemu_timeout_sec,
-                skip_system_test_generation=args.skip_system_test_generation,
-                enable_host_suite=args.enable_host_suite,
-                keep_worktrees=not args.cleanup_worktrees,
-                kernel_config_target=args.kernel_config_target,
-            ),
+        max_patch_iterations = max(1, int(args.max_patch_iterations or 1))
+        repair_enabled = bool(
+            max_patch_iterations > 1
+            and args.enable_llm
+            and not args.dry_run
+            and not args.validation_patch_file
         )
+        patch_iteration_records: list[dict[str, Any]] = []
+        validation: dict[str, Any] = {}
+        for patch_iteration in range(1, max_patch_iterations + 1):
+            validation_stage = (
+                "09c_validation_agent"
+                if patch_iteration == 1
+                else f"09c_validation_agent_iter_{patch_iteration:02d}"
+            )
+            validation = stage(
+                validation_stage,
+                lambda pg=patch_generation: run_validation_agent(
+                    accessor=accessor,
+                    llm_client=llm_client,
+                    llm_calls_dir=llm_calls_dir,
+                    run_dir=run_dir,
+                    case_id=case_id,
+                    module_path=args.module_path,
+                    old_ref=args.old_ref,
+                    new_ref=args.new_ref,
+                    patch_generation_result=pg,
+                    context_packet=context_packet,
+                    impact_graph=impact_graph,
+                    compatibility_obligations=obligations,
+                    dry_run=args.dry_run,
+                    jobs=args.jobs,
+                    enable_qemu=args.enable_qemu,
+                    qemu_timeout_sec=args.qemu_timeout_sec,
+                    skip_system_test_generation=args.skip_system_test_generation,
+                    enable_host_suite=args.enable_host_suite,
+                    keep_worktrees=not args.cleanup_worktrees,
+                    kernel_config_target=args.kernel_config_target,
+                ),
+            )
+            repair_reason = _validation_repair_reason(validation)
+            iter_record = _write_patch_iteration_snapshot(
+                run_dir=run_dir,
+                iteration=patch_iteration,
+                patch_generation=patch_generation,
+                validation=validation,
+                repair_reason=repair_reason,
+            )
+            patch_iteration_records.append(iter_record)
+            write_json(
+                run_dir / "patch_iterations.json",
+                {
+                    "max_patch_iterations": max_patch_iterations,
+                    "repair_enabled": repair_enabled,
+                    "iterations": patch_iteration_records,
+                },
+            )
+            metadata["patch_iterations"] = patch_iteration_records
+            write_json(run_dir / "metadata.json", metadata)
+
+            if not repair_reason:
+                break
+            if not repair_enabled:
+                iter_record["repair_skipped_reason"] = (
+                    "disabled: requires --max-patch-iterations > 1, --enable-llm, no --dry-run, and no --validation-patch-file"
+                )
+                iter_record["will_repair"] = False
+                write_json(run_dir / "patch_iterations" / f"iter_{patch_iteration:02d}" / "iteration_result.json", iter_record)
+                patch_iteration_records[-1] = iter_record
+                write_json(
+                    run_dir / "patch_iterations.json",
+                    {
+                        "max_patch_iterations": max_patch_iterations,
+                        "repair_enabled": repair_enabled,
+                        "iterations": patch_iteration_records,
+                    },
+                )
+                break
+            if patch_iteration >= max_patch_iterations:
+                iter_record["repair_skipped_reason"] = "max_patch_iterations_reached"
+                iter_record["will_repair"] = False
+                write_json(run_dir / "patch_iterations" / f"iter_{patch_iteration:02d}" / "iteration_result.json", iter_record)
+                patch_iteration_records[-1] = iter_record
+                write_json(
+                    run_dir / "patch_iterations.json",
+                    {
+                        "max_patch_iterations": max_patch_iterations,
+                        "repair_enabled": repair_enabled,
+                        "iterations": patch_iteration_records,
+                    },
+                )
+                break
+
+            repair_context = _validation_feedback_for_repair(validation, patch_iteration, repair_reason)
+            previous_patch_generation = patch_generation
+            patch_generation = stage(
+                f"09b_patch_repair_iter_{patch_iteration + 1:02d}",
+                lambda pg=previous_patch_generation, rc=repair_context, next_iter=patch_iteration + 1: run_patch_generation_agent(
+                    llm_client=llm_client,
+                    llm_calls_dir=llm_calls_dir,
+                    run_dir=run_dir,
+                    extracted_dir=extracted_dir,
+                    case_id=case_id,
+                    module_path=args.module_path,
+                    context_packet=context_packet,
+                    pre_reasoning=pre_reasoning,
+                    impact_graph=impact_graph,
+                    compatibility_obligations=obligations,
+                    dry_run=False,
+                    max_candidates=max(1, args.patch_candidates),
+                    prompt_strength=args.patch_prompt_strength,
+                    source_mode=args.patch_source_mode,
+                    source_with_line_numbers=bool(args.patch_source_with_lineno),
+                    patch_generation_mode=args.patch_generation_mode,
+                    old_ref=args.old_ref,
+                    new_ref=args.new_ref,
+                    kernel_definition_diffs=kernel_diffs,
+                    repair_iteration=next_iter,
+                    repair_context=rc,
+                    previous_patch_generation=pg,
+                ),
+            )
 
     validation_summary_v2 = stage(
         "09d_validation_summary_v2",

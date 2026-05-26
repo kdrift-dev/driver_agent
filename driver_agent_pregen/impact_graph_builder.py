@@ -251,6 +251,33 @@ def _function_alloc_signal(trigger_reasons: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _strip_line_numbers(text: str) -> str:
+    return re.sub(r"^\s*\d+:\s?", "", text or "", flags=re.M)
+
+
+def _return_value_used_at_callsite(local_slice: str, symbol_name: str) -> bool:
+    """Conservatively detect callsites that rely on a function return value.
+
+    A return-type change is only an edit-required obligation for a particular
+    driver function when the old call's result participates in control/data
+    flow. Plain statement calls can remain context-only.
+    """
+    if not symbol_name:
+        return False
+    text = _strip_line_numbers(local_slice)
+    sym = re.escape(symbol_name)
+    call = rf"\b{sym}\s*\("
+    if not re.search(call, text):
+        return False
+    patterns = [
+        rf"\breturn\s+{call}",
+        rf"\b(?:if|while|switch)\s*\([^;\n{{}}]*{call}",
+        rf"{call}[^;\n]*\)\s*(?:[!=<>]=?|&&|\|\|)",
+        rf"(?:^|[;\n{{}}]\s*)(?:[A-Za-z_][A-Za-z0-9_\s\*\[\]\.]*\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*{call}",
+    ]
+    return any(re.search(p, text, flags=re.S) for p in patterns)
+
+
 def _to_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -433,6 +460,15 @@ def run_impact_graph_builder(
                     }
                 )
                 continue
+            trig = dict(trig)
+            if (
+                str(meta.get("change_type_guess", "")) == "return_value_change"
+                and _return_value_used_at_callsite(local_slice, sym_name)
+            ):
+                trig["tier"] = "hard"
+                trig.setdefault("reasons", [])
+                if "return_value_used_at_callsite" not in trig["reasons"]:
+                    trig["reasons"] = list(trig["reasons"]) + ["return_value_used_at_callsite"]
             kept_reasons.append(trig)
             kept_symbols.add(sym_text)
             kept_tier = _max_tier(kept_tier, str(trig.get("tier", "context")))

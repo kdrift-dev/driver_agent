@@ -98,6 +98,27 @@ Strict mode constraints:
 """.strip()
 
 
+PATCH_REPAIR_INSTRUCTION = """
+You are a Linux driver migration patch repair agent.
+Task: repair a previously generated patch using validation feedback.
+Constraints:
+1. Output a COMPLETE replacement unified diff against the original old target module source, not an incremental diff against the previous failed patch.
+2. Use validation feedback only as diagnostic evidence. Do not use target driver new-version source, target driver reference diff, or other-driver migration examples.
+3. Patch MUST only touch files under module_path unless directly required by supplied kernel-side evidence.
+4. Preserve ownership, error path, locking, cleanup, and return-value semantics.
+5. Fix the specific patch-apply or compile error first; avoid opportunistic cleanup or broad rewrites.
+6. Respect edit_scope_policy:
+   - edit_required functions are default edit targets.
+   - edit_candidate functions may be edited only when rationale cites their candidate evidence.
+   - context_only functions must not be edited.
+7. If the failure indicates the previous edit was wrong, replace it with a smaller correct edit rather than layering another change on top.
+8. If evidence is insufficient for a safe code edit, emit an explicit no-op/open_question instead of guessing.
+9. Output MUST be strict JSON matching the required schema.
+10. Patch text must be valid unified diff with diff --git headers.
+11. Return ONLY the JSON object. Do not include prose, markdown fences, or analysis outside the JSON.
+""".strip()
+
+
 BASELINE_PATCH_GEN_INSTRUCTION = """
 You are a Linux driver migration baseline patch generator.
 Task: generate patch candidates (unified diff) using only the baseline input payload.
@@ -288,6 +309,50 @@ def build_patch_generation_prompt(
         "module_level_notes": ["string"],
     }
     instruction = PATCH_GEN_INSTRUCTION
+    mode = str(source_mode or "full_module").strip().lower()
+    if mode == "focused":
+        instruction = instruction + "\n\n" + PATCH_GEN_SOURCE_FOCUSED_APPENDIX
+    else:
+        instruction = instruction + "\n\n" + PATCH_GEN_SOURCE_FULL_APPENDIX
+    if source_with_line_numbers:
+        instruction = instruction + "\n\nSource note: line-number prefixes are hints only; never include them in output patch."
+    if strict_mode:
+        instruction = instruction + "\n\n" + PATCH_GEN_STRICT_APPENDIX
+    return (
+        instruction
+        + "\n\nRequired output schema:\n```json\n"
+        + json.dumps(schema, indent=2)
+        + "\n```\n"
+        + "\nInput payload:\n```json\n"
+        + json.dumps(input_payload, indent=2)
+        + "\n```\n"
+    )
+
+
+def build_patch_repair_prompt(
+    input_payload: dict[str, Any],
+    *,
+    strict_mode: bool = True,
+    source_mode: str = "full_module",
+    source_with_line_numbers: bool = False,
+) -> str:
+    schema = {
+        "case_id": "string",
+        "stage": "patch_repair",
+        "patch_candidates": [
+            {
+                "candidate_id": "string",
+                "strategy": "string",
+                "rationale": "string",
+                "touched_files": ["string"],
+                "patch_diff": "string",
+                "evidence": ["string"],
+                "open_questions": ["string"],
+            }
+        ],
+        "module_level_notes": ["string"],
+    }
+    instruction = PATCH_REPAIR_INSTRUCTION
     mode = str(source_mode or "full_module").strip().lower()
     if mode == "focused":
         instruction = instruction + "\n\n" + PATCH_GEN_SOURCE_FOCUSED_APPENDIX

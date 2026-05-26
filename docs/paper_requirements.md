@@ -136,9 +136,10 @@ Report QEMU evidence by scope:
 - `hardware_required`: meaningful validation requires real hardware,
   subsystem CI, or a dedicated simulator.
 
-`PASSED_CORE_EVIDENCE_NOT_PROVEN` remains the global default for generic driver
-migration unless the report names the exercised QEMU interface and explains why
-that interface covers the migrated behavior.
+`PASS_ALL_VALIDATION` means all currently enabled validation layers passed. It
+does not mean the patch is a proof of full driver correctness. A report should
+still name the exercised QEMU interface and explain whether that interface
+covers the migrated behavior.
 
 ## Deferred Semantic Modernization Policy
 

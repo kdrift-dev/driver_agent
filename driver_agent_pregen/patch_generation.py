@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from .llm_client import LLMClient
 from .patch_line_fixer import fix_patch_line_numbers
-from .prompts import build_baseline_patch_generation_prompt, build_patch_generation_prompt
+from .prompts import build_baseline_patch_generation_prompt, build_patch_generation_prompt, build_patch_repair_prompt
 from .utils import read_json, read_text, truncate_text, write_json, write_text
 
 
@@ -1153,6 +1153,45 @@ def _extract_raw_candidates(llm_output: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def _selected_candidate(patch_generation: dict[str, Any]) -> dict[str, Any]:
+    candidates = patch_generation.get("patch_candidates", []) or []
+    if not candidates:
+        return {}
+    selected_id = patch_generation.get("selected_candidate_id") or candidates[0].get("candidate_id")
+    for cand in candidates:
+        if cand.get("candidate_id") == selected_id:
+            return cand
+    return candidates[0]
+
+
+def _repair_previous_patch_payload(run_dir: Path, patch_generation: dict[str, Any]) -> dict[str, Any]:
+    cand = _selected_candidate(patch_generation)
+    patch_text = ""
+    patch_rel = cand.get("fixed_patch_path") or cand.get("raw_patch_path")
+    if patch_rel:
+        patch_path = run_dir / str(patch_rel)
+        if patch_path.exists():
+            patch_text = read_text(patch_path)
+    return {
+        "selected_candidate_id": patch_generation.get("selected_candidate_id"),
+        "parse_status": patch_generation.get("parse_status"),
+        "patch_generation_mode": patch_generation.get("patch_generation_mode"),
+        "candidate": {
+            "candidate_id": cand.get("candidate_id"),
+            "strategy": cand.get("strategy"),
+            "rationale": truncate_text(str(cand.get("rationale", "") or ""), max_chars=1000),
+            "evidence": [truncate_text(str(x), max_chars=240) for x in (cand.get("evidence", []) or [])[:8]],
+            "open_questions": [truncate_text(str(x), max_chars=240) for x in (cand.get("open_questions", []) or [])[:8]],
+            "touched_files": cand.get("touched_files", []),
+            "line_fix_ok": cand.get("line_fix_ok"),
+            "line_fix_messages": cand.get("line_fix_messages", [])[:8],
+            "no_op_candidate": cand.get("no_op_candidate"),
+            "policy_fallback": cand.get("policy_fallback"),
+        },
+        "patch_diff": truncate_text(patch_text, max_chars=24000),
+    }
+
+
 def _should_emit_auto_noop(
     *,
     compatibility_obligations: dict[str, Any],
@@ -1304,8 +1343,14 @@ def run_patch_generation_agent(
     old_ref: str | None = None,
     new_ref: str | None = None,
     kernel_definition_diffs: dict[str, Any] | None = None,
+    repair_iteration: int | None = None,
+    repair_context: dict[str, Any] | None = None,
+    previous_patch_generation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    stage_dir = llm_calls_dir / "03_patch_generation"
+    is_repair = repair_context is not None
+    stage_dir = llm_calls_dir / (
+        f"03_patch_repair_iter_{int(repair_iteration or 0):02d}" if is_repair else "03_patch_generation"
+    )
     stage_dir.mkdir(parents=True, exist_ok=True)
     patch_runs_dir = run_dir / "patch_runs"
     patch_runs_dir.mkdir(parents=True, exist_ok=True)
@@ -1328,9 +1373,13 @@ def run_patch_generation_agent(
         mode = "full_module"
         requested_source_mode = "full_module"
 
-    deterministic_noop = generation_mode == "agent" and _should_emit_auto_noop(
+    deterministic_noop = (
+        not is_repair
+        and generation_mode == "agent"
+        and _should_emit_auto_noop(
         compatibility_obligations=compatibility_obligations,
         impact_graph=impact_graph,
+    )
     )
     required_symbol_keys = _required_symbol_keys(compatibility_obligations) if generation_mode == "agent" else set()
     llm_impact_graph = (
@@ -1466,8 +1515,41 @@ def run_patch_generation_agent(
                 else ""
             )
 
+    if is_repair:
+        input_payload = {
+            **input_payload,
+            "stage": "patch_repair",
+            "repair_iteration": int(repair_iteration or 0),
+            "repair_policy": {
+                "patch_diff_contract": (
+                    "Return a complete replacement unified diff against the original old target module source. "
+                    "Do not return an incremental diff against the previously failed patch."
+                ),
+                "input_boundary": (
+                    "Repair may use old target module source, kernel-side evidence, generated obligations/specs, "
+                    "and validation diagnostics only. Target driver new-version diff remains evaluation-only and is absent."
+                ),
+            },
+            "previous_patch_generation": _repair_previous_patch_payload(
+                run_dir,
+                previous_patch_generation or {},
+            ),
+            "validation_feedback": repair_context or {},
+            "instruction": (
+                "Repair the previous patch. Produce one complete replacement unified diff that applies to the "
+                "original old module source and addresses the validation failure."
+            ),
+        }
+
     strict_mode = str(prompt_strength or "normal").strip().lower() == "strict"
-    if generation_mode == "baseline_source_only":
+    if is_repair:
+        prompt = build_patch_repair_prompt(
+            input_payload,
+            strict_mode=True,
+            source_mode=mode,
+            source_with_line_numbers=bool(source_with_line_numbers),
+        )
+    elif generation_mode == "baseline_source_only":
         prompt = build_baseline_patch_generation_prompt(
             input_payload,
             baseline_mode="source_only",
@@ -1490,7 +1572,7 @@ def run_patch_generation_agent(
         )
     default_output = {
         "case_id": case_id,
-        "stage": "patch_generation",
+        "stage": "patch_repair" if is_repair else "patch_generation",
         "patch_candidates": [],
         "module_level_notes": ["dry-run or no-provider placeholder"],
     }
@@ -1526,7 +1608,8 @@ def run_patch_generation_agent(
     strong_semantic_required = effective_patch_required
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
-        cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
+        raw_cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
+        cid = f"REPAIR-{int(repair_iteration or 0):02d}-{raw_cid}" if is_repair else raw_cid
         cdir = patch_runs_dir / cid.lower().replace("/", "_")
         cdir.mkdir(parents=True, exist_ok=True)
 
@@ -1929,7 +2012,9 @@ def run_patch_generation_agent(
 
     out = {
         "case_id": case_id,
-        "stage": "patch_generation",
+        "stage": "patch_repair" if is_repair else "patch_generation",
+        "repair_iteration": int(repair_iteration or 0) if is_repair else None,
+        "is_repair": bool(is_repair),
         "patch_generation_mode": generation_mode,
         "patch_source_mode": mode,
         "requested_patch_source_mode": requested_source_mode,

@@ -324,6 +324,10 @@ def pregen_base_cmd(
                 args.llm_model,
             ]
         )
+        if args.llm_api_key:
+            cmd.extend(["--llm-api-key", args.llm_api_key])
+        if args.llm_base_url:
+            cmd.extend(["--llm-base-url", args.llm_base_url])
         if args.config_ini:
             cmd.extend(["--config-ini", args.config_ini])
     runtime_policy = str(args.runtime_policy or "all")
@@ -549,6 +553,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--enable-llm", action="store_true")
     p.add_argument("--llm-provider", default="openrouter")
     p.add_argument("--llm-model", default="anthropic/claude-sonnet-4.6")
+    p.add_argument("--llm-api-key", default=None)
+    p.add_argument("--llm-base-url", default=None)
     p.add_argument("--config-ini", default="/mnt/disk7/jw_ai4os/driver-agent/workflow/config.ini")
     p.add_argument("--llm-timeout-sec", type=int, default=240)
     p.add_argument("--llm-max-retries", type=int, default=1)

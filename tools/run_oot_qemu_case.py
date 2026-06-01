@@ -134,10 +134,45 @@ def prepare_worktree(repo: Path, ref: str, dest: Path, *, keep_existing: bool = 
     return res
 
 
-def prepare_kernel(tree: Path, jobs: int) -> list[dict[str, Any]]:
+def _apply_kernel_config_options(tree: Path, config_options: list[str] | None) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    script = tree / "scripts" / "config"
+    if not config_options or not script.exists():
+        return results
+    for raw in config_options:
+        item = (raw or "").strip()
+        if not item:
+            continue
+        if item.startswith("CONFIG_"):
+            item = item[len("CONFIG_") :]
+        if "=" in item:
+            name, value = item.split("=", 1)
+            value = value.strip().lower()
+        else:
+            name, value = item, "y"
+        name = name.strip()
+        if value in {"m", "module"}:
+            cmd = [str(script), "--module", name]
+        elif value in {"n", "disable", "off"}:
+            cmd = [str(script), "--disable", name]
+        else:
+            cmd = [str(script), "--enable", name]
+        results.append(run(cmd, cwd=tree, timeout=120))
+    return results
+
+
+def prepare_kernel(
+    tree: Path,
+    jobs: int,
+    *,
+    config_target: str = "defconfig",
+    config_options: list[str] | None = None,
+) -> list[dict[str, Any]]:
     results = []
     if not (tree / ".config").exists():
-        results.append(run(["make", f"-j{jobs}", "defconfig"], cwd=tree, timeout=1800))
+        target = config_target if config_target in {"defconfig", "allmodconfig", "allyesconfig"} else "defconfig"
+        results.append(run(["make", f"-j{jobs}", target], cwd=tree, timeout=7200))
+    results.extend(_apply_kernel_config_options(tree, config_options))
     results.append(run(["make", f"-j{jobs}", "olddefconfig"], cwd=tree, timeout=1800))
     results.append(run(["make", f"-j{jobs}", "modules_prepare"], cwd=tree, timeout=3600))
     return results
@@ -160,6 +195,95 @@ def build_external(kernel_tree: Path, module_dir: Path, jobs: int, extra_make_ar
         ],
         timeout=1800,
     )
+
+
+def _kernel_release(kernel_tree: Path) -> str:
+    res = run(["make", "-s", "kernelrelease"], cwd=kernel_tree, timeout=120)
+    if res.get("returncode") != 0:
+        return ""
+    return (res.get("stdout") or "").strip()
+
+
+def prepare_qemu_module_tree(
+    run_dir: Path,
+    kernel_tree: Path,
+    oot_module_ko: Path,
+    jobs: int,
+    dependency_module_dirs: list[str] | None = None,
+    dependency_module_targets: list[str] | None = None,
+    extra_make_args: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build/copy selected dependency modules and place OOT module under extra/.
+
+    External modules may compile while still depending on in-kernel modules
+    such as videodev.ko. QEMU validation needs a real /lib/modules tree so the
+    guest can use modprobe rather than a bare insmod with unresolved symbols.
+    Building all kernel modules is too expensive, so callers should provide the
+    small in-tree module directories required by the OOT module.
+    """
+
+    stage = run_dir / "kernel_modules_staging"
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True, exist_ok=True)
+    krel = _kernel_release(kernel_tree)
+    if not krel:
+        return {"ok": False, "reason": "kernelrelease_failed"}
+    copied: list[str] = []
+    build_runs: list[dict[str, Any]] = []
+
+    def copy_kernel_module(ko: Path) -> None:
+        if not ko.exists():
+            return
+        dest = stage / "lib" / "modules" / krel / "kernel" / ko.relative_to(kernel_tree)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ko, dest)
+        copied.append(dest.relative_to(stage).as_posix())
+
+    for target in dependency_module_targets or []:
+        target = target.strip().strip("/")
+        if not target:
+            continue
+        build = run(["make", "KBUILD_MODPOST_WARN=1", f"-j{jobs}", target], cwd=kernel_tree, timeout=3600)
+        build_runs.append(build | {"target": target})
+        copy_kernel_module(kernel_tree / target)
+
+    for rel in dependency_module_dirs or []:
+        rel = rel.strip().strip("/")
+        if not rel:
+            continue
+        src_dir = kernel_tree / rel
+        if not src_dir.exists():
+            build_runs.append({"ok": False, "reason": "dependency_dir_missing", "dir": rel})
+            continue
+        # For in-tree dependency dirs, directory targets reliably build the
+        # modules selected by .config. `M=... modules` is intended primarily for
+        # external module builds and may produce no .ko for some in-tree paths.
+        build = run(["make", "KBUILD_MODPOST_WARN=1", f"-j{jobs}", f"{rel}/"], cwd=kernel_tree, timeout=3600)
+        build_runs.append(build | {"dir": rel})
+        for ko in sorted(src_dir.rglob("*.ko")):
+            copy_kernel_module(ko)
+    # Rebuild the OOT module after dependency modules have been built so
+    # modpost can use Module.symvers and depmod can infer depends= entries.
+    oot_rebuild = build_external(kernel_tree, oot_module_ko.parent, jobs, extra_make_args or [])
+    extra = stage / "lib" / "modules" / krel / "extra"
+    extra.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(oot_module_ko, extra / oot_module_ko.name)
+    depmod = run(["depmod", "-b", str(stage), krel], timeout=300)
+    modules_root = stage / "lib" / "modules"
+    build_ok = all(bool(x.get("ok")) for x in build_runs) if build_runs else True
+    ok = build_ok and bool(oot_rebuild.get("ok")) and bool(depmod.get("ok"))
+    return {
+        "ok": ok,
+        "reason": "prepared" if ok else "module_tree_prepare_failed",
+        "kernel_release": krel,
+        "modules_root": modules_root.as_posix(),
+        "dependency_module_dirs": dependency_module_dirs or [],
+        "dependency_module_targets": dependency_module_targets or [],
+        "copied_dependency_modules": copied,
+        "build_dependency_modules": build_runs,
+        "oot_rebuild_after_dependency_modules": oot_rebuild,
+        "depmod": depmod,
+    }
 
 
 def collect_class_create_evidence(repo: Path, old_ref: str, new_ref: str, out_dir: Path) -> dict[str, Any]:
@@ -277,6 +401,7 @@ def run_patch_llm(
             config_ini=args.config_ini,
             timeout_sec=args.llm_timeout_sec,
             max_retries=args.llm_max_retries,
+            max_tokens=args.llm_max_tokens,
         )
     )
     return client.call_json(
@@ -344,6 +469,7 @@ def make_initramfs(
     write_data: str,
     expect_data: str,
     qemu_check_script: Path | None = None,
+    modules_root: Path | None = None,
 ) -> Path:
     root = run_dir / "initramfs_root"
     if root.exists():
@@ -352,6 +478,8 @@ def make_initramfs(
         (root / d).mkdir(parents=True, exist_ok=True)
     shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
     shutil.copy2(module_ko, root / module_ko.name)
+    if modules_root and modules_root.exists():
+        shutil.copytree(modules_root, root / "lib" / "modules", dirs_exist_ok=True, symlinks=True)
     for app in [
         "sh",
         "mount",
@@ -360,6 +488,7 @@ def make_initramfs(
         "awk",
         "mknod",
         "insmod",
+        "modprobe",
         "rmmod",
         "poweroff",
         "echo",
@@ -388,6 +517,15 @@ mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 export DRIVER_AGENT_MODULE_KO=/{module_ko.name}
 export DRIVER_AGENT_MODULE_NAME={module_name}
+driver_agent_load_module() {{
+  if [ -d /lib/modules/$(uname -r) ]; then
+    /bin/modprobe "$DRIVER_AGENT_MODULE_NAME" "$@" && return 0
+  fi
+  /bin/insmod "$DRIVER_AGENT_MODULE_KO" "$@"
+}}
+driver_agent_unload_module() {{
+  /bin/rmmod "$DRIVER_AGENT_MODULE_NAME"
+}}
 {check_body}
 """
     else:
@@ -395,7 +533,11 @@ export DRIVER_AGENT_MODULE_NAME={module_name}
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
-/bin/insmod /{module_ko.name} || {{ echo DRIVER_AGENT_INSMOD_FAIL; /bin/poweroff -f; }}
+if [ -d /lib/modules/$(uname -r) ]; then
+  /bin/modprobe {module_name} || {{ echo DRIVER_AGENT_MODPROBE_FAIL; /bin/poweroff -f; }}
+else
+  /bin/insmod /{module_ko.name} || {{ echo DRIVER_AGENT_INSMOD_FAIL; /bin/poweroff -f; }}
+fi
 if [ ! -e {device_node} ]; then
   echo DRIVER_AGENT_DEVICE_NODE_MISSING {device_node}
   /bin/poweroff -f
@@ -404,7 +546,7 @@ exec 3<> {device_node} || {{ echo DRIVER_AGENT_OPEN_FAIL; /bin/poweroff -f; }}
 echo -n {write_data!r} >&3 || {{ echo DRIVER_AGENT_WRITE_FAIL; /bin/poweroff -f; }}
 cat <&3 | grep {expect_data!r} || {{ echo DRIVER_AGENT_READBACK_FAIL; /bin/poweroff -f; }}
 exec 3>&-
-rmmod {module_name} || {{ echo DRIVER_AGENT_RMMOD_FAIL; /bin/poweroff -f; }}
+/bin/rmmod {module_name} || {{ echo DRIVER_AGENT_RMMOD_FAIL; /bin/poweroff -f; }}
 echo DRIVER_AGENT_QEMU_SMOKE_PASS
 poweroff -f
 """
@@ -430,6 +572,9 @@ def run_qemu_smoke(
     write_data: str,
     expect_data: str,
     qemu_check_script: Path | None = None,
+    dependency_module_dirs: list[str] | None = None,
+    dependency_module_targets: list[str] | None = None,
+    make_extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     bz = new_tree / "arch" / "x86" / "boot" / "bzImage"
     build_kernel: dict[str, Any] | None = None
@@ -437,6 +582,22 @@ def run_qemu_smoke(
         build_kernel = run(["make", f"-j{jobs}", "bzImage"], cwd=new_tree, timeout=7200)
         if build_kernel["returncode"] != 0:
             return {"ok": False, "reason": "bzImage_build_failed", "build_kernel": build_kernel}
+    module_tree = prepare_qemu_module_tree(
+        run_dir,
+        new_tree,
+        module_ko,
+        jobs,
+        dependency_module_dirs=dependency_module_dirs or [],
+        dependency_module_targets=dependency_module_targets or [],
+        extra_make_args=make_extra_args or [],
+    )
+    if not module_tree.get("ok"):
+        return {
+            "ok": False,
+            "reason": module_tree.get("reason") or "module_tree_prepare_failed",
+            "build_kernel": build_kernel,
+            "module_tree": module_tree,
+        }
     initrd = make_initramfs(
         run_dir,
         module_ko,
@@ -445,6 +606,7 @@ def run_qemu_smoke(
         write_data=write_data,
         expect_data=expect_data,
         qemu_check_script=qemu_check_script,
+        modules_root=Path(module_tree["modules_root"]) if module_tree.get("modules_root") else None,
     )
     qemu_cmd = [
         "qemu-system-x86_64",
@@ -466,7 +628,13 @@ def run_qemu_smoke(
     text = (res.get("stdout", "") or "") + "\n" + (res.get("stderr", "") or "")
     res["success_marker"] = "DRIVER_AGENT_QEMU_SMOKE_PASS" in text
     res["ok"] = res["success_marker"]
-    return {"ok": res["ok"], "reason": "success" if res["ok"] else "success_marker_missing", "build_kernel": build_kernel, "qemu": res}
+    return {
+        "ok": res["ok"],
+        "reason": "success" if res["ok"] else "success_marker_missing",
+        "build_kernel": build_kernel,
+        "module_tree": module_tree,
+        "qemu": res,
+    }
 
 
 def main() -> int:
@@ -486,6 +654,7 @@ def main() -> int:
     ap.add_argument("--llm-model", default="anthropic/claude-sonnet-4.6")
     ap.add_argument("--config-ini", default=str(ROOT / "config.ini"))
     ap.add_argument("--llm-timeout-sec", type=int, default=300)
+    ap.add_argument("--llm-max-tokens", type=int, default=10000)
     ap.add_argument("--llm-max-retries", type=int, default=2)
     ap.add_argument("--max-patch-iterations", type=int, default=1, help="max LLM patch/build repair iterations")
     ap.add_argument("--enable-qemu", action="store_true")
@@ -505,6 +674,24 @@ def main() -> int:
         action="append",
         default=[],
         help="extra make argument for OOT module builds, e.g. KCFLAGS=-Wno-error=type-limits",
+    )
+    ap.add_argument(
+        "--kernel-config",
+        action="append",
+        default=[],
+        help="kernel config option needed by the OOT module, e.g. MEDIA_SUPPORT=m or CONFIG_VIDEO_DEV=m",
+    )
+    ap.add_argument(
+        "--kernel-module-dir",
+        action="append",
+        default=[],
+        help="in-tree kernel module directory to build/copy into QEMU initramfs, e.g. drivers/media/v4l2-core",
+    )
+    ap.add_argument(
+        "--kernel-module",
+        action="append",
+        default=[],
+        help="specific in-tree .ko target to build/copy into QEMU initramfs, e.g. drivers/media/v4l2-core/videodev.ko",
     )
     ap.add_argument("--keep-worktrees", action="store_true")
     args = ap.parse_args()
@@ -573,8 +760,8 @@ def main() -> int:
     timings["worktree_prepare_sec"] = round(time.time() - t, 3)
 
     t = time.time()
-    old_prep = prepare_kernel(old_tree, args.jobs)
-    new_prep = prepare_kernel(new_tree, args.jobs)
+    old_prep = prepare_kernel(old_tree, args.jobs, config_options=args.kernel_config or [])
+    new_prep = prepare_kernel(new_tree, args.jobs, config_options=args.kernel_config or [])
     timings["kernel_prepare_sec"] = round(time.time() - t, 3)
 
     t = time.time()
@@ -639,6 +826,9 @@ def main() -> int:
             write_data=args.qemu_write_data,
             expect_data=args.qemu_expect_data,
             qemu_check_script=Path(args.qemu_check_script) if args.qemu_check_script else None,
+            dependency_module_dirs=args.kernel_module_dir or [],
+            dependency_module_targets=args.kernel_module or [],
+            make_extra_args=args.make_extra_arg or [],
         )
         qemu["skipped"] = False
         timings["qemu_smoke_sec"] = round(time.time() - t, 3)

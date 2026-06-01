@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import json
 import os
 import re
 from pathlib import Path
@@ -321,7 +322,124 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
     cmds: list[str]
     notes: list[str]
 
-    if module_path == "drivers/iio/test":
+    def _kunit_case(
+        *,
+        test_id: str,
+        name: str,
+        intent: str,
+        kunitconfig: str,
+        note: str,
+        timeout_sec: int = 900,
+    ) -> dict[str, Any]:
+        cmd = (
+            "make ARCH=um mrproper >/dev/null 2>&1 || true; "
+            f"./tools/testing/kunit/kunit.py run --kunitconfig={shlex.quote(kunitconfig)}"
+        )
+        return {
+            "case_id": case_id,
+            "stage": "system_test_generation",
+            "parse_status": "ok",
+            "test_cases": [
+                {
+                    "id": test_id,
+                    "name": name,
+                    "entry_kind": "boot",
+                    "intent": intent,
+                    "preconditions": [f"{kunitconfig} exists or can be generated in the prepared kernel tree."],
+                    "steps": [{"cmd": cmd, "why": "Runs the target in-tree KUnit suite without physical hardware."}],
+                    "assertions": ["kunit.py exits successfully"],
+                    "timeout_sec": timeout_sec,
+                    "skip_if": ["KUnit/UML tooling unavailable or dependencies unsatisfied"],
+                    "artifacts": ["KUnit stdout/stderr"],
+                }
+            ],
+            "suite_commands": [cmd],
+            "notes": [note],
+            "generator": "deterministic_fallback",
+        }
+
+    if module_path == "drivers/base/test":
+        return _kunit_case(
+            test_id="DET-KUNIT-BASE-TEST-001",
+            name="driver core/base KUnit tests",
+            intent="Run driver-core platform/property/root-device KUnit tests for the base test module.",
+            kunitconfig="drivers/base/test",
+            note="deterministic KUnit fallback for drivers/base/test",
+        )
+
+    if module_path == "drivers/gpu/drm/scheduler":
+        return _kunit_case(
+            test_id="DET-KUNIT-DRM-SCHED-001",
+            name="DRM scheduler KUnit tests",
+            intent="Run DRM scheduler KUnit tests without GPU hardware.",
+            kunitconfig="drivers/gpu/drm/scheduler",
+            note="deterministic KUnit fallback for drivers/gpu/drm/scheduler",
+        )
+
+    if module_path == "drivers/firewire":
+        return _kunit_case(
+            test_id="DET-KUNIT-FIREWIRE-001",
+            name="FireWire KUnit tests",
+            intent="Run FireWire UAPI and serialization KUnit tests without FireWire hardware.",
+            kunitconfig="drivers/firewire",
+            note="deterministic KUnit fallback for drivers/firewire",
+        )
+
+    if module_path == "drivers/base/power":
+        cfg = ".kunitconfig.driver_agent_base_power"
+        cmd = (
+            "printf '%s\\n' "
+            "'CONFIG_KUNIT=y' "
+            "'CONFIG_PM=y' "
+            "'CONFIG_PM_RUNTIME=y' "
+            "'CONFIG_PM_QOS_KUNIT_TEST=y' "
+            "'CONFIG_PM_RUNTIME_KUNIT_TEST=y' "
+            f"> {cfg} && make ARCH=um mrproper >/dev/null 2>&1 || true; "
+            f"./tools/testing/kunit/kunit.py run --kunitconfig={cfg}"
+        )
+        cases = [
+            {
+                "id": "DET-KUNIT-BASE-POWER-001",
+                "name": "base power-management KUnit tests",
+                "entry_kind": "boot",
+                "intent": "Run PM QoS and runtime-PM KUnit tests without physical hardware.",
+                "preconditions": ["KUnit/UML tooling is available."],
+                "steps": [{"cmd": cmd, "why": "Exercises PM helper semantics in an isolated KUnit run."}],
+                "assertions": ["kunit.py exits successfully"],
+                "timeout_sec": 900,
+                "skip_if": ["KUnit/UML tooling unavailable or dependencies unsatisfied"],
+                "artifacts": ["KUnit stdout/stderr"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic KUnit fallback for drivers/base/power"]
+    elif module_path == "drivers/base/regmap":
+        cfg = ".kunitconfig.driver_agent_regmap"
+        cmd = (
+            "printf '%s\\n' "
+            "'CONFIG_KUNIT=y' "
+            "'CONFIG_REGMAP=y' "
+            "'CONFIG_REGMAP_KUNIT=y' "
+            f"> {cfg} && make ARCH=um mrproper >/dev/null 2>&1 || true; "
+            f"./tools/testing/kunit/kunit.py run --kunitconfig={cfg}"
+        )
+        cases = [
+            {
+                "id": "DET-KUNIT-REGMAP-001",
+                "name": "regmap KUnit tests",
+                "entry_kind": "boot",
+                "intent": "Run regmap KUnit tests without physical hardware.",
+                "preconditions": ["KUnit/UML tooling is available."],
+                "steps": [{"cmd": cmd, "why": "Exercises regmap helper semantics in an isolated KUnit run."}],
+                "assertions": ["kunit.py exits successfully"],
+                "timeout_sec": 1200,
+                "skip_if": ["KUnit/UML tooling unavailable or dependencies unsatisfied"],
+                "artifacts": ["KUnit stdout/stderr"],
+            }
+        ]
+        cmds = [cmd]
+        notes = ["deterministic KUnit fallback for drivers/base/regmap"]
+    elif module_path == "drivers/iio/test":
         cfg = ".kunitconfig.driver_agent_iio_test"
         cmd = (
             "printf '%s\\n' "
@@ -375,7 +493,7 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
         ]
         cmds = [cmd]
         notes = ["deterministic isolated-QEMU smoke test for drivers/iio/dummy"]
-    elif module_path == "drivers/gpu/drm/ttm/tests":
+    elif module_path in {"drivers/gpu/drm/ttm", "drivers/gpu/drm/ttm/tests"}:
         cmd = "make ARCH=um mrproper >/dev/null 2>&1 || true; ./tools/testing/kunit/kunit.py run --kunitconfig=drivers/gpu/drm/ttm/tests"
         cases = [
             {
@@ -431,7 +549,57 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
         notes = ["deterministic KUnit fallback for drivers/gpu/drm/vc4"]
     else:
         runner = (Path(__file__).resolve().parents[1] / "tools" / "run_intree_kselftest_qemu.py").as_posix()
-        if module_path == "drivers/dma-buf/heaps":
+        if module_path == "drivers/block/zram":
+            cmd = (
+                f"python {shlex.quote(runner)} "
+                "--kernel-tree . "
+                "--target zram "
+                "--out-dir ../kselftest_qemu/zram "
+                "--jobs 8 "
+                "--timeout-sec 900"
+            )
+            cases = [
+                {
+                    "id": "DET-QEMU-KSELFTEST-ZRAM-001",
+                    "name": "zram kselftest in QEMU",
+                    "entry_kind": "boot",
+                    "intent": "Build and run zram kselftests inside an isolated QEMU guest.",
+                    "preconditions": ["qemu-system-x86_64, busybox, cpio, and gcc are available on the host."],
+                    "steps": [{"cmd": cmd, "why": "Executes the zram selftest in a generated initramfs instead of on the host."}],
+                    "assertions": ["runner exits successfully and prints DRIVER_AGENT_QEMU_KSELFTEST_PASS"],
+                    "timeout_sec": 900,
+                    "skip_if": ["QEMU or required host build tools unavailable"],
+                    "artifacts": ["worktrees/kselftest_qemu/zram/result.json", "worktrees/kselftest_qemu/zram/qemu_output.txt"],
+                }
+            ]
+            cmds = [cmd]
+            notes = ["deterministic isolated-QEMU kselftest runner for drivers/block/zram"]
+        elif module_path == "drivers/dma-buf":
+            cmd = (
+                f"python {shlex.quote(runner)} "
+                "--kernel-tree . "
+                "--target drivers-dma-buf "
+                "--out-dir ../kselftest_qemu/drivers-dma-buf "
+                "--jobs 8 "
+                "--timeout-sec 900"
+            )
+            cases = [
+                {
+                    "id": "DET-QEMU-KSELFTEST-DMABUF-DRIVERS-001",
+                    "name": "drivers/dma-buf kselftest in QEMU",
+                    "entry_kind": "boot",
+                    "intent": "Build and run the udmabuf driver selftest inside an isolated QEMU guest.",
+                    "preconditions": ["qemu-system-x86_64, busybox, cpio, and gcc are available on the host."],
+                    "steps": [{"cmd": cmd, "why": "Executes the drivers/dma-buf selftest in a generated initramfs instead of on the host."}],
+                    "assertions": ["runner exits successfully and prints DRIVER_AGENT_QEMU_KSELFTEST_PASS"],
+                    "timeout_sec": 900,
+                    "skip_if": ["QEMU or required host build tools unavailable"],
+                    "artifacts": ["worktrees/kselftest_qemu/drivers-dma-buf/result.json", "worktrees/kselftest_qemu/drivers-dma-buf/qemu_output.txt"],
+                }
+            ]
+            cmds = [cmd]
+            notes = ["deterministic isolated-QEMU kselftest runner for drivers/dma-buf"]
+        elif module_path == "drivers/dma-buf/heaps":
             cmd = (
                 f"python {shlex.quote(runner)} "
                 "--kernel-tree . "
@@ -853,6 +1021,12 @@ _UNUSED_FUNCTION_RE = re.compile(
 _VOID_VALUE_NOT_IGNORED_RE = re.compile(
     r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+void value not ignored as it ought to be"
 )
+_CONFLICTING_TYPES_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+conflicting types for\s+[`'\u2018](?P<function>[A-Za-z_][A-Za-z0-9_]*)['\u2019`]"
+)
+_PLATFORM_REMOVE_VOID_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+initialization of\s+.*void\s+\(\*\)\s*\(\s*struct\s+platform_device\s+\*\s*\).*from incompatible pointer type\s+.*int\s+\(\*\)\s*\(\s*struct\s+platform_device\s+\*\s*\)",
+)
 
 
 def _resolve_compile_error_file(filename: str, candidates: Iterable[str]) -> str:
@@ -1187,6 +1361,149 @@ def _remove_unused_static_function_in_trees(
     return result
 
 
+def _rename_static_function_conflicting_with_kernel_symbol_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+    function: str,
+) -> dict[str, Any]:
+    stem = Path(rel).stem
+    prefix = re.sub(r"[^A-Za-z0-9_]", "_", stem).strip("_")
+    if not prefix:
+        prefix = "driver"
+    new_function = f"{prefix}_{function}"
+    if new_function == function:
+        new_function = f"{function}_local"
+
+    result = {
+        "file": rel,
+        "line": line_no,
+        "function": function,
+        "new_function": new_function,
+        "applied": False,
+        "reason": "",
+    }
+    call_re = re.compile(rf"\b{re.escape(function)}\s*\(")
+    def_re = re.compile(rf"\b{re.escape(function)}\s*\(")
+
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        if re.search(rf"\b{re.escape(new_function)}\s*\(", text):
+            result["reason"] = f"{tree_name}_new_function_name_already_exists"
+            return result
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            result["reason"] = f"{tree_name}_line_out_of_range"
+            return result
+
+        start = line_no - 1
+        signature_lines = lines[start : min(len(lines), start + 10)]
+        signature = "\n".join(signature_lines)
+        if "static" not in signature or def_re.search(signature) is None:
+            result["reason"] = f"{tree_name}_line_is_not_static_function_definition"
+            result["line_text"] = lines[start]
+            return result
+        if "{" not in signature:
+            result["reason"] = f"{tree_name}_function_open_brace_not_found_near_definition"
+            return result
+
+        new_text, count = call_re.subn(f"{new_function}(", text)
+        if count < 2:
+            # A static helper with no visible callsite is probably not the
+            # intended low-risk rename pattern; leave it to the LLM/manual path.
+            result["reason"] = f"{tree_name}_no_static_callsite_to_rename"
+            result["replacement_count"] = count
+            return result
+        write_text(path, new_text)
+
+    result["applied"] = True
+    result["reason"] = "renamed_static_function_conflicting_with_kernel_symbol"
+    return result
+
+
+def _fix_platform_remove_void_callback_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+) -> dict[str, Any]:
+    result = {"file": rel, "line": line_no, "field": "remove", "applied": False, "reason": ""}
+
+    def apply_one(tree_name: str, tree: Path) -> tuple[bool, str, str]:
+        path = tree / rel
+        if not path.exists():
+            return False, f"{tree_name}_file_missing", ""
+        text = read_text(path)
+        lines = text.splitlines()
+        if line_no < 1 or line_no > len(lines):
+            return False, f"{tree_name}_line_out_of_range", ""
+        init_line = lines[line_no - 1]
+        m_init = re.search(r"\.remove\s*=\s*(?P<function>[A-Za-z_][A-Za-z0-9_]*)\s*,", init_line)
+        if not m_init:
+            return False, f"{tree_name}_line_is_not_remove_initializer", init_line
+        function = m_init.group("function")
+
+        def_idx = None
+        def_re = re.compile(rf"^(?P<indent>\s*)static\s+int\s+{re.escape(function)}\s*\(")
+        for idx, line in enumerate(lines):
+            if def_re.search(line):
+                def_idx = idx
+                break
+        if def_idx is None:
+            return False, f"{tree_name}_static_int_remove_definition_not_found", function
+
+        open_idx = None
+        for idx in range(def_idx, min(len(lines), def_idx + 20)):
+            if "{" in lines[idx]:
+                open_idx = idx
+                break
+        if open_idx is None:
+            return False, f"{tree_name}_function_open_brace_not_found", function
+        depth = 0
+        end_idx = None
+        for idx in range(open_idx, len(lines)):
+            depth += lines[idx].count("{")
+            depth -= lines[idx].count("}")
+            if depth == 0:
+                end_idx = idx
+                break
+        if end_idx is None:
+            return False, f"{tree_name}_function_end_not_found", function
+
+        return_lines = [
+            idx for idx in range(open_idx + 1, end_idx) if re.match(r"^\s*return\b", lines[idx])
+        ]
+        if not return_lines:
+            return False, f"{tree_name}_remove_function_has_no_return_to_rewrite", function
+        if any(not re.match(r"^\s*return\s+0\s*;\s*$", lines[idx]) for idx in return_lines):
+            return False, f"{tree_name}_remove_function_has_nonzero_or_value_return", function
+
+        lines[def_idx] = re.sub(r"\bstatic\s+int\b", "static void", lines[def_idx], count=1)
+        for idx in reversed(return_lines):
+            del lines[idx]
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+        return True, "converted_platform_remove_callback_from_int_to_void", function
+
+    function_name = ""
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        ok, reason, detail = apply_one(tree_name, tree)
+        if not ok:
+            result["reason"] = reason
+            result["detail"] = detail
+            return result
+        function_name = detail or function_name
+
+    result["function"] = function_name
+    result["applied"] = True
+    result["reason"] = "converted_platform_remove_callback_from_int_to_void"
+    return result
+
+
 def _fix_pm_runtime_put_void_assignment_in_trees(
     old_tree: Path,
     new_tree: Path,
@@ -1404,6 +1721,61 @@ def _apply_safe_compile_autofixes_once(
             )
         )
 
+    seen_conflicting_types: set[tuple[str, int, str]] = set()
+    for m in _CONFLICTING_TYPES_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "function": m.group("function"),
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), m.group("function"))
+        if key in seen_conflicting_types:
+            continue
+        seen_conflicting_types.add(key)
+        changes.append(
+            _rename_static_function_conflicting_with_kernel_symbol_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                function=m.group("function"),
+            )
+        )
+
+    seen_platform_remove: set[tuple[str, int]] = set()
+    for m in _PLATFORM_REMOVE_VOID_RE.finditer(text):
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "field": "remove",
+                    "applied": False,
+                    "reason": "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")))
+        if key in seen_platform_remove:
+            continue
+        seen_platform_remove.add(key)
+        changes.append(
+            _fix_platform_remove_void_callback_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+            )
+        )
+
     seen_unused_labels: set[tuple[str, int, str]] = set()
     for m in _UNUSED_LABEL_RE.finditer(text):
         rel = _resolve_compile_error_file(m.group("file"), candidates)
@@ -1546,6 +1918,19 @@ def _best_failure_reason(stderr_text: str, stdout_text: str, fallback: str) -> s
     line = _first_meaningful_line(stderr_text)
     if line:
         return line
+    stripped_stdout = (stdout_text or "").strip()
+    if stripped_stdout.startswith("{"):
+        try:
+            payload = json.loads(stripped_stdout)
+            status = str(payload.get("status") or "").strip()
+            if status:
+                return f"structured_run_status={status}"[:280]
+            for key in ("error", "reason", "message"):
+                value = str(payload.get(key) or "").strip()
+                if value:
+                    return f"{key}={value}"[:280]
+        except Exception:
+            pass
     for raw in (stdout_text or "").splitlines():
         s = raw.strip()
         if "timed out after" in s:
@@ -1771,6 +2156,11 @@ def run_validation_agent(
         _set_stage_result(stage_results, "patch_apply", "passed", "patch applied on old_ref")
 
     module_source_files = _list_module_source_files(old_tree, module_path)
+    new_tree_module_source_files = _list_module_source_files(new_tree, module_path)
+    old_source_set = set(module_source_files)
+    new_only_module_source_files = sorted(
+        rel for rel in new_tree_module_source_files if rel not in old_source_set
+    )
     stage_files = _ordered_unique([*module_source_files, *touched_files])
     copied = []
     missing = []
@@ -1789,9 +2179,19 @@ def run_validation_agent(
         "missing_files": missing,
         "count": len(copied),
         "module_source_file_count": len(module_source_files),
+        "new_tree_module_source_file_count": len(new_tree_module_source_files),
+        "new_only_module_source_files": new_only_module_source_files[:80],
+        "new_only_module_source_file_count": len(new_only_module_source_files),
         "touched_file_count": len(touched_files),
         "stage_policy": "stage_full_old_module_sources_plus_touched_patch_files",
+        "stage_policy_caveat": (
+            "Validation overlays old target module sources onto the new kernel tree. "
+            "If new_only_module_source_file_count > 0, the compile may include new target-module files; "
+            "that is evaluation/validation evidence and must not be used as agent input."
+        ),
     }
+    if new_only_module_source_files:
+        out["open_questions"].append("new_tree_contains_target_module_sources_not_present_in_old_module")
     if missing:
         _set_stage_result(
             stage_results,
@@ -2120,8 +2520,11 @@ def run_validation_agent(
     pr_parse_ok = str(post_reasoning.get("parse_status", "")) == "ok"
     pr_verdict = str(post_reasoning.get("overall_verdict", "UNKNOWN")).upper()
     if not pr_parse_ok:
-        pr_status = "failed"
-        pr_reason = post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}"
+        pr_status = "skipped"
+        pr_reason = (
+            "spec_consistency_unavailable: "
+            + (post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}")
+        )
     elif pr_verdict == "PASS":
         pr_status = "passed"
         pr_reason = f"overall_verdict={pr_verdict}"

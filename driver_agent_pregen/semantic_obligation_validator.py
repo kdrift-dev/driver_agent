@@ -244,7 +244,26 @@ def _obligation_requires_old_absence(obligation: dict[str, Any]) -> bool:
 def _line_changes_with_symbol(patch_text: str, symbol: str, prefix: str) -> list[str]:
     if not symbol:
         return []
+    # Very short tokens often come from conservative regex fallback scanning
+    # (for example a one-letter false "function" symbol). Treating them as
+    # semantic keys creates substring-style false failures even with word
+    # boundaries, e.g. symbol "s" in scsi_done(...).
+    if len(symbol) < 3:
+        return []
     pat = re.compile(rf"\b{re.escape(symbol)}\b")
+    out = []
+    for line in patch_text.splitlines():
+        if not line.startswith(prefix) or line.startswith(("+++", "---")):
+            continue
+        if pat.search(line[1:]):
+            out.append(line)
+    return out
+
+
+def _line_changes_with_field_access(patch_text: str, field: str, prefix: str) -> list[str]:
+    if not field or len(field) < 3:
+        return []
+    pat = re.compile(rf"(?:->|\.)\s*{re.escape(field)}\b")
     out = []
     for line in patch_text.splitlines():
         if not line.startswith(prefix) or line.startswith(("+++", "---")):
@@ -278,7 +297,17 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
 
     checks: list[dict[str, Any]] = []
 
-    policy_rejections = patch_generation.get("policy_rejections") or []
+    selected_id = str(cand.get("candidate_id") or patch_generation.get("selected_candidate_id") or "")
+    all_policy_rejections = patch_generation.get("policy_rejections") or []
+    # Policy rejections are produced for discarded candidates as well as the
+    # selected candidate. Validation must judge the effective patch that was
+    # actually compiled, otherwise a rejected no-op LLM candidate can make a
+    # later accepted heuristic/autofixed patch look invalid.
+    policy_rejections = [
+        r
+        for r in all_policy_rejections
+        if isinstance(r, dict) and str(r.get("candidate_id") or "") == selected_id
+    ]
     checks.append(
         {
             "id": "L3-EDIT-SCOPE-POLICY",
@@ -371,8 +400,26 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
             )
 
         if _obligation_requires_old_absence(obl):
-            removed_hits = _line_changes_with_symbol(patch_text, old_sym, "-")
-            added_old_hits = _line_changes_with_symbol(patch_text, old_sym, "+")
+            if len(old_sym) < 3:
+                checks.append(
+                    {
+                        "id": f"L3-OLD-SYMBOL-ABSENCE-{idx:03d}",
+                        "name": "old_symbol_removed_from_changed_lines",
+                        "status": _STATUS_UNKNOWN,
+                        "obligation_id": obl.get("id"),
+                        "symbol": old_sym,
+                        "evidence": {"reason": "symbol_too_short_for_reliable_patch_line_check"},
+                        "note": "Short fallback-scanned tokens are not reliable semantic keys.",
+                    }
+                )
+                continue
+            raw_symbol = str(obl.get("affected_kernel_symbol") or obl.get("symbol") or "")
+            if "(field)" in raw_symbol:
+                removed_hits = _line_changes_with_field_access(patch_text, old_sym, "-")
+                added_old_hits = _line_changes_with_field_access(patch_text, old_sym, "+")
+            else:
+                removed_hits = _line_changes_with_symbol(patch_text, old_sym, "-")
+                added_old_hits = _line_changes_with_symbol(patch_text, old_sym, "+")
             checks.append(
                 {
                     "id": f"L3-OLD-SYMBOL-ABSENCE-{idx:03d}",

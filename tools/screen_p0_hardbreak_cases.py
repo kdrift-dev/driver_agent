@@ -192,6 +192,36 @@ def classify_compile_error(text: str) -> tuple[str, list[str]]:
     return (matches[0] if matches else "", matches)
 
 
+def normalize_partial_module_compile_result(run: dict[str, Any]) -> dict[str, Any]:
+    """Ignore modpost-only unresolved symbols from partial module builds.
+
+    The P0 screen prepares the new kernel with modules_prepare, not a full
+    vmlinux/modules build. In that environment Module.symvers is commonly
+    absent, so modpost can report unresolved in-kernel symbols even when the
+    old source still C-compiles. Treat only real compiler/header/API errors as
+    P0 hard breaks.
+    """
+    if run.get("ok"):
+        return run
+    text = (run.get("stdout", "") or "") + "\n" + (run.get("stderr", "") or "")
+    if "Module.symvers is missing" not in text or "ERROR: modpost:" not in text:
+        return run
+    for line in text.splitlines():
+        lower = line.lower()
+        if "fatal error:" in lower:
+            return run
+        if " error:" in lower and "error: modpost:" not in lower:
+            return run
+    out = dict(run)
+    out["ok"] = True
+    out["partial_module_compile_note"] = (
+        "C compilation reached modpost; unresolved symbols ignored because "
+        "Module.symvers is unavailable in the partial P0 screen worktree."
+    )
+    out["original_returncode"] = run.get("returncode")
+    return out
+
+
 def count_compiled_units(tree: Path, module_path: str) -> int:
     root = tree / module_path
     if not root.exists():
@@ -379,6 +409,7 @@ def screen_cases(args: argparse.Namespace) -> int:
                     cwd=new_tree,
                     timeout=args.compile_timeout_sec,
                 )
+                run = normalize_partial_module_compile_result(run)
                 compile_runs.append(run)
                 stderr_joined += "\n" + run.get("stdout", "") + "\n" + run.get("stderr", "")
                 if not run["ok"]:

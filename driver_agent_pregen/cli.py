@@ -21,6 +21,7 @@ from .obligation_builder import run_obligation_builder
 from .oot_validation import (
     collect_oot_pre_patch_build_diagnostics,
     export_oot_source_snapshot,
+    filter_scan_payload_by_oot_compile_diagnostics,
     filter_impact_graph_by_oot_compile_diagnostics,
     run_oot_integrated_validation_agent,
 )
@@ -238,6 +239,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="extra make argument for OOT module builds, e.g. KCFLAGS=-Wno-error=type-limits",
     )
+    oot.add_argument(
+        "--oot-kernel-config",
+        action="append",
+        default=[],
+        help=(
+            "kernel config option required for OOT build/QEMU validation, "
+            "e.g. MEDIA_SUPPORT=m or CONFIG_VIDEO_DEV=m"
+        ),
+    )
+    oot.add_argument(
+        "--oot-kernel-module-dir",
+        action="append",
+        default=[],
+        help=(
+            "in-tree kernel module directory to build/copy into the OOT QEMU initramfs, "
+            "e.g. drivers/media/v4l2-core"
+        ),
+    )
+    oot.add_argument(
+        "--oot-kernel-module",
+        action="append",
+        default=[],
+        help=(
+            "specific in-tree .ko target to build/copy into the OOT QEMU initramfs, "
+            "e.g. drivers/media/v4l2-core/videodev.ko"
+        ),
+    )
     return p
 
 
@@ -302,6 +330,12 @@ def _run_oot_parallel_path(args: argparse.Namespace) -> tuple[Path, bool]:
         cmd.extend(["--qemu-check-script", args.oot_qemu_check_script])
     for extra in args.oot_make_extra_arg or []:
         cmd.extend(["--make-extra-arg", extra])
+    for opt in args.oot_kernel_config or []:
+        cmd.extend(["--kernel-config", opt])
+    for rel in args.oot_kernel_module_dir or []:
+        cmd.extend(["--kernel-module-dir", rel])
+    for target in args.oot_kernel_module or []:
+        cmd.extend(["--kernel-module", target])
 
     proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print(proc.stdout, end="")
@@ -342,7 +376,7 @@ def _compact_text(text: str, max_chars: int = 16000) -> str:
 
 def _validation_stage(validation: dict[str, Any], name: str) -> dict[str, Any]:
     for item in validation.get("validation_stage_results", []) or []:
-        if item.get("name") == name:
+        if item.get("stage") == name or item.get("name") == name:
             return item
     return {}
 
@@ -701,6 +735,31 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         "02_old_driver_symbol_scanner",
         lambda: run_symbol_scanner(module_result, extracted_dir),
     )
+    oot_pre_patch_build_diagnostics: dict[str, Any] | None = None
+    if oot_integrated:
+        assert external_source_root is not None
+        oot_pre_patch_build_diagnostics = stage(
+            "02b_oot_pre_patch_build_diagnostics",
+            lambda: collect_oot_pre_patch_build_diagnostics(
+                accessor=accessor,
+                run_dir=run_dir,
+                external_source_root=external_source_root,
+                jobs=args.jobs,
+                make_extra_args=args.oot_make_extra_arg or [],
+                kernel_config_target=args.kernel_config_target,
+                kernel_config_options=args.oot_kernel_config or [],
+            ),
+        )
+        write_json(extracted_dir / "oot_pre_patch_build_diagnostics.json", oot_pre_patch_build_diagnostics)
+        scan_payload = stage(
+            "02c_oot_compile_diagnostic_symbol_filter",
+            lambda: filter_scan_payload_by_oot_compile_diagnostics(
+                scan_payload=scan_payload,
+                diagnostics=oot_pre_patch_build_diagnostics or {},
+                extracted_dir=extracted_dir,
+                module_path=args.module_path,
+            ),
+        )
 
     baseline_source_only = str(args.patch_generation_mode or "").strip().lower() == "baseline_source_only"
 
@@ -805,16 +864,19 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
 
         if oot_integrated:
             assert external_source_root is not None
-            oot_pre_patch_build_diagnostics = stage(
-                "05b_oot_pre_patch_build_diagnostics",
-                lambda: collect_oot_pre_patch_build_diagnostics(
-                    accessor=accessor,
-                    run_dir=run_dir,
-                    external_source_root=external_source_root,
-                    jobs=args.jobs,
-                    make_extra_args=args.oot_make_extra_arg or [],
-                ),
-            )
+            if oot_pre_patch_build_diagnostics is None:
+                oot_pre_patch_build_diagnostics = stage(
+                    "05b_oot_pre_patch_build_diagnostics",
+                    lambda: collect_oot_pre_patch_build_diagnostics(
+                        accessor=accessor,
+                        run_dir=run_dir,
+                        external_source_root=external_source_root,
+                        jobs=args.jobs,
+                        make_extra_args=args.oot_make_extra_arg or [],
+                        kernel_config_target=args.kernel_config_target,
+                        kernel_config_options=args.oot_kernel_config or [],
+                    ),
+                )
             write_json(extracted_dir / "oot_pre_patch_build_diagnostics.json", oot_pre_patch_build_diagnostics)
             impact_graph = stage(
                 "05c_oot_compile_diagnostic_impact_filter",
@@ -991,6 +1053,10 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
                 qemu_write_data=args.oot_qemu_write_data,
                 qemu_expect_data=args.oot_qemu_expect_data,
                 make_extra_args=args.oot_make_extra_arg or [],
+                kernel_config_target=args.kernel_config_target,
+                kernel_config_options=args.oot_kernel_config or [],
+                kernel_module_dirs=args.oot_kernel_module_dir or [],
+                kernel_module_targets=args.oot_kernel_module or [],
                 keep_worktrees=not args.cleanup_worktrees,
             ),
         )

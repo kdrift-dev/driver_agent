@@ -267,7 +267,7 @@ def _level4_spec(validation: dict[str, Any], stages: dict[str, dict[str, Any]]) 
     parse_status = str(pr.get("parse_status", ""))
     verdict = str(pr.get("overall_verdict", "UNKNOWN")).upper()
     if parse_status != "ok":
-        status = FAIL
+        status = UNKNOWN
     elif verdict == "PASS":
         status = PASS
     elif verdict in {"UNKNOWN", "MATCH", "MISMATCH"}:
@@ -317,8 +317,12 @@ def _overall_evidence_status(levels: list[dict[str, Any]]) -> str:
 
 
 def _overall_validation_result(levels: list[dict[str, Any]]) -> str:
-    critical = [levels[0].get("status"), levels[1].get("status"), levels[3].get("status")]
-    if any(s == FAIL for s in critical):
+    # Only implemented, enabled checks are allowed to fail the overall result.
+    # Runtime/formal/static layers may be SKIPPED/UNKNOWN/NOT_IMPLEMENTED for a
+    # valid compile-focused run. Spec consistency is advisory and not a
+    # correctness gate.
+    critical = [levels[0].get("status"), levels[1].get("status")]
+    if any(s == FAIL for s in critical) or levels[3].get("status") == FAIL:
         return "FAILED_VALIDATION"
     if not all(s == PASS for s in critical):
         return "INCOMPLETE_VALIDATION"

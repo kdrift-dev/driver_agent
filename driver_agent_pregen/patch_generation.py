@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import difflib
+import json
 import os
 import re
 from pathlib import Path
@@ -11,6 +12,9 @@ from .llm_client import LLMClient
 from .patch_line_fixer import fix_patch_line_numbers
 from .prompts import build_baseline_patch_generation_prompt, build_patch_generation_prompt, build_patch_repair_prompt
 from .utils import read_json, read_text, truncate_text, write_json, write_text
+
+
+DEFAULT_PATCH_INPUT_BUDGET_CHARS = int(os.environ.get("DRIVER_AGENT_PATCH_INPUT_BUDGET_CHARS", "180000"))
 
 
 def _extract_diff_text(text: str) -> str:
@@ -284,8 +288,8 @@ def _build_focused_old_sources(
     module_path: str,
     impact_graph: dict[str, Any],
     with_line_numbers: bool,
-    max_chars_per_block: int = 12000,
-    max_blocks: int = 80,
+    max_chars_per_block: int = 8000,
+    max_blocks: int = 48,
 ) -> list[dict[str, Any]]:
     required = list(impact_graph.get("edit_required_functions", []) or [])
     candidates = list(impact_graph.get("edit_candidate_functions", []) or [])
@@ -473,6 +477,83 @@ def _collect_file_contents(extracted_dir: Path, paths: Iterable[str]) -> dict[st
     return out
 
 
+def _extract_diagnostic_source_paths(
+    *,
+    repair_context: dict[str, Any],
+    extracted_dir: Path,
+    module_path: str,
+    max_files: int = 6,
+) -> list[str]:
+    texts: list[str] = []
+    for run in ((repair_context.get("compile") or {}).get("failed_runs", []) or []):
+        texts.append(str(run.get("stderr", "") or ""))
+        texts.append(str(run.get("stdout", "") or ""))
+    for run in ((repair_context.get("compile") or {}).get("prepare_failures", []) or []):
+        texts.append(str(run.get("stderr", "") or ""))
+        texts.append(str(run.get("stdout", "") or ""))
+
+    root = extracted_dir / "old_module_sources"
+    module_root = root / module_path
+    by_basename: dict[str, str] = {}
+    if module_root.exists():
+        for p in module_root.rglob("*"):
+            if p.is_file() and p.suffix.lower() in {".c", ".h", ".rs"}:
+                by_basename.setdefault(p.name, p.relative_to(root).as_posix())
+
+    out: list[str] = []
+    path_re = re.compile(r"\b(drivers/[A-Za-z0-9_./+\-]+\.(?:c|h|rs))(?::\d+)?")
+    basename_re = re.compile(r"\b([A-Za-z0-9_+\-]+\.(?:c|h|rs))(?::\d+)?")
+    for text in texts:
+        for m in path_re.finditer(text):
+            rel = m.group(1)
+            if rel.startswith(module_path.rstrip("/") + "/") and (root / rel).exists() and rel not in out:
+                out.append(rel)
+        for m in basename_re.finditer(text):
+            rel = by_basename.get(m.group(1))
+            if rel and rel not in out:
+                out.append(rel)
+        if len(out) >= max_files:
+            break
+    return out[:max_files]
+
+
+def _load_repair_diagnostic_sources(
+    *,
+    extracted_dir: Path,
+    module_path: str,
+    repair_context: dict[str, Any],
+    with_line_numbers: bool,
+    max_chars_per_file: int = 12000,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for rel in _extract_diagnostic_source_paths(
+        repair_context=repair_context,
+        extracted_dir=extracted_dir,
+        module_path=module_path,
+    ):
+        p = extracted_dir / "old_module_sources" / rel
+        if not p.exists():
+            continue
+        text = read_text(p)
+        if len(text) > max_chars_per_file:
+            text = text[:max_chars_per_file] + "\n...[truncated_diagnostic_file]"
+        if with_line_numbers:
+            text = _render_with_line_numbers(text, start_line=1)
+        out.append(
+            {
+                "path": rel,
+                "content": text,
+                "source_item_kind": "diagnostic_failure_file",
+                "editable": True,
+                "edit_scope": "edit_candidate",
+                "roles": ["compile_failure_diagnostic_context"],
+                "candidate_reasons": ["file appears in compile failure diagnostics"],
+                "context_reasons": [],
+            }
+        )
+    return out
+
+
 def _function_key(item: dict[str, Any]) -> tuple[str, str] | None:
     fn = str(item.get("function", "") or "").strip()
     path = str(item.get("file", "") or "").strip()
@@ -481,33 +562,53 @@ def _function_key(item: dict[str, Any]) -> tuple[str, str] | None:
     return (path, fn)
 
 
-def _edit_scope_payload(impact_graph: dict[str, Any]) -> dict[str, Any]:
+def _edit_scope_payload(
+    impact_graph: dict[str, Any],
+    *,
+    max_required: int = 24,
+    max_candidates: int = 16,
+    max_context: int = 8,
+) -> dict[str, Any]:
     required = list(impact_graph.get("edit_required_functions", []) or [])
     candidates = list(impact_graph.get("edit_candidate_functions", []) or [])
     context_only = list(impact_graph.get("context_only_functions", []) or impact_graph.get("context_functions", []) or [])
 
-    def slim(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def slim(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
         out = []
-        for item in items:
+        for item in items[:limit]:
             out.append(
                 {
                     "function": item.get("function"),
                     "file": item.get("file"),
                     "edit_scope": item.get("edit_scope"),
                     "tier": item.get("tier"),
-                    "candidate_reasons": item.get("candidate_reasons", []),
-                    "context_reasons": item.get("context_reasons", []),
-                    "uses_changed_kernel_symbols": item.get("uses_changed_kernel_symbols", []),
+                    "candidate_reasons": [
+                        truncate_text(str(x), max_chars=140)
+                        for x in (item.get("candidate_reasons", []) or [])[:4]
+                    ],
+                    "context_reasons": [
+                        truncate_text(str(x), max_chars=140)
+                        for x in (item.get("context_reasons", []) or [])[:3]
+                    ],
+                    "uses_changed_kernel_symbols": [
+                        truncate_text(str(x), max_chars=120)
+                        for x in (item.get("uses_changed_kernel_symbols", []) or [])[:8]
+                    ],
                 }
             )
         return out
 
     return {
         "policy": impact_graph.get("affected_tier_policy", {}),
-        "edit_required_functions": slim(required),
-        "edit_candidate_functions": slim(candidates),
-        "context_only_functions": slim(context_only),
-        "editable_functions": slim(required + candidates),
+        "edit_required_functions": slim(required, max_required),
+        "edit_candidate_functions": slim(candidates, max_candidates),
+        "context_only_functions": slim(context_only, max_context),
+        "editable_functions": slim(required + candidates, max_required + max_candidates),
+        "omitted_counts": {
+            "edit_required_functions": max(0, len(required) - max_required),
+            "edit_candidate_functions": max(0, len(candidates) - max_candidates),
+            "context_only_functions": max(0, len(context_only) - max_context),
+        },
         "rule_summary": (
             "edit_required functions are default edit targets; edit_candidate functions may be edited only "
             "when candidate evidence is cited; context_only functions are non-editable reasoning context."
@@ -554,13 +655,13 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": item.get("id"),
         "affected_kernel_symbol": item.get("affected_kernel_symbol"),
-        "affected_driver_functions": item.get("affected_driver_functions", []),
-        "statement": item.get("statement"),
+        "affected_driver_functions": [str(x) for x in (item.get("affected_driver_functions", []) or [])[:12]],
+        "statement": truncate_text(str(item.get("statement", "") or ""), max_chars=360),
         "kind": item.get("kind"),
         "strength": item.get("strength"),
         "recommended_action": item.get("recommended_action"),
-        "hard_checks": item.get("hard_checks", []),
-        "semantic_checks": item.get("semantic_checks", []),
+        "hard_checks": [truncate_text(str(x), max_chars=180) for x in (item.get("hard_checks", []) or [])[:4]],
+        "semantic_checks": [truncate_text(str(x), max_chars=180) for x in (item.get("semantic_checks", []) or [])[:3]],
         "confidence": item.get("confidence"),
         "semantic_strength": item.get("semantic_strength"),
         "migration_signal": item.get("migration_signal", False),
@@ -569,23 +670,43 @@ def _compact_obligation(item: dict[str, Any]) -> dict[str, Any]:
             for x in (item.get("replacement_candidates", []) or [])[:3]
             if x.get("symbol")
         ],
-        "patch_guidance_seed": item.get("patch_guidance_seed"),
-        "open_questions": item.get("open_questions", [])[:4],
+        "patch_guidance_seed": truncate_text(str(item.get("patch_guidance_seed", "") or ""), max_chars=360),
+        "open_questions": [truncate_text(str(x), max_chars=160) for x in (item.get("open_questions", []) or [])[:4]],
         "evidence": _compact_obligation_evidence(item.get("evidence", []) or []),
     }
 
 
+def _obligation_priority(item: dict[str, Any]) -> tuple[int, int, int, int]:
+    hard = 1 if item.get("hard_checks") else 0
+    strong = 1 if str(item.get("semantic_strength", item.get("strength", ""))).lower() == "strong" else 0
+    replacement = 1 if item.get("replacement_candidates") else 0
+    high_confidence = 1 if str(item.get("confidence", "")).lower() == "high" else 0
+    return (hard, strong, replacement, high_confidence)
+
+
 def _compact_agent_obligations(compatibility_obligations: dict[str, Any]) -> dict[str, Any]:
+    required_obligations = [
+        x
+        for x in compatibility_obligations.get("obligations", []) or []
+        if x.get("hard_checks") or str(x.get("semantic_strength", "")).lower() == "strong"
+    ]
+    required_obligations = sorted(required_obligations, key=_obligation_priority, reverse=True)
+    strong_semantic = [
+        x
+        for x in compatibility_obligations.get("semantic_obligations", []) or []
+        if str(x.get("strength", "")).lower() == "strong"
+    ]
+    strong_semantic = sorted(strong_semantic, key=_obligation_priority, reverse=True)
+    max_obligations = int(os.environ.get("DRIVER_AGENT_PATCH_MAX_OBLIGATIONS", "32"))
+    max_semantic = int(os.environ.get("DRIVER_AGENT_PATCH_MAX_SEMANTIC_OBLIGATIONS", "12"))
     return {
         "obligations": [
             _compact_obligation(x)
-            for x in compatibility_obligations.get("obligations", []) or []
-            if x.get("hard_checks") or str(x.get("semantic_strength", "")).lower() == "strong"
+            for x in required_obligations[:max_obligations]
         ],
         "semantic_obligations": [
             _compact_obligation(x)
-            for x in compatibility_obligations.get("semantic_obligations", []) or []
-            if str(x.get("strength", "")).lower() == "strong"
+            for x in strong_semantic[:max_semantic]
         ],
         "semantic_obligation_summary": compatibility_obligations.get("semantic_obligation_summary", {}),
         "semantic_obligations_omitted_from_llm": {
@@ -600,6 +721,14 @@ def _compact_agent_obligations(compatibility_obligations: dict[str, Any]) -> dic
                 if not (x.get("hard_checks") or str(x.get("semantic_strength", "")).lower() == "strong")
             ),
             "reason": "medium/low semantic guidance is not a required edit and is omitted from LLM payload",
+        },
+        "required_obligations_omitted_from_llm": {
+            "count": max(0, len(required_obligations) - max_obligations),
+            "reason": "patch-generation prompt budget; highest-priority hard/strong obligations are kept first",
+        },
+        "strong_semantic_obligations_omitted_from_llm": {
+            "count": max(0, len(strong_semantic) - max_semantic),
+            "reason": "patch-generation prompt budget; highest-priority semantic obligations are kept first",
         },
         "llm_payload_filter": "compact obligations; full evidence remains in extracted/compatibility_obligations.json",
     }
@@ -621,7 +750,7 @@ def _target_edit_checklist(compatibility_obligations: dict[str, Any]) -> list[di
         replacements = [
             {
                 "symbol": c.get("symbol"),
-                "evidence": (c.get("evidence", []) or [])[:2],
+                "evidence": [truncate_text(str(x), max_chars=120) for x in (c.get("evidence", []) or [])[:2]],
                 "paths": (c.get("paths", []) or [])[:2],
             }
             for c in (item.get("replacement_candidates", []) or [])[:3]
@@ -631,15 +760,15 @@ def _target_edit_checklist(compatibility_obligations: dict[str, Any]) -> list[di
             {
                 "obligation_id": item.get("id"),
                 "old_symbol": item.get("affected_kernel_symbol"),
-                "affected_driver_functions": item.get("affected_driver_functions", []),
+                "affected_driver_functions": [str(x) for x in (item.get("affected_driver_functions", []) or [])[:12]],
                 "required": True,
-                "hard_checks": hard[:3],
+                "hard_checks": [truncate_text(str(x), max_chars=160) for x in hard[:3]],
                 "replacement_candidates": replacements,
-                "patch_guidance_seed": item.get("patch_guidance_seed"),
+                "patch_guidance_seed": truncate_text(str(item.get("patch_guidance_seed", "") or ""), max_chars=280),
                 "confidence": item.get("confidence"),
             }
         )
-    return rows[:40]
+    return rows[:24]
 
 
 def _compact_pre_reasoning(pre_reasoning: dict[str, Any]) -> dict[str, Any]:
@@ -726,11 +855,62 @@ def _source_payload_summary(
         "editable_source_items": editable,
         "readonly_context_source_items": readonly,
         "source_item_kinds": dict(sorted(kinds.items())),
-        "source_paths": sorted(p for p in paths if p),
+        "source_paths": sorted(p for p in paths if p)[:40],
+        "source_paths_omitted": max(0, len([p for p in paths if p]) - 40),
         "policy": (
             "focused mode provides edit-scope function slices plus read-only context slices; "
             "full module source is supplied only when focused extraction is empty or when full_module is explicitly requested"
         ),
+    }
+
+
+def _json_size(data: Any) -> int:
+    return len(json.dumps(data, ensure_ascii=False))
+
+
+def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Apply last-mile prompt-budget trimming without changing evidence sources.
+
+    The main compactors above keep the payload small for ordinary modules. This
+    guard handles broad parent directories by trimming low-priority context and
+    recording exactly what was omitted. It deliberately does not invent
+    replacement hints or read new target driver code.
+    """
+    payload = dict(input_payload)
+    notes: list[str] = []
+    initial_size = _json_size(payload)
+    if initial_size <= budget_chars:
+        return payload, {"initial_chars": initial_size, "final_chars": initial_size, "budget_chars": budget_chars, "trimmed": False, "notes": []}
+
+    sources = list(payload.get("old_module_sources") or [])
+    if len(sources) > 32:
+        editable = [x for x in sources if bool(x.get("editable"))]
+        readonly = [x for x in sources if not bool(x.get("editable"))]
+        payload["old_module_sources"] = editable[:28] + readonly[:4]
+        notes.append(f"trimmed old_module_sources {len(sources)} -> {len(payload['old_module_sources'])}")
+        sources = list(payload.get("old_module_sources") or [])
+
+    for item in sources:
+        content = str(item.get("content", "") or "")
+        if len(content) > 6000:
+            item["content"] = content[:6000] + "\n...[truncated_by_patch_input_budget]"
+    if sources:
+        notes.append("capped source block content at 6000 chars")
+
+    # Drop read-only context entirely if the payload is still too large.
+    if _json_size(payload) > budget_chars and sources:
+        editable = [x for x in sources if bool(x.get("editable"))]
+        payload["old_module_sources"] = editable[:24]
+        notes.append(f"removed read-only old_module_sources; kept editable={len(payload['old_module_sources'])}")
+
+    final_size = _json_size(payload)
+    return payload, {
+        "initial_chars": initial_size,
+        "final_chars": final_size,
+        "budget_chars": budget_chars,
+        "trimmed": bool(notes),
+        "over_budget_after_trim": final_size > budget_chars,
+        "notes": notes,
     }
 
 
@@ -1428,6 +1608,24 @@ def run_patch_generation_agent(
             with_line_numbers=bool(source_with_line_numbers),
         )
 
+    if is_repair:
+        diagnostic_sources = _load_repair_diagnostic_sources(
+            extracted_dir=extracted_dir,
+            module_path=module_path,
+            repair_context=repair_context or {},
+            with_line_numbers=bool(source_with_line_numbers),
+        )
+        if diagnostic_sources:
+            seen_source_keys = {
+                (str(item.get("path", "")), str(item.get("source_item_kind", "")))
+                for item in old_sources
+            }
+            for item in diagnostic_sources:
+                key = (str(item.get("path", "")), str(item.get("source_item_kind", "")))
+                if key not in seen_source_keys:
+                    old_sources.append(item)
+                    seen_source_keys.add(key)
+
     if generation_mode == "agent":
         if deterministic_noop:
             input_payload = {
@@ -1541,6 +1739,18 @@ def run_patch_generation_agent(
             ),
         }
 
+    budget_info: dict[str, Any] = {}
+    if generation_mode == "agent":
+        input_payload, budget_info = _shrink_patch_input_payload(
+            input_payload,
+            budget_chars=DEFAULT_PATCH_INPUT_BUDGET_CHARS,
+        )
+        summary = input_payload.get("source_payload_summary")
+        if isinstance(summary, dict):
+            summary["patch_input_budget"] = budget_info
+        else:
+            input_payload["patch_input_budget"] = budget_info
+
     strict_mode = str(prompt_strength or "normal").strip().lower() == "strict"
     if is_repair:
         prompt = build_patch_repair_prompt(
@@ -1577,6 +1787,8 @@ def run_patch_generation_agent(
         "module_level_notes": ["dry-run or no-provider placeholder"],
     }
 
+    input_budget_exceeded = bool(budget_info.get("over_budget_after_trim"))
+
     if deterministic_noop:
         write_text(stage_dir / "prompt.md", prompt)
         write_json(stage_dir / "input.json", input_payload)
@@ -1589,6 +1801,21 @@ def run_patch_generation_agent(
                 "deterministic_noop_short_circuit: no hard or strong semantic migration edit is required"
             ],
             "parse_status": "skipped_auto_noop",
+        }
+        write_json(stage_dir / "parsed_output.json", llm_output)
+    elif input_budget_exceeded:
+        write_text(stage_dir / "prompt.md", prompt)
+        write_json(stage_dir / "input.json", input_payload)
+        write_text(stage_dir / "raw_output.txt", "")
+        llm_output = {
+            "case_id": case_id,
+            "stage": "patch_repair" if is_repair else "patch_generation",
+            "patch_candidates": [],
+            "module_level_notes": [
+                "input_budget_exceeded: patch-generation prompt remained over budget after conservative trimming",
+                f"budget_info={budget_info}",
+            ],
+            "parse_status": "input_budget_exceeded",
         }
         write_json(stage_dir / "parsed_output.json", llm_output)
     else:

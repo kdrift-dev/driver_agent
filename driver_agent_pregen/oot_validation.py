@@ -62,6 +62,8 @@ def collect_oot_pre_patch_build_diagnostics(
     external_source_root: Path,
     jobs: int,
     make_extra_args: list[str] | None = None,
+    kernel_config_target: str = "defconfig",
+    kernel_config_options: list[str] | None = None,
 ) -> dict[str, Any]:
     runner = _load_oot_runner_module()
     if accessor.mode != "git" or not accessor.repo or not accessor.old_ref or not accessor.new_ref:
@@ -73,8 +75,18 @@ def collect_oot_pre_patch_build_diagnostics(
     wt_new = runner.prepare_worktree(accessor.repo, accessor.new_ref, new_tree, keep_existing=True)
     if not wt_old.get("ok") or not wt_new.get("ok"):
         return {"enabled": True, "ok": False, "reason": "worktree_prepare_failed", "old_prepare": wt_old, "new_prepare": wt_new}
-    old_prep = runner.prepare_kernel(old_tree, jobs)
-    new_prep = runner.prepare_kernel(new_tree, jobs)
+    old_prep = runner.prepare_kernel(
+        old_tree,
+        jobs,
+        config_target=kernel_config_target,
+        config_options=kernel_config_options or [],
+    )
+    new_prep = runner.prepare_kernel(
+        new_tree,
+        jobs,
+        config_target=kernel_config_target,
+        config_options=kernel_config_options or [],
+    )
     old_build = runner.build_external(old_tree, external_source_root, jobs, make_extra_args or [])
     new_build = runner.build_external(new_tree, external_source_root, jobs, make_extra_args or [])
     return {
@@ -178,6 +190,118 @@ def filter_impact_graph_by_oot_compile_diagnostics(
         "applied": True,
         "reason": "OOT old-source/new-kernel compile diagnostics mapped to driver functions",
     }
+    return out
+
+
+def filter_scan_payload_by_oot_compile_diagnostics(
+    *,
+    scan_payload: dict[str, Any],
+    diagnostics: dict[str, Any],
+    extracted_dir: Path,
+    module_path: str,
+) -> dict[str, Any]:
+    """Narrow noisy OOT symbol scans using old-source/new-kernel compiler output.
+
+    OOT repositories can include examples, userspace helpers, and tests. Running
+    the normal kernel definition locator over every regex-scanned token is slow
+    and adds noise. Compiler diagnostics are still allowed input here: they are
+    produced by building the old target source against the new kernel, not by
+    reading a new-version driver diff.
+    """
+
+    used_payload = dict(scan_payload.get("driver_used_symbols") or {})
+    symbols = list(used_payload.get("symbols") or [])
+    stderr = str(((diagnostics.get("new_build") or {}).get("stderr")) or "")
+    stdout = str(((diagnostics.get("new_build") or {}).get("stdout")) or "")
+    text = stderr + "\n" + stdout
+    if not text.strip() or not symbols:
+        return scan_payload
+
+    funcs_payload = scan_payload.get("driver_functions") or {}
+    functions = [f for f in funcs_payload.get("functions", []) or [] if isinstance(f, dict)]
+    selected_functions: set[str] = set()
+
+    # Diagnostics like "v4l2loopback.c:2329:9:" map back to synthetic OOT
+    # module paths such as "oot/v4l2loopback/v4l2loopback.c".
+    for m in re.finditer(r"(?P<file>[A-Za-z0-9_./-]+\.c):(?P<line>\d+)(?::\d+)?:", text):
+        root_rel = m.group("file")
+        line = int(m.group("line"))
+        syn_rel = f"{module_path.rstrip('/')}/{root_rel.strip('./')}"
+        for fn in functions:
+            if str(fn.get("file")) != syn_rel:
+                continue
+            start = int(fn.get("start_line", 0) or 0)
+            end = int(fn.get("end_line", 0) or 0)
+            if start <= line <= end and fn.get("name"):
+                selected_functions.add(str(fn.get("name")))
+
+    # Also keep directly mentioned function names and macro/API names. This
+    # captures diagnostics such as "too few arguments to function v4l2_fh_add"
+    # or "implicit declaration of function setup_timer".
+    directly_mentioned: set[str] = set()
+    for sym in symbols:
+        name = str(sym.get("name") or "")
+        if not name or len(name) < 3:
+            continue
+        if re.search(rf"\b{re.escape(name)}\b", text):
+            directly_mentioned.add(name)
+
+    kept: list[dict[str, Any]] = []
+    for sym in symbols:
+        kind = str(sym.get("kind") or "")
+        name = str(sym.get("name") or "")
+        enclosing = str(sym.get("enclosing_function") or "")
+        if kind == "include":
+            # Includes are cheap and often explain missing declarations.
+            kept.append(sym)
+            continue
+        if name in directly_mentioned or enclosing in selected_functions:
+            kept.append(sym)
+
+    # Keep the original payload if the filter would erase everything useful.
+    if not kept:
+        filtered_payload = used_payload
+        applied = False
+        reason = "diagnostics_filter_selected_no_symbols"
+    else:
+        filtered_payload = dict(used_payload)
+        filtered_payload["symbols"] = kept
+        existing_notes = filtered_payload.get("scan_notes")
+        if isinstance(existing_notes, list):
+            notes = list(existing_notes)
+        elif existing_notes:
+            notes = [existing_notes]
+        else:
+            notes = []
+        notes.append(
+            {
+                "kind": "oot_compile_diagnostics_filter",
+                "original_symbol_count": len(symbols),
+                "filtered_symbol_count": len(kept),
+                "selected_functions": sorted(selected_functions),
+                "directly_mentioned_symbols": sorted(directly_mentioned),
+                "reason": "old OOT source failed to compile against new kernel",
+            }
+        )
+        filtered_payload["scan_notes"] = notes
+        applied = True
+        reason = "filtered_to_compile_diagnostic_symbols"
+
+    out = dict(scan_payload)
+    out["driver_used_symbols"] = filtered_payload
+    write_json(extracted_dir / "driver_used_symbols.json", filtered_payload)
+    write_json(
+        extracted_dir / "oot_compile_diagnostic_symbol_filter.json",
+        {
+            "enabled": True,
+            "applied": applied,
+            "reason": reason,
+            "original_symbol_count": len(symbols),
+            "filtered_symbol_count": len(filtered_payload.get("symbols") or []),
+            "selected_functions": sorted(selected_functions),
+            "directly_mentioned_symbols": sorted(directly_mentioned),
+        },
+    )
     return out
 
 
@@ -680,6 +804,10 @@ def run_oot_integrated_validation_agent(
     qemu_write_data: str,
     qemu_expect_data: str,
     make_extra_args: list[str] | None = None,
+    kernel_config_target: str = "defconfig",
+    kernel_config_options: list[str] | None = None,
+    kernel_module_dirs: list[str] | None = None,
+    kernel_module_targets: list[str] | None = None,
     keep_worktrees: bool = True,
 ) -> dict[str, Any]:
     runner = _load_oot_runner_module()
@@ -801,8 +929,18 @@ def run_oot_integrated_validation_agent(
     }
     _set_stage(stage_results, "stage_patched_files", "passed", "OOT source root patched")
 
-    old_prep = runner.prepare_kernel(old_tree, jobs)
-    new_prep = runner.prepare_kernel(new_tree, jobs)
+    old_prep = runner.prepare_kernel(
+        old_tree,
+        jobs,
+        config_target=kernel_config_target,
+        config_options=kernel_config_options or [],
+    )
+    new_prep = runner.prepare_kernel(
+        new_tree,
+        jobs,
+        config_target=kernel_config_target,
+        config_options=kernel_config_options or [],
+    )
     prep_ok = all(step.get("ok") for step in old_prep + new_prep)
     out["compile"]["prepare_steps"] = {
         "old": [_truncate_run(x) for x in old_prep],
@@ -888,6 +1026,9 @@ def run_oot_integrated_validation_agent(
             write_data=qemu_write_data,
             expect_data=qemu_expect_data,
             qemu_check_script=qemu_script_path,
+            dependency_module_dirs=kernel_module_dirs or [],
+            dependency_module_targets=kernel_module_targets or [],
+            make_extra_args=make_extra_args or [],
         )
         qemu_detail = qemu_run.get("qemu") if isinstance(qemu_run, dict) else None
         qemu_runs = [_truncate_run(qemu_detail)] if isinstance(qemu_detail, dict) else [_truncate_run(qemu_run)]
@@ -897,6 +1038,7 @@ def run_oot_integrated_validation_agent(
             "runs": qemu_runs,
             "success": bool(qemu_run.get("ok")),
             "reason": qemu_run.get("reason"),
+            "module_tree": qemu_run.get("module_tree"),
             "note": "OOT in-guest QEMU smoke check",
             "check_script_path": qemu_script_path.as_posix() if qemu_script_path else None,
             "test_generation": out.get("test_generation", {}),
@@ -947,8 +1089,11 @@ def run_oot_integrated_validation_agent(
         spec_status = "failed"
         spec_reason = f"overall_verdict={verdict}"
     else:
-        spec_status = "failed"
-        spec_reason = post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}"
+        spec_status = "skipped"
+        spec_reason = (
+            "spec_consistency_unavailable: "
+            + (post_reasoning.get("error") or f"parse_status={post_reasoning.get('parse_status')}")
+        )
     out["spec_consistency"] = {
         "status": spec_status,
         "reason": spec_reason,

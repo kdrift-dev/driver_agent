@@ -64,6 +64,24 @@ python pregen_driver_agent.py \
   --llm-model anthropic/claude-sonnet-4.6
 ```
 
+DeepSeek is also supported through its OpenAI-compatible chat API:
+
+```bash
+python pregen_driver_agent.py \
+  --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
+  --old-ref v6.19 \
+  --new-ref v7.0 \
+  --module-path drivers/dax/hmem \
+  --out-dir runs/pregen \
+  --jobs 8 \
+  --enable-llm \
+  --llm-provider deepseek \
+  --llm-model deepseek-v4-pro \
+  --config-ini /mnt/disk7/jw_ai4os/driver-agent/workflow/config.ini
+```
+
+Set `DEEPSEEK_API_KEY=...` or `DEEPSEEK_KEY=...` in `config.ini` or the environment.
+
 ### Dry-run
 
 ```bash

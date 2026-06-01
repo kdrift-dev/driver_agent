@@ -12,6 +12,22 @@ from typing import Any
 
 
 TARGETS: dict[str, dict[str, Any]] = {
+    "drivers-dma-buf": {
+        "selftest_dir": "drivers/dma-buf",
+        "configs": [
+            "CONFIG_BLK_DEV_INITRD=y",
+            "CONFIG_DEVTMPFS=y",
+            "CONFIG_DEVTMPFS_MOUNT=y",
+            "CONFIG_PROC_FS=y",
+            "CONFIG_SYSFS=y",
+            "CONFIG_TMPFS=y",
+            "CONFIG_BINFMT_ELF=y",
+            "CONFIG_MEMFD_CREATE=y",
+            "CONFIG_UDMABUF=y",
+        ],
+        "run": "/kselftest/drivers/dma-buf/udmabuf",
+        "description": "drivers/dma-buf udmabuf userspace kselftest in an isolated QEMU guest.",
+    },
     "dmabuf-heaps": {
         "selftest_dir": "dmabuf-heaps",
         "configs": [
@@ -30,6 +46,23 @@ TARGETS: dict[str, dict[str, Any]] = {
         ],
         "run": "/kselftest/dmabuf-heaps/dmabuf-heap",
         "description": "DMA-BUF heap userspace kselftest in an isolated QEMU guest.",
+    },
+    "zram": {
+        "selftest_dir": "zram",
+        "configs": [
+            "CONFIG_BLK_DEV_INITRD=y",
+            "CONFIG_DEVTMPFS=y",
+            "CONFIG_DEVTMPFS_MOUNT=y",
+            "CONFIG_PROC_FS=y",
+            "CONFIG_SYSFS=y",
+            "CONFIG_TMPFS=y",
+            "CONFIG_BINFMT_ELF=y",
+            "CONFIG_SWAP=y",
+            "CONFIG_ZSMALLOC=y",
+            "CONFIG_ZRAM=m",
+        ],
+        "run": "sh /kselftest/zram/zram.sh",
+        "description": "zram kselftest in an isolated QEMU guest.",
     },
 }
 
@@ -160,7 +193,34 @@ def make_initramfs(out_dir: Path, install_dir: Path, spec: dict[str, Any]) -> Pa
     for d in ["bin", "sbin", "proc", "sys", "dev", "tmp", "kselftest"]:
         (root / d).mkdir(parents=True, exist_ok=True)
     shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
-    for app in ["sh", "mount", "cat", "grep", "awk", "mknod", "poweroff", "echo", "sleep", "find", "test", "ls", "printf", "dmesg", "uname", "mkdir", "chmod"]:
+    for app in [
+        "sh",
+        "bash",
+        "mount",
+        "umount",
+        "cat",
+        "grep",
+        "awk",
+        "mknod",
+        "poweroff",
+        "echo",
+        "sleep",
+        "find",
+        "test",
+        "ls",
+        "printf",
+        "dmesg",
+        "uname",
+        "mkdir",
+        "chmod",
+        "id",
+        "seq",
+        "modprobe",
+        "rmmod",
+        "swapon",
+        "swapoff",
+        "mkswap",
+    ]:
         target = root / "bin" / app
         if not target.exists():
             target.symlink_to("busybox")

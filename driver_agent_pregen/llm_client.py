@@ -179,6 +179,28 @@ class LLMClient:
                     retry_backoff_sec=config.retry_backoff_sec,
                     max_tokens=config.max_tokens,
                 )
+            elif config.provider == "deepseek":
+                key = config.api_key or os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_KEY")
+                if not key and config.config_ini:
+                    key = (
+                        _read_kv_like_config_key(Path(config.config_ini), "DEEPSEEK_API_KEY")
+                        or _read_kv_like_config_key(Path(config.config_ini), "DEEPSEEK_KEY")
+                    )
+                if not key:
+                    raise ValueError("DEEPSEEK_API_KEY/DEEPSEEK_KEY not found (env or config.ini)")
+                # DeepSeek exposes an OpenAI-compatible Chat Completions API.
+                # Use the stdlib HTTP provider rather than the OpenAI Python
+                # SDK so sudo/root validation runs do not depend on root's
+                # site-packages.
+                self._provider = OpenRouterProvider(
+                    model=config.model,
+                    api_key=key,
+                    base_url=config.base_url or "https://api.deepseek.com",
+                    timeout_sec=config.timeout_sec,
+                    max_retries=config.max_retries,
+                    retry_backoff_sec=config.retry_backoff_sec,
+                    max_tokens=config.max_tokens,
+                )
             else:
                 raise ValueError(f"unsupported provider: {config.provider}")
 

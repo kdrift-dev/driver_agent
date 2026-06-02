@@ -29,6 +29,10 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PREGEN = ROOT / "pregen_driver_agent.py"
+sys.path.insert(0, str(ROOT))
+
+from driver_agent_pregen.kbuild_target import resolve_kbuild_target  # noqa: E402
+from driver_agent_pregen.repo_utils import RepositoryAccessor  # noqa: E402
 
 
 SOURCE_SUFFIXES = {
@@ -144,7 +148,22 @@ def git_lines(repo: Path, args: list[str]) -> list[str]:
     return [x.strip() for x in out.splitlines() if x.strip()]
 
 
-def old_source_files(repo: Path, old_ref: str, module_path: str) -> list[str]:
+def old_source_files(repo: Path, old_ref: str, module_path: str, kbuild_target: str | None = None) -> list[str]:
+    if kbuild_target:
+        accessor = RepositoryAccessor(repo=repo, old_ref=old_ref, new_ref=old_ref)
+        resolution = resolve_kbuild_target(
+            accessor,
+            side="old",
+            module_path=module_path,
+            kbuild_target=kbuild_target,
+            include_all_headers=True,
+        )
+        if not resolution.source_files:
+            raise ValueError(
+                f"--kbuild-target {kbuild_target!r} under {module_path!r} resolved no old source files; "
+                f"warnings={resolution.warnings}"
+            )
+        return resolution.files
     files = git_lines(repo, ["ls-tree", "-r", "--name-only", old_ref, "--", module_path])
     return [p for p in files if Path(p).suffix in SOURCE_SUFFIXES]
 
@@ -164,6 +183,26 @@ def find_makefile_dirs(tree: Path, module_path: str, files: list[str]) -> list[s
     return dirs or [module_path.rstrip("/")]
 
 
+def target_build_goal(kbuild_target: str | None) -> str | None:
+    if not kbuild_target:
+        return None
+    target = kbuild_target.strip()
+    if not target:
+        return None
+    if target.endswith(".ko"):
+        return target
+    if target.endswith(".o"):
+        return target[:-2] + ".ko"
+    return target + ".ko"
+
+
+def module_compile_cmd(module_dir: str, jobs: int, kbuild_target: str | None = None) -> list[str]:
+    cmd = ["make", f"-j{max(1, jobs)}", f"M={module_dir}"]
+    goal = target_build_goal(kbuild_target)
+    cmd.append(goal or "modules")
+    return cmd
+
+
 def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
     repo = Path(args.repo).resolve()
     p0_dir = run_dir / "P0_problem_reproduction"
@@ -175,6 +214,8 @@ def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
         "layer": "P0",
         "case_kind": "intree",
         "module_path": args.module_path,
+        "case_scope": "kbuild_target" if args.kbuild_target else "directory",
+        "kbuild_target": args.kbuild_target,
         "old_ref": args.old_ref,
         "new_ref": args.new_ref,
         "steps": [],
@@ -188,7 +229,7 @@ def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
         write_json(p0_dir / "result.json", result)
         return result
 
-    files = old_source_files(repo, args.old_ref, args.module_path)
+    files = old_source_files(repo, args.old_ref, args.module_path, args.kbuild_target)
     copied: list[str] = []
     for rel in files:
         src = old_tree / rel
@@ -212,7 +253,7 @@ def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
         dirs = find_makefile_dirs(new_tree, args.module_path, copied)
         compile_ok = True
         for d in dirs:
-            r = run_cmd(["make", f"-j{max(1, args.jobs)}", f"M={d}", "modules"], cwd=new_tree, timeout=3600)
+            r = run_cmd(module_compile_cmd(d, args.jobs, args.kbuild_target), cwd=new_tree, timeout=3600)
             compile_runs.append(r)
             if not r.get("ok"):
                 compile_ok = False
@@ -222,6 +263,8 @@ def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
     result["compile"] = {
         "prepare_success": prep_ok,
         "compiled_dirs": dirs,
+        "kbuild_target": args.kbuild_target,
+        "compiled_goals": [target_build_goal(args.kbuild_target)] if args.kbuild_target else ["modules"],
         "runs": [truncate_run(r) for r in compile_runs],
         "success": compile_ok,
     }
@@ -312,6 +355,8 @@ def pregen_base_cmd(
         "--llm-retry-backoff-sec",
         str(args.llm_retry_backoff_sec),
     ]
+    if args.kbuild_target:
+        cmd.extend(["--kbuild-target", args.kbuild_target])
     if dry_run:
         cmd.append("--dry-run")
     elif args.enable_llm:
@@ -383,6 +428,7 @@ def find_latest_run(out_dir: Path) -> Path | None:
 
 def summarize_pipeline_run(layer: str, mode: str, out_dir: Path, cmd: list[str], res: dict[str, Any]) -> dict[str, Any]:
     latest = find_latest_run(out_dir)
+    metadata = read_json(latest / "metadata.json", {}) if latest else {}
     validation = read_json(latest / "validation.json", {}) if latest else {}
     summary_v2 = read_json(latest / "validation_summary_v2.json", {}) if latest else {}
     patch_generation = read_json(latest / "patch_generation.json", {}) if latest else {}
@@ -405,7 +451,9 @@ def summarize_pipeline_run(layer: str, mode: str, out_dir: Path, cmd: list[str],
         "process_returncode": res.get("returncode"),
         "process_duration_sec": res.get("duration_sec"),
         "run_dir": latest.as_posix() if latest else "",
-        "metadata_status": (read_json(latest / "metadata.json", {}) or {}).get("status") if latest else "",
+        "metadata_status": (metadata or {}).get("status") if latest else "",
+        "case_scope": (metadata or {}).get("case_scope") or "",
+        "kbuild_target": (metadata or {}).get("kbuild_target") or "",
         "validation_status": validation.get("status", ""),
         "overall_validation_result": summary_v2.get("overall_validation_result", ""),
         "overall_evidence_status": summary_v2.get("overall_evidence_status", ""),
@@ -451,6 +499,8 @@ def write_summary(run_dir: Path, args: argparse.Namespace, p0: dict[str, Any], l
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "case_kind": args.case_kind,
         "module_path": args.module_path,
+        "case_scope": "kbuild_target" if args.kbuild_target else "directory",
+        "kbuild_target": args.kbuild_target,
         "old_ref": args.old_ref,
         "new_ref": args.new_ref,
         "input_policy": {
@@ -539,6 +589,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--old-ref", required=True)
     p.add_argument("--new-ref", required=True)
     p.add_argument("--module-path", required=True)
+    p.add_argument("--kbuild-target", default=None, help="optional Kbuild target under --module-path, e.g. iio_dummy.o")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--patch-candidates", type=int, default=1)
@@ -601,7 +652,11 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"OOT case requires: {', '.join('--' + x.replace('_', '-') for x in missing)}")
 
     base = Path(args.out_dir).resolve()
-    run_dir = base / f"{slugify(args.module_path)}__{args.old_ref}__{args.new_ref}" / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    slug_parts = [slugify(args.module_path)]
+    if args.kbuild_target:
+        slug_parts.append(slugify(args.kbuild_target))
+    slug_parts.extend([args.old_ref, args.new_ref])
+    run_dir = base / "__".join(slug_parts) / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     write_json(run_dir / "experiment_args.json", vars(args))
     write_reference_diff(args, run_dir)

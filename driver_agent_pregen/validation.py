@@ -1554,11 +1554,39 @@ def _compile_failure_text(compile_like: dict[str, Any]) -> str:
     )
 
 
-def _rerun_module_compile(new_tree: Path, compile_dirs: list[str], jobs: int) -> tuple[bool, list[dict[str, Any]]]:
+def _target_build_goal(kbuild_target: str | None) -> str | None:
+    if not kbuild_target:
+        return None
+    target = kbuild_target.strip()
+    if not target:
+        return None
+    if target.endswith(".ko"):
+        return target
+    if target.endswith(".o"):
+        return target[:-2] + ".ko"
+    return target + ".ko"
+
+
+def _compile_command_for_dir(d: str, jobs: int, kbuild_target: str | None = None) -> list[str]:
+    cmd = ["make", f"-j{max(1, jobs)}", f"M={d}"]
+    goal = _target_build_goal(kbuild_target)
+    if goal:
+        cmd.append(goal)
+    else:
+        cmd.append("modules")
+    return cmd
+
+
+def _rerun_module_compile(
+    new_tree: Path,
+    compile_dirs: list[str],
+    jobs: int,
+    kbuild_target: str | None = None,
+) -> tuple[bool, list[dict[str, Any]]]:
     runs: list[dict[str, Any]] = []
     ok = True
     for d in compile_dirs:
-        run = _run_cmd(["make", f"-j{max(1, jobs)}", f"M={d}", "modules"], cwd=new_tree, timeout=3600)
+        run = _run_cmd(_compile_command_for_dir(d, jobs, kbuild_target), cwd=new_tree, timeout=3600)
         run = _normalize_partial_module_compile_result(run)
         run["stdout"] = _truncate(run.get("stdout", ""))
         run["stderr"] = _truncate(run.get("stderr", ""))
@@ -1576,9 +1604,11 @@ def _apply_safe_compile_autofixes_once(
     copied_files: list[str],
     touched_files: list[str],
     compile_like: dict[str, Any],
+    target_source_files: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     text = _compile_failure_text(compile_like)
-    candidates = _ordered_unique([*copied_files, *touched_files, *_list_module_source_files(new_tree, module_path)])
+    scope_files = target_source_files if target_source_files is not None else _list_module_source_files(new_tree, module_path)
+    candidates = _ordered_unique([*copied_files, *touched_files, *scope_files])
     changes: list[dict[str, Any]] = []
     seen_unused: set[tuple[str, int, str]] = set()
     for m in _UNUSED_VAR_RE.finditer(text):
@@ -1845,6 +1875,8 @@ def _try_compile_autofix_unused_variables(
     compile_dirs: list[str],
     jobs: int,
     validation_dir: Path,
+    kbuild_target: str | None = None,
+    target_source_files: list[str] | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "attempted": False,
@@ -1864,6 +1896,7 @@ def _try_compile_autofix_unused_variables(
             copied_files=copied_files,
             touched_files=touched_files,
             compile_like=current,
+            target_source_files=target_source_files,
         )
         if not changes:
             if not result["attempted"]:
@@ -1878,7 +1911,7 @@ def _try_compile_autofix_unused_variables(
         if not applied:
             result["reason"] = "no_safe_compile_autofix_applied"
             break
-        rerun_ok, reruns = _rerun_module_compile(new_tree, compile_dirs, jobs)
+        rerun_ok, reruns = _rerun_module_compile(new_tree, compile_dirs, jobs, kbuild_target)
         for r in reruns:
             r["autofix_round"] = round_idx
         result["rerun_compile"].extend(reruns)
@@ -1998,6 +2031,8 @@ def run_validation_agent(
     keep_worktrees: bool,
     enable_host_suite: bool = False,
     kernel_config_target: str = "defconfig",
+    kbuild_target: str | None = None,
+    target_source_files: list[str] | None = None,
 ) -> dict[str, Any]:
     stage_results = _init_stage_results()
 
@@ -2102,7 +2137,7 @@ def run_validation_agent(
             "duration_sec": 0.0,
         }
         if not touched_files:
-            touched_files = _list_module_source_files(old_tree, module_path)
+            touched_files = list(target_source_files or _list_module_source_files(old_tree, module_path))
     else:
         apply_check = _run_cmd(["git", "apply", "--check", str(fixed_patch_path)], cwd=old_tree, timeout=300)
         if apply_check.get("ok"):
@@ -2155,8 +2190,12 @@ def run_validation_agent(
     else:
         _set_stage_result(stage_results, "patch_apply", "passed", "patch applied on old_ref")
 
-    module_source_files = _list_module_source_files(old_tree, module_path)
-    new_tree_module_source_files = _list_module_source_files(new_tree, module_path)
+    module_source_files = list(target_source_files or _list_module_source_files(old_tree, module_path))
+    new_tree_module_source_files = (
+        [rel for rel in module_source_files if (new_tree / rel).exists()]
+        if kbuild_target
+        else _list_module_source_files(new_tree, module_path)
+    )
     old_source_set = set(module_source_files)
     new_only_module_source_files = sorted(
         rel for rel in new_tree_module_source_files if rel not in old_source_set
@@ -2183,9 +2222,15 @@ def run_validation_agent(
         "new_only_module_source_files": new_only_module_source_files[:80],
         "new_only_module_source_file_count": len(new_only_module_source_files),
         "touched_file_count": len(touched_files),
-        "stage_policy": "stage_full_old_module_sources_plus_touched_patch_files",
+        "case_scope": "kbuild_target" if kbuild_target else "directory",
+        "kbuild_target": kbuild_target,
+        "stage_policy": (
+            "stage_old_kbuild_target_sources_plus_touched_patch_files"
+            if kbuild_target
+            else "stage_full_old_module_sources_plus_touched_patch_files"
+        ),
         "stage_policy_caveat": (
-            "Validation overlays old target module sources onto the new kernel tree. "
+            "Validation overlays old target source scope onto the new kernel tree. "
             "If new_only_module_source_file_count > 0, the compile may include new target-module files; "
             "that is evaluation/validation evidence and must not be used as agent input."
         ),
@@ -2247,9 +2292,11 @@ def run_validation_agent(
     if prep_ok:
         compile_dirs = _find_makefile_dirs(new_tree, copied or touched_files, module_path)
         compile_result["compiled_dirs"] = compile_dirs
+        compile_result["kbuild_target"] = kbuild_target
+        compile_result["compiled_goals"] = [_target_build_goal(kbuild_target)] if kbuild_target else ["modules"]
         all_ok = True
         for d in compile_dirs:
-            cmd = ["make", f"-j{max(1, jobs)}", f"M={d}", "modules"]
+            cmd = _compile_command_for_dir(d, jobs, kbuild_target)
             run = _run_cmd(cmd, cwd=new_tree, timeout=3600)
             run = _normalize_partial_module_compile_result(run)
             run["stdout"] = _truncate(run.get("stdout", ""))
@@ -2264,7 +2311,8 @@ def run_validation_agent(
             reason = _first_error_line((first_fail or {}).get("stderr", "")) or "module_compile_failed"
             _set_stage_result(stage_results, "compile_modules", "failed", reason)
         else:
-            _set_stage_result(stage_results, "compile_modules", "passed", f"compiled dirs: {', '.join(compile_dirs) if compile_dirs else '(none)'}")
+            target_note = f" target={_target_build_goal(kbuild_target)}" if kbuild_target else ""
+            _set_stage_result(stage_results, "compile_modules", "passed", f"compiled dirs: {', '.join(compile_dirs) if compile_dirs else '(none)'}{target_note}")
     else:
         compile_result["error"] = "kernel_prepare_failed"
         _set_stage_result(stage_results, "compile_modules", "skipped", "compile_prepare_failed")
@@ -2286,6 +2334,8 @@ def run_validation_agent(
             compile_dirs=compile_dirs,
             jobs=jobs,
             validation_dir=validation_dir,
+            kbuild_target=kbuild_target,
+            target_source_files=target_source_files,
         )
         if compile_autofix.get("attempted"):
             if compile_autofix.get("success"):

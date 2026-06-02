@@ -6,6 +6,7 @@ import re
 import shutil
 
 from .repo_utils import RepositoryAccessor
+from .kbuild_target import KbuildTargetResolution, resolve_kbuild_target
 from .utils import ensure_dir, write_json, write_text
 
 
@@ -34,6 +35,9 @@ class ModuleSourceResult:
     headers_old: list[str]
     module_loc_old: int
     copied_root: Path
+    case_scope: str = "directory"
+    kbuild_target: str | None = None
+    kbuild_target_resolution: dict | None = None
 
 
 
@@ -43,12 +47,29 @@ def run_module_source_loader(
     module_path: str,
     extracted_dir: Path,
     restrict_files_old: set[str] | None = None,
+    kbuild_target: str | None = None,
 ) -> ModuleSourceResult:
     ensure_dir(extracted_dir)
     old_exists = accessor.module_path_exists("old", module_path)
     new_exists = accessor.module_path_exists("new", module_path)
 
-    files = accessor.list_module_files("old", module_path, extensions=SOURCE_EXTENSIONS) if old_exists else []
+    target_resolution: KbuildTargetResolution | None = None
+    if old_exists and kbuild_target:
+        target_resolution = resolve_kbuild_target(
+            accessor,
+            side="old",
+            module_path=module_path,
+            kbuild_target=kbuild_target,
+            include_all_headers=True,
+        )
+        if not target_resolution.source_files:
+            raise ValueError(
+                f"--kbuild-target {kbuild_target!r} under {module_path!r} resolved no old source files; "
+                f"warnings={target_resolution.warnings}"
+            )
+        files = target_resolution.files
+    else:
+        files = accessor.list_module_files("old", module_path, extensions=SOURCE_EXTENSIONS) if old_exists else []
     if restrict_files_old is not None:
         allow = set(restrict_files_old)
         files = [f for f in files if f in allow]
@@ -72,6 +93,9 @@ def run_module_source_loader(
 
     payload = {
         "module_path": module_path,
+        "case_scope": "kbuild_target" if kbuild_target else "directory",
+        "kbuild_target": kbuild_target,
+        "kbuild_target_resolution": target_resolution.to_json() if target_resolution else None,
         "old_ref": accessor.old_ref,
         "new_ref": accessor.new_ref,
         "old_exists": old_exists,
@@ -81,9 +105,13 @@ def run_module_source_loader(
         "module_loc_old": module_loc,
         "local_include_scope_risks": _local_include_scope_risks(files, source_texts),
         "note": (
-            "module path is user-provided; no buildable unit inference performed"
-            if restrict_files_old is None
-            else "module path is user-provided; old files restricted by caller filter"
+            "module path is user-provided; kbuild target source scope was resolved from old Makefile/Kbuild"
+            if kbuild_target
+            else (
+                "module path is user-provided; no buildable unit inference performed"
+                if restrict_files_old is None
+                else "module path is user-provided; old files restricted by caller filter"
+            )
         ),
     }
     write_json(extracted_dir / "module_source.json", payload)
@@ -92,6 +120,9 @@ def run_module_source_loader(
         module_path=module_path,
         old_ref=accessor.old_ref,
         new_ref=accessor.new_ref,
+        case_scope="kbuild_target" if kbuild_target else "directory",
+        kbuild_target=kbuild_target,
+        kbuild_target_resolution=target_resolution.to_json() if target_resolution else None,
         old_exists=old_exists,
         new_path_exists=new_exists,
         source_files_old=files,
@@ -189,6 +220,9 @@ def run_external_module_source_loader(
 
     payload = {
         "module_path": module_path,
+        "case_scope": "directory",
+        "kbuild_target": None,
+        "kbuild_target_resolution": None,
         "old_ref": old_ref,
         "new_ref": new_ref,
         "old_exists": True,

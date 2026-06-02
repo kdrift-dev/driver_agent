@@ -57,6 +57,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--old-tree", type=str, default=None, help="fallback old source tree")
     p.add_argument("--new-tree", type=str, default=None, help="fallback new source tree")
     p.add_argument("--module-path", type=str, required=False)
+    p.add_argument(
+        "--kbuild-target",
+        type=str,
+        default=None,
+        help=(
+            "optional in-tree Kbuild module target under --module-path, e.g. iio_dummy.o. "
+            "When set, source loading and validation are scoped to that target instead of the whole directory."
+        ),
+    )
     p.add_argument("--out-dir", type=str, required=True)
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--dry-run", action="store_true", help="skip real LLM calls, keep prompt/input outputs")
@@ -444,6 +453,8 @@ def _validation_feedback_for_repair(validation: dict[str, Any], iteration: int, 
             "success": bool(compile_payload.get("success")),
             "error": compile_payload.get("error", ""),
             "compiled_dirs": compile_payload.get("compiled_dirs", []),
+            "kbuild_target": compile_payload.get("kbuild_target"),
+            "compiled_goals": compile_payload.get("compiled_goals", []),
             "prepare_failures": prepare_failures,
             "failed_runs": failed_runs,
             "autofix": compile_payload.get("autofix", {}),
@@ -543,8 +554,15 @@ def _override_patch_generation_with_file(
     return out
 
 
-def _make_case_id(module_path: str, old_ref: str | None, new_ref: str | None) -> str:
+def _make_case_id(
+    module_path: str,
+    old_ref: str | None,
+    new_ref: str | None,
+    kbuild_target: str | None = None,
+) -> str:
     parts = [module_path.replace("/", "_")]
+    if kbuild_target:
+        parts.append(kbuild_target.replace("/", "_").replace(".", "_"))
     if old_ref:
         parts.append(old_ref)
     if new_ref:
@@ -569,6 +587,8 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         else:
             raise SystemExit("--module-path is required for the in-tree driver pipeline")
     oot_integrated = bool(args.oot_repo_url and args.oot_pipeline_mode == "integrated")
+    if args.kbuild_target and oot_integrated:
+        raise SystemExit("--kbuild-target is only supported for the in-tree driver pipeline")
 
     accessor = RepositoryAccessor.from_args(
         repo=args.repo,
@@ -579,7 +599,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
     )
     accessor.validate()
 
-    case_id = _make_case_id(args.module_path, args.old_ref, args.new_ref)
+    case_id = _make_case_id(args.module_path, args.old_ref, args.new_ref, args.kbuild_target)
     ts = now_timestamp()
     run_dir = (Path(args.out_dir) / case_id / ts).resolve()
     extracted_dir = run_dir / "extracted"
@@ -593,6 +613,8 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         "case_id": case_id,
         "timestamp": ts,
         "module_path": args.module_path,
+        "case_scope": "kbuild_target" if args.kbuild_target else "directory",
+        "kbuild_target": args.kbuild_target,
         "mode": accessor.describe(),
         "jobs": args.jobs,
         "dry_run": args.dry_run,
@@ -728,8 +750,16 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
     else:
         module_result = stage(
             "01_module_source_loader",
-            lambda: run_module_source_loader(accessor, module_path=args.module_path, extracted_dir=extracted_dir),
+            lambda: run_module_source_loader(
+                accessor,
+                module_path=args.module_path,
+                extracted_dir=extracted_dir,
+                kbuild_target=args.kbuild_target,
+            ),
         )
+    metadata["case_scope"] = module_result.case_scope
+    metadata["kbuild_target_resolution"] = module_result.kbuild_target_resolution
+    write_json(run_dir / "metadata.json", metadata)
 
     scan_payload = stage(
         "02_old_driver_symbol_scanner",
@@ -1099,6 +1129,8 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
                     enable_host_suite=args.enable_host_suite,
                     keep_worktrees=not args.cleanup_worktrees,
                     kernel_config_target=args.kernel_config_target,
+                    kbuild_target=args.kbuild_target,
+                    target_source_files=module_result.source_files_old if args.kbuild_target else None,
                 ),
             )
             repair_reason = _validation_repair_reason(validation)
@@ -1198,6 +1230,9 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
             old_ref=args.old_ref,
             new_ref=args.new_ref,
             module_source={
+                "case_scope": module_result.case_scope,
+                "kbuild_target": module_result.kbuild_target,
+                "kbuild_target_resolution": module_result.kbuild_target_resolution,
                 "source_files_old": module_result.source_files_old,
                 "headers_old": module_result.headers_old,
                 "module_loc_old": module_result.module_loc_old,

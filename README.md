@@ -94,6 +94,36 @@ python pregen_driver_agent.py \
   --dry-run
 ```
 
+### Kbuild target scope
+
+By default, an in-tree case is scoped to the whole `--module-path` directory. If
+that directory contains multiple Kbuild module objects, use `--kbuild-target` to
+scope the case to one target:
+
+```bash
+python pregen_driver_agent.py \
+  --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
+  --old-ref v6.12 \
+  --new-ref v7.0 \
+  --module-path drivers/iio/dummy \
+  --kbuild-target iio_dummy.o \
+  --out-dir runs/pregen \
+  --jobs 8 \
+  --dry-run
+```
+
+In target mode, Driver-Agent resolves the target's owning source files from the
+old tree `Makefile`/`Kbuild`, records `case_scope=kbuild_target` in artifacts,
+loads only those source files plus local headers, and validates with a
+target-specific command such as:
+
+```bash
+make -j8 M=drivers/iio/dummy iio_dummy.ko
+```
+
+This keeps sibling targets such as `iio_dummy_evgen.o` out of affected-function
+analysis, patch generation, and validation unless they are explicitly selected.
+
 ### Optional runtime execution switches
 
 - `--patch-candidates N`: request N patch candidates from LLM (default `1`)

@@ -122,6 +122,8 @@ class PatchLineFixer:
                     new_count = int(hm.group(4) or "1")
                     ctx = (hm.group(5) or "").strip()
                     hlines: List[str] = []
+                    consumed_old = 0
+                    consumed_new = 0
                     i += 1
                     while i < len(lines):
                         nxt = lines[i]
@@ -129,12 +131,37 @@ class PatchLineFixer:
                             i -= 1
                             break
                         if not nxt:
+                            # LLM-generated patches sometimes represent a
+                            # blank context line as an empty string instead of
+                            # the unified-diff form " ". Treat it as context
+                            # while the hunk header counts still expect more
+                            # old/new lines; otherwise it is a separator.
+                            if consumed_old < old_count and consumed_new < new_count:
+                                hlines.append(" ")
+                                consumed_old += 1
+                                consumed_new += 1
+                                i += 1
+                                continue
                             break
                         if nxt[0] in (" ", "+", "-"):
                             hlines.append(nxt)
+                            if nxt[0] == " ":
+                                consumed_old += 1
+                                consumed_new += 1
+                            elif nxt[0] == "-":
+                                consumed_old += 1
+                            elif nxt[0] == "+":
+                                consumed_new += 1
                         else:
                             i -= 1
                             break
+                        if consumed_old >= old_count and consumed_new >= new_count:
+                            # Keep scanning only if the next line is a formal
+                            # hunk/file header; otherwise the current hunk is
+                            # complete and later non-prefixed text should not
+                            # be swallowed.
+                            if i + 1 >= len(lines):
+                                break
                         i += 1
                     cur.hunks.append(
                         HunkInfo(
@@ -178,9 +205,21 @@ class PatchLineFixer:
         for idx, hunk in enumerate(hunks):
             pattern = [ln[1:] for ln in hunk.lines if ln and ln[0] in (" ", "-")]
             match_line = self._find_best_match(orig_lines, pattern, start_hint=max(0, hunk.old_start - 1))
+            aligned_lines: Optional[List[str]] = None
+            if match_line is None:
+                aligned = self._align_hunk_allow_missing_blank_context(
+                    hunk,
+                    orig_lines,
+                    start_hint=max(0, hunk.old_start - 1),
+                )
+                if aligned is not None:
+                    match_line, aligned_lines = aligned
 
             if match_line is not None:
-                hunk = self._normalize_hunk_lines(hunk, orig_lines, match_line)
+                if aligned_lines is not None:
+                    hunk.lines = aligned_lines
+                else:
+                    hunk = self._normalize_hunk_lines(hunk, orig_lines, match_line)
                 hunk = self._add_context_lines(hunk, orig_lines, match_line)
                 old_count, new_count = hunk.recalculate_counts()
                 old_start = match_line + 1
@@ -225,6 +264,62 @@ class PatchLineFixer:
 
         if best_score >= 0.8:
             return best_pos
+        return None
+
+    def _align_hunk_allow_missing_blank_context(
+        self,
+        hunk: HunkInfo,
+        orig_lines: List[str],
+        start_hint: int,
+    ) -> Optional[Tuple[int, List[str]]]:
+        """Align a hunk that omitted blank context lines from the original file.
+
+        Some LLM patches drop empty context lines inside otherwise correct hunks.
+        Arbitrary fuzzy matching is unsafe, so this only permits inserting
+        blank context lines that exist in the original source before the next
+        old-consuming hunk line.
+        """
+
+        if not orig_lines or not hunk.lines:
+            return None
+        search_start = max(0, start_hint - 20)
+        search_end = min(len(orig_lines), start_hint + 120)
+
+        for pos in range(search_start, search_end):
+            orig_idx = pos
+            aligned: List[str] = []
+            inserted_blank = False
+            failed = False
+            for line in hunk.lines:
+                if not line:
+                    continue
+                lead = line[0]
+                if lead == "+":
+                    aligned.append(line)
+                    continue
+                if lead not in (" ", "-"):
+                    failed = True
+                    break
+
+                wanted = line[1:]
+                while (
+                    orig_idx < len(orig_lines)
+                    and orig_lines[orig_idx].strip() == ""
+                    and wanted.strip() != ""
+                    and not self._line_equal(orig_lines[orig_idx], wanted)
+                ):
+                    aligned.append(" " + orig_lines[orig_idx])
+                    orig_idx += 1
+                    inserted_blank = True
+
+                if orig_idx >= len(orig_lines) or not self._line_equal(orig_lines[orig_idx], wanted):
+                    failed = True
+                    break
+                aligned.append(lead + orig_lines[orig_idx])
+                orig_idx += 1
+
+            if not failed and inserted_blank:
+                return pos, aligned
         return None
 
     @staticmethod

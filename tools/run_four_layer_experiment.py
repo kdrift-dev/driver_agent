@@ -199,6 +199,8 @@ def target_build_goal(kbuild_target: str | None) -> str | None:
 def module_compile_cmd(module_dir: str, jobs: int, kbuild_target: str | None = None) -> list[str]:
     cmd = ["make", f"-j{max(1, jobs)}", f"M={module_dir}"]
     goal = target_build_goal(kbuild_target)
+    if goal:
+        cmd.append("KBUILD_MODPOST_WARN=1")
     cmd.append(goal or "modules")
     return cmd
 

@@ -1051,12 +1051,58 @@ def _parse_touched_function_scopes(patch_text: str, extracted_dir: Path) -> list
     return dedup
 
 
+def _compile_failure_edit_scope_keys(
+    *,
+    repair_context: dict[str, Any] | None,
+    extracted_dir: Path,
+) -> set[tuple[str, str]]:
+    """Map compiler diagnostics to functions that may be edited in repair.
+
+    Normal patch generation is restricted to affected/edit-candidate functions.
+    During compile repair, however, the compiler may expose an additional
+    required edit in the same target source file. Allow only functions that are
+    explicitly named by a failed compiler diagnostic line.
+    """
+
+    if not repair_context:
+        return set()
+    ranges = _load_function_ranges(extracted_dir)
+    root = extracted_dir / "old_module_sources"
+    by_basename: dict[str, list[str]] = defaultdict(list)
+    for rel in ranges:
+        by_basename[Path(rel).name].append(rel)
+
+    texts: list[str] = []
+    compile_payload = repair_context.get("compile") or {}
+    for run in compile_payload.get("failed_runs", []) or []:
+        texts.append(str(run.get("stderr", "") or ""))
+        texts.append(str(run.get("stdout", "") or ""))
+
+    out: set[tuple[str, str]] = set()
+    diag_re = re.compile(r"(?P<path>(?:drivers/[A-Za-z0-9_./+\-]+|[A-Za-z0-9_+\-.]+)\.(?:c|h|rs)):(?P<line>\d+):(?:\d+:)?\s+(?:fatal\s+)?error:")
+    for text in texts:
+        for m in diag_re.finditer(text):
+            raw_path = m.group("path")
+            line_no = int(m.group("line"))
+            rels: list[str] = []
+            if raw_path.startswith("drivers/") and (root / raw_path).exists():
+                rels = [raw_path]
+            else:
+                rels = by_basename.get(Path(raw_path).name, [])
+            for rel in rels:
+                for fn in ranges.get(rel, []):
+                    if int(fn["start_line"]) <= line_no <= int(fn["end_line"]):
+                        out.add((rel, str(fn["function"])))
+    return out
+
+
 def _edit_scope_policy_check(
     *,
     patch_text: str,
     extracted_dir: Path,
     impact_graph: dict[str, Any],
     candidate_rationale_text: str = "",
+    extra_editable_keys: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     required = {_function_key(x) for x in impact_graph.get("edit_required_functions", []) or []}
     candidates = {_function_key(x) for x in impact_graph.get("edit_candidate_functions", []) or []}
@@ -1067,7 +1113,9 @@ def _edit_scope_policy_check(
     required.discard(None)
     candidates.discard(None)
     context_only.discard(None)
-    editable = set(required) | set(candidates)
+    extra_editable = set(extra_editable_keys or set())
+    context_only -= extra_editable
+    editable = set(required) | set(candidates) | extra_editable
     candidate_meta: dict[tuple[str, str], dict[str, Any]] = {}
     for item in impact_graph.get("edit_candidate_functions", []) or []:
         key = _function_key(item)
@@ -1130,6 +1178,10 @@ def _edit_scope_policy_check(
         "touched_function_scopes": touched,
         "allowed_edit_required": sorted([{"file": p, "function": f} for p, f in required], key=lambda x: (x["file"], x["function"])),
         "allowed_edit_candidate": sorted([{"file": p, "function": f} for p, f in candidates], key=lambda x: (x["file"], x["function"])),
+        "allowed_compile_failure_edit_scope": sorted(
+            [{"file": p, "function": f} for p, f in extra_editable],
+            key=lambda x: (x["file"], x["function"]),
+        ),
     }
 
 
@@ -1833,6 +1885,10 @@ def run_patch_generation_agent(
     rejected_noop_candidates: list[dict[str, Any]] = []
     effective_patch_required = _requires_effective_patch(compatibility_obligations) if generation_mode == "agent" else False
     strong_semantic_required = effective_patch_required
+    repair_extra_edit_keys = _compile_failure_edit_scope_keys(
+        repair_context=repair_context,
+        extracted_dir=extracted_dir,
+    ) if is_repair else set()
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
         raw_cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
@@ -1909,6 +1965,7 @@ def run_patch_generation_agent(
                 patch_text=candidate_patch,
                 extracted_dir=extracted_dir,
                 impact_graph=impact_graph,
+                extra_editable_keys=repair_extra_edit_keys,
                 candidate_rationale_text=" ".join(
                     [
                         str(cand.get("strategy", "") or ""),
@@ -1939,6 +1996,7 @@ def run_patch_generation_agent(
                     patch_text=pruned_candidate_patch,
                     extracted_dir=extracted_dir,
                     impact_graph=impact_graph,
+                    extra_editable_keys=repair_extra_edit_keys,
                     candidate_rationale_text=" ".join(
                         [
                             str(cand.get("strategy", "") or ""),
@@ -2077,6 +2135,7 @@ def run_patch_generation_agent(
                         patch_text=candidate_patch,
                         extracted_dir=extracted_dir,
                         impact_graph=impact_graph,
+                        extra_editable_keys=repair_extra_edit_keys,
                         candidate_rationale_text=f"heuristic_fallback {heur.get('reason', '')} pre_reasoning.patch_guidance",
                     )
                     if candidate_patch
@@ -2101,6 +2160,7 @@ def run_patch_generation_agent(
                             patch_text=pruned_candidate_patch,
                             extracted_dir=extracted_dir,
                             impact_graph=impact_graph,
+                            extra_editable_keys=repair_extra_edit_keys,
                             candidate_rationale_text=f"heuristic_fallback {heur.get('reason', '')} pre_reasoning.patch_guidance",
                         )
                         if pruned_fixed_ok and pruned_scope_check.get("ok", True):

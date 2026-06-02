@@ -340,6 +340,13 @@ def validate_semantic_obligations(run_dir: Path) -> dict[str, Any]:
 
     mod_info = _modified_functions_from_patch(run_dir, patch_text)
     editable, context, affected = _editable_sets(impact_graph)
+    candidate_scope = cand.get("edit_scope_policy_check") or {}
+    for field in ("allowed_edit_required", "allowed_edit_candidate", "allowed_compile_failure_edit_scope"):
+        for item in candidate_scope.get(field, []) or []:
+            key = (str(item.get("file") or ""), str(item.get("function") or ""))
+            if key[0] and key[1]:
+                editable.add(key)
+                context.discard(key)
     outside: list[dict[str, str]] = []
     context_edits: list[dict[str, str]] = []
     for item in mod_info["modified_functions"]:

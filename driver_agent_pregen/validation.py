@@ -1571,6 +1571,11 @@ def _compile_command_for_dir(d: str, jobs: int, kbuild_target: str | None = None
     cmd = ["make", f"-j{max(1, jobs)}", f"M={d}"]
     goal = _target_build_goal(kbuild_target)
     if goal:
+        # Target-level validation intentionally builds a single Kbuild module
+        # after modules_prepare, not the whole dependency graph. In that mode
+        # Module.symvers may be absent, so unresolved dependency symbols should
+        # stay warnings; source/API compile errors remain hard failures.
+        cmd.append("KBUILD_MODPOST_WARN=1")
         cmd.append(goal)
     else:
         cmd.append("modules")

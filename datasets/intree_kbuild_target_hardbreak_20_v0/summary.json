@@ -1,0 +1,17 @@
+{
+  "case_count": 20,
+  "unique_module_targets": 20,
+  "unique_dirs": 17,
+  "max_target_code_loc_old": 2188,
+  "max_target_source_file_count_old": 2,
+  "by_validation_scope": {
+    "compile_only_qemu_partial": 4,
+    "compile_only_hardware_limited": 15,
+    "compile_only_virtual_device_needed": 1
+  },
+  "by_case_type": {
+    "kbuild_module_target": 11,
+    "split_from_multi_target_dir": 9
+  },
+  "source_screen": "runs/kbuild_target_case_search_20260602_185711"
+}

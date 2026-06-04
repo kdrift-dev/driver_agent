@@ -253,6 +253,13 @@ class LLMClient:
 
         write_text(stage_dir / "raw_output.txt", raw)
 
+        if not raw.strip():
+            failed = dict(default_output)
+            failed["parse_status"] = "failed"
+            failed["error"] = "empty_llm_response"
+            write_json(stage_dir / "parsed_output.json", failed)
+            return failed
+
         parsed = self._robust_parse_json(raw)
         if parsed is None:
             failed = dict(default_output)

@@ -89,7 +89,7 @@ class PatchLineFixer:
         return ok, rebuilt, msgs
 
     def parse_patch(self, patch_content: str) -> List[PatchFile]:
-        lines = patch_content.splitlines()
+        lines = self._normalize_malformed_hunk_headers(patch_content.splitlines())
         out: List[PatchFile] = []
         cur: Optional[PatchFile] = None
         i = 0
@@ -178,6 +178,26 @@ class PatchLineFixer:
         if cur:
             out.append(cur)
         return out
+
+    def _normalize_malformed_hunk_headers(self, lines: List[str]) -> List[str]:
+        """Recover LLM-indented hunk headers before parsing.
+
+        Some model outputs accidentally indent a later ``@@ -x +y @@`` hunk
+        header inside the previous hunk. Unified diff headers must start at
+        column 0; if we leave the indentation intact, the parser treats the
+        header as a context source line and drops the whole later edit. Only
+        strip lines that exactly become a valid hunk header after leading
+        whitespace removal, which keeps ordinary source context untouched.
+        """
+
+        normalized: List[str] = []
+        for line in lines:
+            stripped = line.lstrip(" \t")
+            if line != stripped and self.hunk_re.match(stripped):
+                normalized.append(stripped)
+            else:
+                normalized.append(line)
+        return normalized
 
     def fix_file_hunks(self, hunks: List[HunkInfo], original_content: Optional[str]) -> List[HunkInfo]:
         if not hunks:

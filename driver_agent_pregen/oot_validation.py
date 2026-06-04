@@ -4,7 +4,7 @@ import importlib.util
 import re
 import shutil
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .llm_client import LLMClient
@@ -343,23 +343,36 @@ def _select_candidate(patch_generation_result: dict[str, Any]) -> dict[str, Any]
     return candidates[0]
 
 
+def _module_prefix_variants(module_path: str) -> list[str]:
+    raw = str(module_path or "").strip("/")
+    variants: list[str] = []
+    for value in (raw, str(PurePosixPath(raw)) if raw else ""):
+        value = value.strip("/")
+        if value and value != "." and value not in variants:
+            variants.append(value)
+    variants.sort(key=len, reverse=True)
+    return variants
+
+
 def _root_relative_patch(patch_text: str, module_path: str) -> str:
-    prefix = module_path.strip("/") + "/"
-    if not prefix.strip("/"):
+    prefixes = _module_prefix_variants(module_path)
+    if not prefixes:
         return patch_text
     out = []
     for line in (patch_text or "").splitlines():
-        line = line.replace(f"a/{prefix}", "a/")
-        line = line.replace(f"b/{prefix}", "b/")
+        for prefix in prefixes:
+            line = line.replace(f"a/{prefix}/", "a/")
+            line = line.replace(f"b/{prefix}/", "b/")
         out.append(line)
     text = "\n".join(out)
     return text + ("\n" if patch_text.endswith("\n") or text else "")
 
 
 def _strip_module_prefix(path: str, module_path: str) -> str:
-    prefix = module_path.strip("/") + "/"
-    if path.startswith(prefix):
-        return path[len(prefix) :]
+    for prefix in _module_prefix_variants(module_path):
+        marker = prefix + "/"
+        if path.startswith(marker):
+            return path[len(marker) :]
     return path
 
 
@@ -568,6 +581,7 @@ def _generate_oot_qemu_test_script(
     compatibility_obligations: dict[str, Any],
     compile_result: dict[str, Any],
     dry_run: bool,
+    enable_llm_test_generation: bool = False,
 ) -> tuple[dict[str, Any], Path | None]:
     validation_dir = run_dir / "validation"
     stage_dir = llm_calls_dir / "05_oot_qemu_test_generation"
@@ -577,7 +591,7 @@ def _generate_oot_qemu_test_script(
     if mode == "auto":
         if qemu_check_script:
             mode = "custom"
-        elif llm_client.config.enabled and not dry_run:
+        elif enable_llm_test_generation and llm_client.config.enabled and not dry_run:
             mode = "llm"
         else:
             mode = "default"
@@ -809,6 +823,7 @@ def run_oot_integrated_validation_agent(
     kernel_module_dirs: list[str] | None = None,
     kernel_module_targets: list[str] | None = None,
     keep_worktrees: bool = True,
+    enable_llm_test_generation: bool = False,
 ) -> dict[str, Any]:
     runner = _load_oot_runner_module()
     stage_results = _init_stage_results()
@@ -1000,6 +1015,7 @@ def run_oot_integrated_validation_agent(
             compatibility_obligations=compatibility_obligations,
             compile_result=out["compile"],
             dry_run=dry_run,
+            enable_llm_test_generation=enable_llm_test_generation,
         )
         out["test_generation"] = test_generation
         if qemu_script_path and qemu_script_path.exists():

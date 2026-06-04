@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -59,16 +60,28 @@ TARGETS: dict[str, dict[str, Any]] = {
             "CONFIG_BINFMT_ELF=y",
             "CONFIG_SWAP=y",
             "CONFIG_ZSMALLOC=y",
-            "CONFIG_ZRAM=m",
+            "CONFIG_ZRAM=y",
         ],
         "run": "sh /kselftest/zram/zram.sh",
         "description": "zram kselftest in an isolated QEMU guest.",
+        # zram.sh needs a few GNU/userland tools that BusyBox either lacks or
+        # implements without required options (for example seq -w and dd
+        # oflag=append/status=none). Copy them into the initramfs so QEMU
+        # results reflect zram behavior instead of test-environment gaps.
+        "host_binaries": ["bash", "mkfs.ext2", "seq", "dd", "bc"],
     },
 }
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, timeout: int | None = None) -> dict[str, Any]:
     start = time.time()
+    def _text(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode(errors="replace")
+        return str(value)
+
     try:
         proc = subprocess.run(
             cmd,
@@ -92,8 +105,8 @@ def run(cmd: list[str], *, cwd: Path | None = None, timeout: int | None = None) 
             "cmd": cmd,
             "cwd": str(cwd) if cwd else None,
             "returncode": -1,
-            "stdout": exc.stdout or "",
-            "stderr": (exc.stderr or "") + f"\n[timeout] after {timeout} sec",
+            "stdout": _text(exc.stdout),
+            "stderr": _text(exc.stderr) + f"\n[timeout] after {timeout} sec",
             "duration_sec": round(time.time() - start, 3),
             "ok": False,
         }
@@ -116,6 +129,31 @@ def write_json(path: Path, data: Any) -> None:
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def copy_host_binary_with_libs(root: Path, binary_name: str) -> dict[str, Any]:
+    src = shutil.which(binary_name)
+    if not src:
+        return {"ok": False, "binary": binary_name, "reason": "not_found_in_host_path"}
+    src_path = Path(src).resolve()
+    dst = root / "bin" / binary_name
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src_path, dst)
+    os.chmod(dst, 0o755)
+
+    copied_libs: list[str] = []
+    ldd = run(["ldd", str(src_path)], timeout=60)
+    if ldd.get("ok"):
+        text = (ldd.get("stdout") or "") + "\n" + (ldd.get("stderr") or "")
+        for lib in sorted(set(re.findall(r"(/[^\s]+)", text))):
+            lib_path = Path(lib)
+            if not lib_path.exists() or not lib_path.is_file():
+                continue
+            lib_dst = root / lib_path.relative_to("/")
+            lib_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(lib_path, lib_dst)
+            copied_libs.append(str(lib_path))
+    return {"ok": True, "binary": binary_name, "src": str(src_path), "dst": str(dst), "copied_libs": copied_libs}
 
 
 def print_summary(result: dict[str, Any]) -> None:
@@ -193,16 +231,22 @@ def make_initramfs(out_dir: Path, install_dir: Path, spec: dict[str, Any]) -> Pa
     for d in ["bin", "sbin", "proc", "sys", "dev", "tmp", "kselftest"]:
         (root / d).mkdir(parents=True, exist_ok=True)
     shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
+    host_binary_results = [
+        copy_host_binary_with_libs(root, name)
+        for name in (spec.get("host_binaries") or [])
+    ]
     for app in [
         "sh",
         "bash",
         "mount",
         "umount",
         "cat",
+        "cut",
         "grep",
         "awk",
         "mknod",
         "poweroff",
+        "rm",
         "echo",
         "sleep",
         "find",
@@ -215,6 +259,8 @@ def make_initramfs(out_dir: Path, install_dir: Path, spec: dict[str, Any]) -> Pa
         "chmod",
         "id",
         "seq",
+        "wc",
+        "which",
         "modprobe",
         "rmmod",
         "swapon",
@@ -245,6 +291,10 @@ else
 fi
 poweroff -f
 """
+    if host_binary_results:
+        init_lines = init.splitlines()
+        init_lines.insert(1, "echo DRIVER_AGENT_HOST_BINARIES " + json.dumps(host_binary_results).replace("'", "'\"'\"'"))
+        init = "\n".join(init_lines) + "\n"
     write_text(root / "init", init)
     os.chmod(root / "init", 0o755)
     initrd = out_dir / "initramfs.cpio.gz"
@@ -271,8 +321,14 @@ def run_qemu(kernel_tree: Path, initrd: Path, out_dir: Path, timeout_sec: int) -
     res = run(cmd, cwd=kernel_tree, timeout=timeout_sec)
     text = (res.get("stdout") or "") + "\n" + (res.get("stderr") or "")
     res["success_marker"] = "DRIVER_AGENT_QEMU_KSELFTEST_PASS" in text
-    res["failure_marker"] = "DRIVER_AGENT_QEMU_KSELFTEST_FAIL" in text
-    res["ok"] = bool(res["success_marker"])
+    failure_lines = [
+        line
+        for line in text.splitlines()
+        if re.search(r"(^|\s)(FAIL|not ok|\[FAIL\])(\s|:|$)", line)
+    ]
+    res["failure_marker"] = "DRIVER_AGENT_QEMU_KSELFTEST_FAIL" in text or bool(failure_lines)
+    res["failure_lines"] = failure_lines[:20]
+    res["ok"] = bool(res["success_marker"]) and not bool(res["failure_marker"])
     write_text(out_dir / "qemu_output.txt", text)
     return res
 

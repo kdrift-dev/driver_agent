@@ -110,15 +110,41 @@ Report metrics separately:
 - kselftest/QEMU result when available.
 - Manual verdict for curated mini dataset cases.
 
+## Runtime Test Generation Policy
+
+LLM-generated driver tests are disabled by default and are not part of the
+paper-facing workflow or correctness story.
+
+Default runtime validation may use:
+
+- existing in-tree kselftest targets,
+- existing KUnit targets,
+- deterministic module-load/interface-smoke scripts for virtual/software drivers,
+- caller-provided explicit OOT QEMU scripts.
+
+LLM-generated test scripts may be enabled only for private/debug exploration
+with `--enable-llm-test-generation`. Results from that mode must be reported
+separately and must not be used as a primary correctness metric.
+
+Rationale:
+
+- Linux driver tests often require hardware, firmware, device tree/ACPI setup,
+  device nodes, mounted filesystems, or subsystem-specific orchestration.
+- LLM-generated scripts can be plausible but non-executable or can test only a
+  superficial load/unload path.
+- Paper-facing validation should prefer deterministic or existing tests whose
+  scope can be audited.
+
 ## QEMU Dynamic Validation Scope
 
 QEMU-based dynamic validation is strong evidence only when the driver exposes
 the migrated behavior through virtual or software-visible interfaces.
 
-For virtual or software-only drivers, Driver-Agent can generate and execute
-in-guest QEMU tests against sysfs, procfs, debugfs, configfs, character-device,
-netdev, block-device, or kselftest-visible interfaces. In that setting, a QEMU
-test can provide strong functional evidence for the exercised interface.
+For virtual or software-only drivers, Driver-Agent can execute existing
+kselftest/KUnit targets or deterministic/explicit in-guest QEMU checks against
+sysfs, procfs, debugfs, configfs, character-device, netdev, block-device, or
+kselftest-visible interfaces. In that setting, a QEMU test can provide strong
+functional evidence for the exercised interface.
 
 For hardware-dependent drivers, QEMU validation usually provides only smoke
 evidence, such as load/unload, dmesg regression scanning, or basic sysfs
@@ -229,6 +255,24 @@ Unsafe claims until further evidence exists:
 - Commit messages are part of the default agent input.
 - Source-compatible semantic modernization is treated as required repair.
 - Two-agent architecture or sub-second latency is necessary.
+
+## Related-Work Baseline Boundary: MigGPT
+
+MigGPT is related but not an isomorphic baseline for the default Driver-Agent task.
+
+Observed input difference from the public MigGPT repository:
+
+- MigGPT benchmark rows contain `s_old`, `s_old_p`, `file_new`, `s_new_gt*`, and `s_new_p_gt*`.
+- The migration prompt explicitly provides the old code snippet and the corresponding patched old snippet.
+- Therefore MigGPT solves a patch-migration problem: migrate an existing old patch onto a new kernel snippet.
+- Driver-Agent's default task starts earlier: infer the needed driver update from old target source plus old/new kernel evidence, without an existing target patch.
+
+Paper-facing policy:
+
+- Treat MigGPT as closely related/complementary work, especially for OOT kernel patch migration.
+- Do not use MigGPT as the main direct baseline unless the experiment is explicitly reframed as old-patch migration.
+- If a sanity comparison is included, report the input boundary clearly and do not mix it with Driver-Agent's default source-only/evidence-grounded setting.
+- Do not feed `s_old_p`, `s_new_gt*`, or `s_new_p_gt*` into Driver-Agent runs, because these correspond to old-patch/reference-patch information outside the default input boundary.
 
 ## Open Decisions
 

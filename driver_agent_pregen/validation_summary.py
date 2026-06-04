@@ -219,10 +219,8 @@ def _level1_build(validation: dict[str, Any], stages: dict[str, dict[str, Any]])
 def _level2_runtime(validation: dict[str, Any], stages: dict[str, dict[str, Any]]) -> dict[str, Any]:
     suite_status, suite_ev = _real_suite_status(validation, stages)
     qemu_status, qemu_ev = _real_qemu_status(validation, stages)
-    test_generation_status = _map_stage_status(stages.get("test_generation", {}).get("status"))
-    if test_generation_status == FAIL:
-        runtime_status = FAIL
-    elif suite_status == FAIL or qemu_status == FAIL:
+    test_selection_status = _map_stage_status(stages.get("test_generation", {}).get("status"))
+    if suite_status == FAIL or qemu_status == FAIL:
         runtime_status = FAIL
     elif PASS in {suite_status, qemu_status}:
         runtime_status = PASS
@@ -232,10 +230,15 @@ def _level2_runtime(validation: dict[str, Any], stages: dict[str, dict[str, Any]
         runtime_status = UNKNOWN
     checks = [
         {
-            "id": "L2-TEST-GENERATION",
-            "name": "system_test_generation",
-            "status": test_generation_status,
-            "evidence": {"stage": stages.get("test_generation", {}), "parse_status": (validation.get("test_generation") or {}).get("parse_status")},
+            "id": "L2-RUNTIME-TEST-SELECTION",
+            "name": "deterministic_or_explicit_runtime_test_selection",
+            "status": test_selection_status,
+            "evidence": {
+                "stage": stages.get("test_generation", {}),
+                "parse_status": (validation.get("test_generation") or {}).get("parse_status"),
+                "generator": (validation.get("test_generation") or {}).get("generator"),
+            },
+            "non_gating": True,
         },
         {"id": "L2-SUITE-EXECUTION", "name": "suite_execution_real_run", "status": suite_status, "evidence": suite_ev},
         {"id": "L2-QEMU-EXECUTION", "name": "qemu_or_kunit_execution_real_run", "status": qemu_status, "evidence": qemu_ev},
@@ -244,7 +247,7 @@ def _level2_runtime(validation: dict[str, Any], stages: dict[str, dict[str, Any]
         "level": 2,
         "name": "runtime_hooks",
         "status": runtime_status,
-        "proves": "Only that generated runtime hooks executed successfully when real suite/QEMU runs occurred.",
+        "proves": "Only that deterministic/explicit runtime hooks executed successfully when real suite/QEMU runs occurred.",
         "does_not_prove": "Hardware-dependent probe/IRQ/PM paths unless the test actually exercises that hardware path.",
         "checks": checks,
     }

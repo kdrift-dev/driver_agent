@@ -517,6 +517,90 @@ def _extract_diagnostic_source_paths(
     return out[:max_files]
 
 
+def _extract_diagnostic_source_refs(
+    *,
+    repair_context: dict[str, Any],
+    extracted_dir: Path,
+    module_path: str,
+    max_refs: int = 24,
+) -> list[tuple[str, int]]:
+    texts: list[str] = []
+    for run in ((repair_context.get("compile") or {}).get("failed_runs", []) or []):
+        texts.append(str(run.get("stderr", "") or ""))
+        texts.append(str(run.get("stdout", "") or ""))
+    for run in ((repair_context.get("compile") or {}).get("prepare_failures", []) or []):
+        texts.append(str(run.get("stderr", "") or ""))
+        texts.append(str(run.get("stdout", "") or ""))
+
+    root = extracted_dir / "old_module_sources"
+    module_root = root / module_path
+    by_basename: dict[str, list[str]] = defaultdict(list)
+    if module_root.exists():
+        for p in module_root.rglob("*"):
+            if p.is_file() and p.suffix.lower() in {".c", ".h", ".rs"}:
+                by_basename[p.name].append(p.relative_to(root).as_posix())
+
+    out: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    diag_re = re.compile(
+        r"(?P<path>(?:drivers/[A-Za-z0-9_./+\-]+|[A-Za-z0-9_+\-.]+)\.(?:c|h|rs)):"
+        r"(?P<line>\d+):(?:\d+:)?\s+(?:fatal\s+)?(?:error|warning):"
+    )
+    for text in texts:
+        for m in diag_re.finditer(text):
+            raw_path = m.group("path")
+            line_no = int(m.group("line"))
+            rels: list[str] = []
+            if raw_path.startswith("drivers/") and raw_path.startswith(module_path.rstrip("/") + "/") and (root / raw_path).exists():
+                rels = [raw_path]
+            else:
+                rels = by_basename.get(Path(raw_path).name, [])
+            for rel in rels:
+                key = (rel, line_no)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(key)
+                if len(out) >= max_refs:
+                    return out
+    return out
+
+
+def _extract_source_window(
+    *,
+    extracted_dir: Path,
+    rel_file: str,
+    center_line: int,
+    with_line_numbers: bool,
+    before: int = 35,
+    after: int = 45,
+) -> dict[str, Any] | None:
+    src_path = extracted_dir / "old_module_sources" / rel_file
+    if not src_path.exists() or not src_path.is_file():
+        return None
+    lines = read_text(src_path).splitlines()
+    if not lines:
+        return None
+    center = max(1, min(int(center_line), len(lines)))
+    start = max(1, center - before)
+    end = min(len(lines), center + after)
+    raw_text = "\n".join(lines[start - 1 : end])
+    content = _render_with_line_numbers(raw_text, start_line=start) if with_line_numbers else raw_text
+    return {
+        "path": rel_file,
+        "start_line": start,
+        "end_line": end,
+        "diagnostic_line": center,
+        "content": content,
+        "source_item_kind": "diagnostic_failure_window",
+        "editable": True,
+        "edit_scope": "edit_candidate",
+        "roles": ["compile_failure_diagnostic_context"],
+        "candidate_reasons": [f"compile diagnostic points to {rel_file}:{center}"],
+        "context_reasons": [],
+    }
+
+
 def _load_repair_diagnostic_sources(
     *,
     extracted_dir: Path,
@@ -526,11 +610,60 @@ def _load_repair_diagnostic_sources(
     max_chars_per_file: int = 12000,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
+    seen_items: set[tuple[str, str, int, int]] = set()
+    ranges = _load_function_ranges(extracted_dir)
+    for rel, line_no in _extract_diagnostic_source_refs(
+        repair_context=repair_context,
+        extracted_dir=extracted_dir,
+        module_path=module_path,
+    ):
+        added = False
+        for fn in ranges.get(rel, []) or []:
+            start = int(fn.get("start_line") or 0)
+            end = int(fn.get("end_line") or 0)
+            if start <= line_no <= end:
+                block = _extract_function_block(
+                    extracted_dir=extracted_dir,
+                    fn_name=str(fn.get("function") or ""),
+                    rel_file=rel,
+                    start_line=start,
+                    end_line=end,
+                    roles=["compile_failure_diagnostic_context"],
+                    with_line_numbers=with_line_numbers,
+                    max_chars_per_block=24000,
+                )
+                if block:
+                    block["source_item_kind"] = "diagnostic_failure_function"
+                    block["editable"] = True
+                    block["edit_scope"] = "edit_candidate"
+                    block["candidate_reasons"] = [f"compile diagnostic points to {rel}:{line_no} inside {fn.get('function')}"]
+                    block["context_reasons"] = []
+                    key = (rel, str(fn.get("function") or ""), start, end)
+                    if key not in seen_items:
+                        out.append(block)
+                        seen_items.add(key)
+                    added = True
+                break
+        if not added:
+            window = _extract_source_window(
+                extracted_dir=extracted_dir,
+                rel_file=rel,
+                center_line=line_no,
+                with_line_numbers=with_line_numbers,
+            )
+            if window:
+                key = (rel, "diagnostic_window", int(window["start_line"]), int(window["end_line"]))
+                if key not in seen_items:
+                    out.append(window)
+                    seen_items.add(key)
+
     for rel in _extract_diagnostic_source_paths(
         repair_context=repair_context,
         extracted_dir=extracted_dir,
         module_path=module_path,
     ):
+        if any(item.get("path") == rel for item in out):
+            continue
         p = extracted_dir / "old_module_sources" / rel
         if not p.exists():
             continue
@@ -868,6 +1001,72 @@ def _json_size(data: Any) -> int:
     return len(json.dumps(data, ensure_ascii=False))
 
 
+def _source_item_dedupe_key(item: dict[str, Any]) -> tuple[str, str, str, int, int]:
+    return (
+        str(item.get("path", "") or ""),
+        str(item.get("source_item_kind", "") or ""),
+        str(item.get("function") or item.get("name") or ""),
+        int(item.get("start_line") or item.get("diagnostic_line") or 0),
+        int(item.get("end_line") or item.get("diagnostic_line") or 0),
+    )
+
+
+def _source_item_priority(item: dict[str, Any]) -> tuple[int, str, int, int]:
+    kind = str(item.get("source_item_kind", "") or "")
+    scope = str(item.get("edit_scope", "") or "")
+    editable = bool(item.get("editable"))
+    if kind == "diagnostic_failure_function":
+        rank = 0
+    elif kind == "diagnostic_failure_window":
+        rank = 1
+    elif kind == "diagnostic_failure_file":
+        rank = 2
+    elif scope == "edit_required":
+        rank = 3
+    elif scope == "edit_candidate" or editable:
+        rank = 4
+    elif kind == "file_include_block":
+        rank = 5
+    elif kind == "context_function_block":
+        rank = 6
+    else:
+        rank = 7
+    return (
+        rank,
+        str(item.get("path", "") or ""),
+        int(item.get("start_line") or item.get("diagnostic_line") or 0),
+        int(item.get("end_line") or item.get("diagnostic_line") or 0),
+    )
+
+
+def _prioritize_patch_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(sources, key=_source_item_priority)
+
+
+def _compact_source_content(content: str, *, max_chars: int) -> tuple[str, bool]:
+    if len(content) <= max_chars:
+        return content, False
+    if max_chars < 1200:
+        return content[:max_chars] + "\n...[truncated_by_patch_input_budget]", True
+
+    head_budget = int(max_chars * 0.68)
+    tail_budget = int(max_chars * 0.22)
+    head = content[:head_budget].rstrip()
+    tail = content[-tail_budget:].lstrip()
+    marker = f"\n...[middle_truncated_by_patch_input_budget original_chars={len(content)}]...\n"
+    return head + marker + tail, True
+
+
+def _source_content_cap(item: dict[str, Any]) -> int:
+    kind = str(item.get("source_item_kind", "") or "")
+    editable = bool(item.get("editable"))
+    if kind in {"file_preamble_block", "diagnostic_failure_file"}:
+        return 5200
+    if editable or kind in {"diagnostic_failure_function", "diagnostic_failure_window"}:
+        return 4600
+    return 2600
+
+
 def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: int) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply last-mile prompt-budget trimming without changing evidence sources.
 
@@ -879,27 +1078,42 @@ def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: 
     payload = dict(input_payload)
     notes: list[str] = []
     initial_size = _json_size(payload)
-    if initial_size <= budget_chars:
-        return payload, {"initial_chars": initial_size, "final_chars": initial_size, "budget_chars": budget_chars, "trimmed": False, "notes": []}
 
-    sources = list(payload.get("old_module_sources") or [])
+    # Always cap very large source blocks. OOT focused slices can remain below
+    # the global budget while still being too noisy for model/provider behavior.
+    sources = _prioritize_patch_sources(list(payload.get("old_module_sources") or []))
+    if sources:
+        compacted = 0
+        for item in sources:
+            content = str(item.get("content", "") or "")
+            new_content, changed = _compact_source_content(content, max_chars=_source_content_cap(item))
+            if changed:
+                item["content"] = new_content
+                compacted += 1
+        payload["old_module_sources"] = sources
+        if compacted:
+            notes.append(f"compacted_source_blocks={compacted}")
+
+    after_block_compaction = _json_size(payload)
+    if after_block_compaction <= budget_chars:
+        return payload, {
+            "initial_chars": initial_size,
+            "final_chars": after_block_compaction,
+            "budget_chars": budget_chars,
+            "trimmed": bool(notes),
+            "notes": notes,
+        }
+
     if len(sources) > 32:
-        editable = [x for x in sources if bool(x.get("editable"))]
-        readonly = [x for x in sources if not bool(x.get("editable"))]
+        editable = _prioritize_patch_sources([x for x in sources if bool(x.get("editable"))])
+        readonly = _prioritize_patch_sources([x for x in sources if not bool(x.get("editable"))])
         payload["old_module_sources"] = editable[:28] + readonly[:4]
         notes.append(f"trimmed old_module_sources {len(sources)} -> {len(payload['old_module_sources'])}")
         sources = list(payload.get("old_module_sources") or [])
 
-    for item in sources:
-        content = str(item.get("content", "") or "")
-        if len(content) > 6000:
-            item["content"] = content[:6000] + "\n...[truncated_by_patch_input_budget]"
-    if sources:
-        notes.append("capped source block content at 6000 chars")
-
     # Drop read-only context entirely if the payload is still too large.
     if _json_size(payload) > budget_chars and sources:
-        editable = [x for x in sources if bool(x.get("editable"))]
+        editable = _prioritize_patch_sources([x for x in sources if bool(x.get("editable"))])
         payload["old_module_sources"] = editable[:24]
         notes.append(f"removed read-only old_module_sources; kept editable={len(payload['old_module_sources'])}")
 
@@ -1093,6 +1307,44 @@ def _compile_failure_edit_scope_keys(
                 for fn in ranges.get(rel, []):
                     if int(fn["start_line"]) <= line_no <= int(fn["end_line"]):
                         out.add((rel, str(fn["function"])))
+    return out
+
+
+def _previous_patch_edit_scope_keys(
+    *,
+    previous_patch_generation: dict[str, Any] | None,
+    run_dir: Path,
+    extracted_dir: Path,
+) -> set[tuple[str, str]]:
+    """Allow repair prompts to preserve previously accepted edits.
+
+    Repair candidates are complete replacement patches against the original old
+    source, not incremental patches on top of the previous attempt. Therefore a
+    later repair may need to re-emit hunks from a previous non-noop candidate.
+    Those functions must remain editable, otherwise the edit-scope policy can
+    reject the very edits required to preserve earlier compile fixes.
+    """
+
+    if not previous_patch_generation:
+        return set()
+    cand = _selected_candidate(previous_patch_generation)
+    patch_rel = cand.get("fixed_patch_path") or cand.get("raw_patch_path")
+    if not patch_rel:
+        return set()
+    patch_path = run_dir / str(patch_rel)
+    if not patch_path.exists():
+        return set()
+    patch_text = read_text(patch_path)
+    if not _has_effective_changes(patch_text):
+        return set()
+    out: set[tuple[str, str]] = set()
+    for item in _parse_touched_function_scopes(patch_text, extracted_dir):
+        if item.get("scope_kind") != "function":
+            continue
+        rel_file = str(item.get("file", "") or "").strip()
+        fn = str(item.get("function", "") or "").strip()
+        if rel_file and fn:
+            out.add((rel_file, fn))
     return out
 
 
@@ -1447,6 +1699,82 @@ def _requires_effective_patch(compatibility_obligations: dict[str, Any]) -> bool
     return False
 
 
+def _decode_jsonish_string_prefix(text: str, start: int) -> str:
+    """Decode a JSON string body from ``text[start:]`` even if the JSON is cut off.
+
+    Some providers occasionally return a syntactically invalid JSON object while
+    still embedding a usable unified diff in the ``patch_diff`` string. This
+    helper only decodes the string prefix; it does not try to treat the whole
+    response as valid JSON.
+    """
+
+    out: list[str] = []
+    i = start
+    while i < len(text):
+        ch = text[i]
+        if ch == '"':
+            break
+        if ch == "\\":
+            i += 1
+            if i >= len(text):
+                break
+            esc = text[i]
+            if esc == "n":
+                out.append("\n")
+            elif esc == "t":
+                out.append("\t")
+            elif esc == "r":
+                out.append("\r")
+            elif esc == '"':
+                out.append('"')
+            elif esc == "\\":
+                out.append("\\")
+            else:
+                out.append(esc)
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _extract_malformed_patch_candidates(raw_text: str) -> list[dict[str, Any]]:
+    """Best-effort extraction for malformed JSON responses containing patch_diff."""
+
+    if not raw_text or "patch_diff" not in raw_text:
+        return []
+    m = re.search(r'"patch_diff"\s*:\s*"', raw_text)
+    if not m:
+        return []
+    patch = _decode_jsonish_string_prefix(raw_text, m.end())
+    patch = _extract_diff_text(patch)
+    if not _has_effective_changes(patch):
+        return []
+
+    cid = "CAND-MALFORMED-JSON-001"
+    cid_m = re.search(r'"candidate_id"\s*:\s*"([^"]+)"', raw_text)
+    if cid_m:
+        cid = cid_m.group(1)
+    strategy = ""
+    strategy_m = re.search(r'"strategy"\s*:\s*"([^"]+)"', raw_text)
+    if strategy_m:
+        strategy = strategy_m.group(1)
+    rationale = "salvaged patch_diff from malformed JSON response"
+    rationale_m = re.search(r'"rationale"\s*:\s*"([^"]+)"', raw_text)
+    if rationale_m:
+        rationale = rationale_m.group(1)
+    touched = _list_touched_files_from_patch(patch)
+    return [
+        {
+            "candidate_id": cid,
+            "strategy": strategy or "salvaged_malformed_json_patch_diff",
+            "rationale": rationale,
+            "touched_files": touched,
+            "patch_diff": patch,
+            "salvaged_from_malformed_json": True,
+        }
+    ]
+
+
 def _required_symbol_keys(compatibility_obligations: dict[str, Any]) -> set[str]:
     keys: set[str] = set()
     for item in compatibility_obligations.get("obligations", []) or []:
@@ -1668,15 +1996,13 @@ def run_patch_generation_agent(
             with_line_numbers=bool(source_with_line_numbers),
         )
         if diagnostic_sources:
-            seen_source_keys = {
-                (str(item.get("path", "")), str(item.get("source_item_kind", "")))
-                for item in old_sources
-            }
+            seen_source_keys = {_source_item_dedupe_key(item) for item in old_sources}
             for item in diagnostic_sources:
-                key = (str(item.get("path", "")), str(item.get("source_item_kind", "")))
+                key = _source_item_dedupe_key(item)
                 if key not in seen_source_keys:
                     old_sources.append(item)
                     seen_source_keys.add(key)
+            old_sources = _prioritize_patch_sources(old_sources)
 
     if generation_mode == "agent":
         if deterministic_noop:
@@ -1880,6 +2206,15 @@ def run_patch_generation_agent(
         )
 
     raw_candidates = _extract_raw_candidates(llm_output)
+    if not raw_candidates and str(llm_output.get("parse_status", "")).lower() == "failed":
+        malformed_candidates = _extract_malformed_patch_candidates(read_text(stage_dir / "raw_output.txt"))
+        if malformed_candidates:
+            raw_candidates = malformed_candidates
+            llm_output["parse_status"] = "salvaged_malformed_json_patch_diff"
+            notes = list(llm_output.get("module_level_notes", []) or [])
+            notes.append("salvaged patch_diff from malformed JSON response for validation/repair")
+            llm_output["module_level_notes"] = notes
+            write_json(stage_dir / "parsed_output.json", llm_output)
     normalized: list[dict[str, Any]] = []
     policy_rejections: list[dict[str, Any]] = []
     rejected_noop_candidates: list[dict[str, Any]] = []
@@ -1889,6 +2224,12 @@ def run_patch_generation_agent(
         repair_context=repair_context,
         extracted_dir=extracted_dir,
     ) if is_repair else set()
+    if is_repair:
+        repair_extra_edit_keys |= _previous_patch_edit_scope_keys(
+            previous_patch_generation=previous_patch_generation,
+            run_dir=run_dir,
+            extracted_dir=extracted_dir,
+        )
 
     for idx, cand in enumerate(raw_candidates[:max_candidates], start=1):
         raw_cid = cand.get("candidate_id") or f"CAND-{idx:03d}"
@@ -2292,6 +2633,62 @@ def run_patch_generation_agent(
                 "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
                 "line_fix_ok": bool(keep.get("line_fix_ok", True)),
                 "line_fix_messages": line_fix_messages,
+                "no_op_candidate": True,
+                "policy_fallback": True,
+            }
+        )
+
+    # If the first patch-generation LLM call fails to produce any candidate for
+    # a case with required edits, keep an explicit no-op candidate for
+    # validation continuity. This is not accepted as a final patch; it allows
+    # compile diagnostics to drive the repair iterations instead of skipping the
+    # whole validation path.
+    if (
+        not normalized
+        and generation_mode == "agent"
+        and not is_repair
+        and effective_patch_required
+        and str(llm_output.get("parse_status", "")).lower() in {"failed", "input_budget_exceeded"}
+    ):
+        cid = "CAND-LLM-FAILED-NOOP-VALIDATION-001"
+        cdir = patch_runs_dir / cid.lower()
+        cdir.mkdir(parents=True, exist_ok=True)
+        raw_path = cdir / "01_raw_patch.diff"
+        fixed_path = cdir / "02_fixed_patch.diff"
+        write_text(raw_path, "")
+        write_text(fixed_path, "")
+        touched = _list_module_source_paths(extracted_dir, module_path)
+        fix_report = {
+            "candidate_id": cid,
+            "raw_patch_nonempty": False,
+            "line_fix_ok": True,
+            "messages": [
+                "llm_failed_or_over_budget; keeping_noop_candidate_for_validation_repair_continuity"
+            ],
+            "touched_files": touched,
+            "no_op_candidate": True,
+            "policy_fallback": True,
+        }
+        write_json(cdir / "patch_fix_report.json", fix_report)
+        normalized.append(
+            {
+                "candidate_id": cid,
+                "strategy": "validation_continuity_noop_after_llm_failure",
+                "rationale": "Patch LLM produced no usable candidate, but required edits exist; run no-op validation to collect compile diagnostics for repair.",
+                "evidence": [
+                    f"patch_generation.parse_status={llm_output.get('parse_status', '')}",
+                    "effective_patch_required=true",
+                ],
+                "open_questions": [
+                    "This no-op is a repair trigger only and is not a valid migration patch."
+                ],
+                "touched_files": touched,
+                "raw_patch_path": raw_path.relative_to(run_dir).as_posix(),
+                "fixed_patch_path": fixed_path.relative_to(run_dir).as_posix(),
+                "line_fix_ok": True,
+                "line_fix_messages": [
+                    "llm_failed_or_over_budget; keeping_noop_candidate_for_validation_repair_continuity"
+                ],
                 "no_op_candidate": True,
                 "policy_fallback": True,
             }

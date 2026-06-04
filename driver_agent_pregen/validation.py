@@ -247,6 +247,7 @@ def _generate_system_tests(
     impact_graph: dict[str, Any],
     compile_result: dict[str, Any],
     dry_run: bool,
+    enable_llm_test_generation: bool,
 ) -> dict[str, Any]:
     stage_dir = llm_calls_dir / "05_system_test_generation"
     stage_dir.mkdir(parents=True, exist_ok=True)
@@ -270,6 +271,33 @@ def _generate_system_tests(
         write_text(stage_dir / "raw_output.txt", "")
         write_json(stage_dir / "parsed_output.json", deterministic)
         return deterministic
+
+    if not enable_llm_test_generation:
+        skipped = {
+            "case_id": case_id,
+            "stage": "system_test_generation",
+            "parse_status": "skipped_llm_disabled",
+            "generator": "none",
+            "test_cases": [],
+            "suite_commands": [],
+            "notes": [
+                "LLM-generated driver tests are disabled by default.",
+                "No deterministic kselftest/KUnit/QEMU hook is registered for this module.",
+            ],
+        }
+        write_text(stage_dir / "prompt.md", "")
+        write_json(
+            stage_dir / "input.json",
+            {
+                "case_id": case_id,
+                "module_path": module_path,
+                "stage": "system_test_generation",
+                "reason": "llm_test_generation_disabled_by_default",
+            },
+        )
+        write_text(stage_dir / "raw_output.txt", "")
+        write_json(stage_dir / "parsed_output.json", skipped)
+        return skipped
 
     input_payload = {
         "case_id": case_id,
@@ -556,7 +584,7 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
                 "--target zram "
                 "--out-dir ../kselftest_qemu/zram "
                 "--jobs 8 "
-                "--timeout-sec 900"
+                "--timeout-sec 300"
             )
             cases = [
                 {
@@ -567,7 +595,7 @@ def _deterministic_system_tests(*, case_id: str, module_path: str) -> dict[str, 
                     "preconditions": ["qemu-system-x86_64, busybox, cpio, and gcc are available on the host."],
                     "steps": [{"cmd": cmd, "why": "Executes the zram selftest in a generated initramfs instead of on the host."}],
                     "assertions": ["runner exits successfully and prints DRIVER_AGENT_QEMU_KSELFTEST_PASS"],
-                    "timeout_sec": 900,
+                    "timeout_sec": 300,
                     "skip_if": ["QEMU or required host build tools unavailable"],
                     "artifacts": ["worktrees/kselftest_qemu/zram/result.json", "worktrees/kselftest_qemu/zram/qemu_output.txt"],
                 }
@@ -1006,6 +1034,13 @@ _UNUSED_VAR_RE = re.compile(
 _MISSING_HEADER_RE = re.compile(
     r"(?P<file>[^:\n]+\.[ch]):(?P<line>\d+):(?P<col>\d+):\s+fatal error:\s+(?P<header>[^:\s]+):\s+No such file or directory"
 )
+_IMPLICIT_DECL_RE = re.compile(
+    r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+implicit declaration of function\s+[`'\u2018](?P<function>[A-Za-z_][A-Za-z0-9_]*)['\u2019`]"
+)
+_IMPLICIT_DECL_HEADER_MAP = {
+    "bin2hex": "linux/hex.h",
+    "hex2bin": "linux/hex.h",
+}
 _IIO_DEVICE_ALLOC_TOO_FEW_ARGS_RE = re.compile(
     r"(?P<file>[^:\n]+\.c):(?P<line>\d+):(?P<col>\d+):\s+error:\s+too few arguments to function\s+[`'\u2018]iio_device_alloc['\u2019`]"
 )
@@ -1216,6 +1251,45 @@ def _replace_header_include_in_trees(
         write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
     result["applied"] = True
     result["reason"] = "replaced_missing_include_with_unique_existing_header"
+    return result
+
+
+def _ensure_header_include_in_trees(
+    old_tree: Path,
+    new_tree: Path,
+    rel: str,
+    line_no: int,
+    function: str,
+    header: str,
+) -> dict[str, Any]:
+    result = {
+        "file": rel,
+        "line": line_no,
+        "function": function,
+        "required_header": header,
+        "applied": False,
+        "reason": "",
+    }
+    include_line = f"#include <{header}>"
+    changed_any = False
+    for tree_name, tree in (("new", new_tree), ("old", old_tree)):
+        path = tree / rel
+        if not path.exists():
+            result["reason"] = f"{tree_name}_file_missing"
+            return result
+        text = read_text(path)
+        if include_line in text:
+            continue
+        lines = text.splitlines()
+        insert_at = 0
+        for idx, line in enumerate(lines[:120]):
+            if line.strip().startswith("#include"):
+                insert_at = idx + 1
+        lines.insert(insert_at, include_line)
+        write_text(path, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+        changed_any = True
+    result["applied"] = changed_any
+    result["reason"] = "added_required_include_for_implicit_declaration" if changed_any else "required_include_already_present"
     return result
 
 
@@ -1674,6 +1748,37 @@ def _apply_safe_compile_autofixes_once(
             )
         )
 
+    seen_implicit_decl: set[tuple[str, int, str]] = set()
+    for m in _IMPLICIT_DECL_RE.finditer(text):
+        function = m.group("function")
+        header = _IMPLICIT_DECL_HEADER_MAP.get(function)
+        rel = _resolve_compile_error_file(m.group("file"), candidates)
+        if not header or not rel:
+            changes.append(
+                {
+                    "file": m.group("file"),
+                    "line": int(m.group("line")),
+                    "function": function,
+                    "applied": False,
+                    "reason": "no_known_header_mapping" if not header else "could_not_resolve_unique_source_file",
+                }
+            )
+            continue
+        key = (rel, int(m.group("line")), function)
+        if key in seen_implicit_decl:
+            continue
+        seen_implicit_decl.add(key)
+        changes.append(
+            _ensure_header_include_in_trees(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                rel=rel,
+                line_no=int(m.group("line")),
+                function=function,
+                header=header,
+            )
+        )
+
     seen_iio_alloc: set[tuple[str, int]] = set()
     for m in _IIO_DEVICE_ALLOC_TOO_FEW_ARGS_RE.finditer(text):
         rel = _resolve_compile_error_file(m.group("file"), candidates)
@@ -2034,6 +2139,7 @@ def run_validation_agent(
     qemu_timeout_sec: int,
     skip_system_test_generation: bool,
     keep_worktrees: bool,
+    enable_llm_test_generation: bool = False,
     enable_host_suite: bool = False,
     kernel_config_target: str = "defconfig",
     kbuild_target: str | None = None,
@@ -2465,15 +2571,19 @@ def run_validation_agent(
             impact_graph=impact_graph,
             compile_result=compile_result,
             dry_run=dry_run,
+            enable_llm_test_generation=enable_llm_test_generation,
         )
         out["test_generation"] = test_gen
-        tg_status = "passed" if str(test_gen.get("parse_status", "")) == "ok" else "failed"
+        tg_parse_status = str(test_gen.get("parse_status", ""))
+        tg_status = "passed" if tg_parse_status == "ok" else "skipped" if tg_parse_status.startswith("skipped") else "failed"
         if tg_status == "passed":
             generator = str(test_gen.get("generator") or "")
             if generator == "deterministic_fallback":
-                tg_reason = "deterministic system test generated"
+                tg_reason = "deterministic runtime hook selected"
             else:
                 tg_reason = "llm test generation parsed"
+        elif tg_status == "skipped":
+            tg_reason = tg_parse_status
         else:
             tg_reason = test_gen.get("error") or f"parse_status={test_gen.get('parse_status')}"
         _set_stage_result(stage_results, "test_generation", tg_status, tg_reason)
@@ -2602,7 +2712,9 @@ def run_validation_agent(
     }
     _set_stage_result(stage_results, "spec_consistency", pr_status, pr_reason)
 
-    test_gen_ok = str(test_gen.get("parse_status", "")) == "ok"
+    test_gen_parse_status = str(test_gen.get("parse_status", ""))
+    test_gen_ok = test_gen_parse_status == "ok"
+    test_gen_intentionally_skipped = test_gen_parse_status.startswith("skipped")
     suite_has_real_run = bool(suite_runs) and not all_skipped
     # Runtime hooks are evidence, not a core pass/fail oracle. They are recorded
     # in validation_summary_v2 as PASS/FAIL/SKIPPED, but do not decide whether
@@ -2613,7 +2725,7 @@ def run_validation_agent(
     if not compile_result.get("success"):
         out["open_questions"].append("compile_not_success")
     if not skip_system_test_generation:
-        if not test_gen_ok:
+        if not test_gen_ok and not test_gen_intentionally_skipped:
             out["open_questions"].append("test_generation_not_success")
         if not suite_exec.get("success"):
             out["open_questions"].append("suite_execution_not_success")

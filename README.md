@@ -2,7 +2,7 @@
 
 `driver_agent_pregen` now supports both:
 - pre-generation migration analysis
-- patch generation + validation loop (apply, compile, post-reason, test generation, optional qemu command execution)
+- patch generation + validation loop (apply, compile, spec-consistency check, deterministic/existing runtime hooks when available)
 
 ## Scope
 
@@ -17,8 +17,8 @@ Implemented now:
   - stage patched files into new ref worktree
   - compile module directories
   - post-patch reasoner (`llm_calls/04_post_reasoner`) as stated-spec consistency check, not proof of correctness
-  - system test generation (`llm_calls/05_system_test_generation`)
-  - optional suite command execution / qemu-triggered command capture
+  - deterministic/existing runtime hook selection for known kselftest/KUnit/QEMU-smoke cases
+  - optional suite command execution / QEMU-triggered command capture when a deterministic or explicit hook exists
 
 ## Layout
 
@@ -147,8 +147,9 @@ analysis, patch generation, and validation unless they are explicitly selected.
   - synthetic replacement hints and case-specific patch fixups are also disabled by default and require private/debug environment flags.
 - `--enable-qemu`: allow validation stage to execute suite commands that invoke `kunit.py run` / `qemu-system-*`
 - `--qemu-timeout-sec SEC`: timeout for suite/qemu commands (default `3600`)
-- `--skip-system-test-generation`: skip LLM system-test generation and suite/qemu execution (still runs patch apply/compile/post-reasoning)
-- `--enable-host-suite`: explicitly run LLM-generated suite commands on the host. This is disabled by default because generated driver suites may contain `modprobe`, `mount`, suspend/resume, or hardware-specific operations. QEMU/KUnit execution only runs standalone `kunit.py run` / `qemu-system-*` commands.
+- `--skip-system-test-generation`: skip all runtime hook selection/execution, including deterministic kselftest/KUnit/QEMU hooks (still runs patch apply/compile/spec-consistency)
+- `--enable-llm-test-generation`: private/debug opt-in for LLM-generated in-tree system tests. This is disabled by default and should not be used as a paper-facing correctness signal.
+- `--enable-host-suite`: explicitly run generated suite commands on the host. This is disabled by default because generated driver suites may contain `modprobe`, `mount`, suspend/resume`, or hardware-specific operations. QEMU/KUnit execution only runs standalone deterministic or explicit runtime hooks.
 - `--cleanup-worktrees`: remove temporary old/new git worktrees after validation
 
 Out-of-tree QEMU validation:
@@ -156,11 +157,11 @@ Out-of-tree QEMU validation:
 - `--oot-pipeline-mode integrated`: route OOT source through the full Driver-Agent analysis/generation/validation pipeline.
 - `--oot-qemu-check-script PATH`: use a caller-provided in-QEMU shell script.
 - `--oot-qemu-test-mode {auto|custom|llm|default}`:
-  - `auto` (default): use custom script if provided, otherwise generate an LLM in-QEMU script when LLM is enabled, otherwise use deterministic fallback.
-  - `llm`: generate an in-QEMU script from patched OOT source and evidence; invalid scripts fall back to deterministic smoke.
+  - `auto` (default): use custom script if provided, otherwise use deterministic fallback. LLM script generation is considered only when `--enable-llm-test-generation` is explicitly set.
+  - `llm`: private/debug opt-in path to generate an in-QEMU script from patched OOT source and evidence; invalid scripts fall back to deterministic smoke.
   - `default`: deterministic load/unload or device-node smoke.
-- `--oot-qemu-test-level {load_unload|interface_smoke|semantic_scenario}`: request the depth of generated OOT runtime validation.
-- Generated OOT scripts are saved under `validation/oot_qemu_generated_check.sh` and their prompt/input/output under `llm_calls/05_oot_qemu_test_generation/`.
+- `--oot-qemu-test-level {load_unload|interface_smoke|semantic_scenario}`: request the depth of deterministic/custom OOT runtime validation.
+- LLM-generated OOT scripts, when explicitly enabled, are saved under `validation/oot_qemu_generated_check.sh` and their prompt/input/output under `llm_calls/05_oot_qemu_test_generation/`.
 
 FM-Agent-style specs:
 
@@ -182,7 +183,7 @@ runs/pregen/<case_id>/<timestamp>/
     02_pre_reasoner/
     03_patch_generation/
     04_post_reasoner/
-    05_system_test_generation/
+    05_system_test_generation/   # deterministic selection metadata; LLM generation is opt-in only
 
   patch_runs/
     <candidate_id>/
@@ -212,7 +213,7 @@ runs/pregen/<case_id>/<timestamp>/
 - Symbol scanning / call graph / callback extraction currently use regex-first heuristics.
 - The patch line fixer repairs hunk counts and attempts line-number alignment from old module sources.
 - Validation currently uses `make defconfig + olddefconfig + modules_prepare` before module compile.
-- In-tree QEMU execution depends on generated suite commands; if none include qemu/kunit run, qemu stage is reported but not actively booted. OOT integrated validation can generate and execute an in-guest initramfs script.
+- In-tree QEMU execution depends on deterministic/existing runtime hooks; if no kselftest/KUnit/QEMU hook is registered, qemu stage is reported but not actively booted. OOT integrated validation can execute a custom or deterministic in-guest initramfs script.
 - `validation_summary_v2.json` reports an evidence vector, not a single correctness oracle. `post_reasoning` is treated as `spec_consistency`: it checks whether the patch satisfies generated local specs/stated obligations, not whether the spec is complete.
 
 ## Validation Summary v2

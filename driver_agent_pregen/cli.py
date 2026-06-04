@@ -191,7 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--skip-system-test-generation",
         action="store_true",
-        help="skip LLM system-test generation and suite/qemu execution; keep patch apply/compile/post-reasoning",
+        help=(
+            "skip all system-test selection/execution, including deterministic kselftest/KUnit/QEMU hooks. "
+            "LLM-generated tests are disabled by default without this flag."
+        ),
+    )
+    p.add_argument(
+        "--enable-llm-test-generation",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--enable-host-suite",
@@ -230,8 +238,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help=(
             "OOT integrated QEMU script selection: custom uses --oot-qemu-check-script, "
-            "llm generates an in-guest script, default uses deterministic load/interface smoke, "
-            "auto prefers custom, then LLM when enabled, then default"
+            "llm generates an in-guest script only with --enable-llm-test-generation, "
+            "default uses deterministic load/interface smoke, "
+            "auto prefers custom, then explicitly-enabled LLM, then default"
         ),
     )
     oot.add_argument(
@@ -420,7 +429,17 @@ def _validation_feedback_for_repair(validation: dict[str, Any], iteration: int, 
             }
         )
     prepare_failures: list[dict[str, Any]] = []
-    for step in compile_payload.get("prepare_steps", []) or []:
+    prepare_steps_payload = compile_payload.get("prepare_steps", []) or []
+    if isinstance(prepare_steps_payload, dict):
+        prepare_steps_iter = []
+        for steps in prepare_steps_payload.values():
+            if isinstance(steps, list):
+                prepare_steps_iter.extend(steps)
+    else:
+        prepare_steps_iter = prepare_steps_payload
+    for step in prepare_steps_iter:
+        if not isinstance(step, dict):
+            continue
         if step.get("ok"):
             continue
         prepare_failures.append(
@@ -1056,40 +1075,143 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
 
     if oot_integrated:
         assert external_source_root is not None
-        validation = stage(
-            "09c_validation_agent",
-            lambda: run_oot_integrated_validation_agent(
-                accessor=accessor,
-                llm_client=llm_client,
-                llm_calls_dir=llm_calls_dir,
-                run_dir=run_dir,
-                case_id=case_id,
-                module_path=args.module_path,
-                external_source_root=external_source_root,
-                module_ko=args.oot_module_ko,
-                module_name=args.oot_module_name,
-                patch_generation_result=patch_generation,
-                context_packet=context_packet,
-                impact_graph=impact_graph,
-                compatibility_obligations=obligations,
-                dry_run=args.dry_run,
-                jobs=args.jobs,
-                enable_qemu=args.enable_qemu,
-                qemu_timeout_sec=args.qemu_timeout_sec,
-                qemu_check_script=args.oot_qemu_check_script,
-                qemu_test_mode=args.oot_qemu_test_mode,
-                qemu_test_level=args.oot_qemu_test_level,
-                qemu_device_node=args.oot_device_node,
-                qemu_write_data=args.oot_qemu_write_data,
-                qemu_expect_data=args.oot_qemu_expect_data,
-                make_extra_args=args.oot_make_extra_arg or [],
-                kernel_config_target=args.kernel_config_target,
-                kernel_config_options=args.oot_kernel_config or [],
-                kernel_module_dirs=args.oot_kernel_module_dir or [],
-                kernel_module_targets=args.oot_kernel_module or [],
-                keep_worktrees=not args.cleanup_worktrees,
-            ),
+        max_patch_iterations = max(
+            1,
+            int(args.max_patch_iterations or 1),
+            int(args.oot_max_patch_iterations or 1),
         )
+        repair_enabled = bool(
+            max_patch_iterations > 1
+            and args.enable_llm
+            and not args.dry_run
+            and not args.validation_patch_file
+        )
+        patch_iteration_records: list[dict[str, Any]] = []
+        validation: dict[str, Any] = {}
+        for patch_iteration in range(1, max_patch_iterations + 1):
+            validation_stage = (
+                "09c_oot_validation_agent"
+                if patch_iteration == 1
+                else f"09c_oot_validation_agent_iter_{patch_iteration:02d}"
+            )
+            validation = stage(
+                validation_stage,
+                lambda pg=patch_generation: run_oot_integrated_validation_agent(
+                    accessor=accessor,
+                    llm_client=llm_client,
+                    llm_calls_dir=llm_calls_dir,
+                    run_dir=run_dir,
+                    case_id=case_id,
+                    module_path=args.module_path,
+                    external_source_root=external_source_root,
+                    module_ko=args.oot_module_ko,
+                    module_name=args.oot_module_name,
+                    patch_generation_result=pg,
+                    context_packet=context_packet,
+                    impact_graph=impact_graph,
+                    compatibility_obligations=obligations,
+                    dry_run=args.dry_run,
+                    jobs=args.jobs,
+                    enable_qemu=args.enable_qemu,
+                    qemu_timeout_sec=args.qemu_timeout_sec,
+                    qemu_check_script=args.oot_qemu_check_script,
+                    qemu_test_mode=args.oot_qemu_test_mode,
+                    qemu_test_level=args.oot_qemu_test_level,
+                    qemu_device_node=args.oot_device_node,
+                    qemu_write_data=args.oot_qemu_write_data,
+                    qemu_expect_data=args.oot_qemu_expect_data,
+                    make_extra_args=args.oot_make_extra_arg or [],
+                    kernel_config_target=args.kernel_config_target,
+                    kernel_config_options=args.oot_kernel_config or [],
+                    kernel_module_dirs=args.oot_kernel_module_dir or [],
+                    kernel_module_targets=args.oot_kernel_module or [],
+                    keep_worktrees=not args.cleanup_worktrees,
+                    enable_llm_test_generation=args.enable_llm_test_generation,
+                ),
+            )
+            repair_reason = _validation_repair_reason(validation)
+            iter_record = _write_patch_iteration_snapshot(
+                run_dir=run_dir,
+                iteration=patch_iteration,
+                patch_generation=patch_generation,
+                validation=validation,
+                repair_reason=repair_reason,
+            )
+            patch_iteration_records.append(iter_record)
+            write_json(
+                run_dir / "patch_iterations.json",
+                {
+                    "max_patch_iterations": max_patch_iterations,
+                    "repair_enabled": repair_enabled,
+                    "iterations": patch_iteration_records,
+                },
+            )
+            metadata["patch_iterations"] = patch_iteration_records
+            write_json(run_dir / "metadata.json", metadata)
+
+            if not repair_reason:
+                break
+            if not repair_enabled:
+                iter_record["repair_skipped_reason"] = (
+                    "disabled: requires max patch iterations > 1, --enable-llm, "
+                    "no --dry-run, and no --validation-patch-file"
+                )
+                iter_record["will_repair"] = False
+                write_json(run_dir / "patch_iterations" / f"iter_{patch_iteration:02d}" / "iteration_result.json", iter_record)
+                patch_iteration_records[-1] = iter_record
+                write_json(
+                    run_dir / "patch_iterations.json",
+                    {
+                        "max_patch_iterations": max_patch_iterations,
+                        "repair_enabled": repair_enabled,
+                        "iterations": patch_iteration_records,
+                    },
+                )
+                break
+            if patch_iteration >= max_patch_iterations:
+                iter_record["repair_skipped_reason"] = "max_patch_iterations_reached"
+                iter_record["will_repair"] = False
+                write_json(run_dir / "patch_iterations" / f"iter_{patch_iteration:02d}" / "iteration_result.json", iter_record)
+                patch_iteration_records[-1] = iter_record
+                write_json(
+                    run_dir / "patch_iterations.json",
+                    {
+                        "max_patch_iterations": max_patch_iterations,
+                        "repair_enabled": repair_enabled,
+                        "iterations": patch_iteration_records,
+                    },
+                )
+                break
+
+            repair_context = _validation_feedback_for_repair(validation, patch_iteration, repair_reason)
+            previous_patch_generation = patch_generation
+            patch_generation = stage(
+                f"09b_oot_patch_repair_iter_{patch_iteration + 1:02d}",
+                lambda pg=previous_patch_generation, rc=repair_context, next_iter=patch_iteration + 1: run_patch_generation_agent(
+                    llm_client=llm_client,
+                    llm_calls_dir=llm_calls_dir,
+                    run_dir=run_dir,
+                    extracted_dir=extracted_dir,
+                    case_id=case_id,
+                    module_path=args.module_path,
+                    context_packet=context_packet,
+                    pre_reasoning=pre_reasoning,
+                    impact_graph=impact_graph,
+                    compatibility_obligations=obligations,
+                    dry_run=False,
+                    max_candidates=max(1, args.patch_candidates),
+                    prompt_strength=args.patch_prompt_strength,
+                    source_mode=args.patch_source_mode,
+                    source_with_line_numbers=bool(args.patch_source_with_lineno),
+                    patch_generation_mode=args.patch_generation_mode,
+                    old_ref=args.old_ref,
+                    new_ref=args.new_ref,
+                    kernel_definition_diffs=kernel_diffs,
+                    repair_iteration=next_iter,
+                    repair_context=rc,
+                    previous_patch_generation=pg,
+                ),
+            )
     else:
         max_patch_iterations = max(1, int(args.max_patch_iterations or 1))
         repair_enabled = bool(
@@ -1126,6 +1248,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
                     enable_qemu=args.enable_qemu,
                     qemu_timeout_sec=args.qemu_timeout_sec,
                     skip_system_test_generation=args.skip_system_test_generation,
+                    enable_llm_test_generation=args.enable_llm_test_generation,
                     enable_host_suite=args.enable_host_suite,
                     keep_worktrees=not args.cleanup_worktrees,
                     kernel_config_target=args.kernel_config_target,

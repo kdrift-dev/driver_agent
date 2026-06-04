@@ -1,0 +1,18 @@
+{
+  "dataset": "datasets/intree_hardbreak_20_v0",
+  "case_count": 20,
+  "unique_modules_or_repos": 4,
+  "max_code_loc": 3762,
+  "max_source_file_count": 18,
+  "by_module": {
+    "drivers/base/test": 3,
+    "drivers/iio/test": 3,
+    "drivers/block/zram": 8,
+    "drivers/iio/dummy": 6
+  },
+  "by_test_kind": {
+    "kunit": 6,
+    "qemu_kselftest": 8,
+    "qemu_smoke": 6
+  }
+}

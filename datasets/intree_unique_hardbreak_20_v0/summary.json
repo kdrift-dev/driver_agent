@@ -1,0 +1,22 @@
+{
+  "case_count": 20,
+  "unique_module_count": 20,
+  "by_case_type": {
+    "synthetic_driver": 2,
+    "production_driver": 14,
+    "kunit_test_module": 2,
+    "subsystem_core": 1,
+    "virtual_driver": 1
+  },
+  "by_validation_scope": {
+    "runtime_ready": 2,
+    "runtime_ready_test_unit": 2,
+    "kunit_partial": 1,
+    "kunit_stress": 1,
+    "compile_only_qemu_partial": 2,
+    "compile_only_hardware_limited": 11,
+    "compile_only_virtual_device_needed": 1
+  },
+  "max_code_loc": 3762,
+  "max_source_file_count": 18
+}

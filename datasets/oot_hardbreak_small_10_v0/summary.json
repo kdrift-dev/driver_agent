@@ -1,0 +1,17 @@
+{
+  "dataset": "datasets/oot_hardbreak_small_10_v0",
+  "case_count": 10,
+  "unique_modules_or_repos": 4,
+  "max_code_loc": 260,
+  "max_source_file_count": 3,
+  "by_repo": {
+    "https://github.com/PacktPublishing/Linux-Device-Drivers-Development": 2,
+    "https://github.com/d0u9/Linux-Device-Driver.git": 1,
+    "https://github.com/Embetronicx/Tutorials": 5,
+    "https://github.com/Johannes4Linux/Linux_Driver_Tutorial_legacy.git": 2
+  },
+  "by_failure_kind": {
+    "class_create_signature;signature_mismatch": 8,
+    "missing_function": 2
+  }
+}

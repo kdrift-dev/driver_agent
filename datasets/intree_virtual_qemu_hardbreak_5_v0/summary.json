@@ -1,0 +1,13 @@
+{
+  "primary_count": 5,
+  "backup_count": 1,
+  "target_new_ref": "v7.0",
+  "all_primary_have_p0_hardbreak_artifact": true,
+  "primary_validation_scopes": {
+    "qemu_interface": 2,
+    "qemu_kunit": 1,
+    "qemu_selftest": 2
+  },
+  "source_screen": "runs/virtual_device_target_screen_fixed_20260602_204049",
+  "note": "Primary cases are virtual/software device targets intended for QEMU validation. Runtime strength still varies by oracle."
+}

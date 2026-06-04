@@ -7,6 +7,8 @@ __pycache__/
 .runs/
 runs/
 external_repos/
+demo/
+tmp_*_probe/
 *.log
 
 # Env / local config

@@ -230,6 +230,7 @@ def prepare_qemu_module_tree(
         return {"ok": False, "reason": "kernelrelease_failed"}
     copied: list[str] = []
     build_runs: list[dict[str, Any]] = []
+    full_modules_fallback_done = False
 
     def copy_kernel_module(ko: Path) -> None:
         if not ko.exists():
@@ -243,9 +244,12 @@ def prepare_qemu_module_tree(
         target = target.strip().strip("/")
         if not target:
             continue
+        copied_before = len(copied)
         build = run(["make", "KBUILD_MODPOST_WARN=1", f"-j{jobs}", target], cwd=kernel_tree, timeout=3600)
-        build_runs.append(build | {"target": target})
+        build_runs.append(build | {"target": target, "nonfatal": True})
         copy_kernel_module(kernel_tree / target)
+        if len(copied) == copied_before:
+            build_runs.append({"ok": False, "reason": "dependency_target_no_ko", "target": target})
 
     for rel in dependency_module_dirs or []:
         rel = rel.strip().strip("/")
@@ -258,10 +262,42 @@ def prepare_qemu_module_tree(
         # For in-tree dependency dirs, directory targets reliably build the
         # modules selected by .config. `M=... modules` is intended primarily for
         # external module builds and may produce no .ko for some in-tree paths.
+        copied_before = len(copied)
         build = run(["make", "KBUILD_MODPOST_WARN=1", f"-j{jobs}", f"{rel}/"], cwd=kernel_tree, timeout=3600)
-        build_runs.append(build | {"dir": rel})
+        build_runs.append(build | {"dir": rel, "method": "path_target", "nonfatal": True})
         for ko in sorted(src_dir.rglob("*.ko")):
             copy_kernel_module(ko)
+        if build.get("ok") and len(copied) == copied_before:
+            # Some composite in-tree modules do not materialize through the
+            # path target form even though the directory build exits 0. Use
+            # the module-build interface as a conservative fallback before
+            # declaring the dependency unavailable for QEMU.
+            fallback = run(
+                ["make", "KBUILD_MODPOST_WARN=1", f"-j{jobs}", f"M={src_dir}", "modules"],
+                cwd=kernel_tree,
+                timeout=3600,
+            )
+            build_runs.append(fallback | {"dir": rel, "method": "M_modules_fallback", "nonfatal": True})
+            for ko in sorted(src_dir.rglob("*.ko")):
+                copy_kernel_module(ko)
+        if len(copied) == copied_before:
+            # If the in-tree directory still did not produce modules, fall
+            # back to the normal configured kernel module build once. This
+            # preserves in-tree Kbuild semantics for composite modules such as
+            # media/videodev, while still copying only the requested dirs into
+            # the guest module tree.
+            if not full_modules_fallback_done:
+                full = run(
+                    ["make", "KBUILD_MODPOST_WARN=1", f"-j{jobs}", "modules"],
+                    cwd=kernel_tree,
+                    timeout=7200,
+                )
+                build_runs.append(full | {"method": "full_modules_fallback", "nonfatal": True})
+                full_modules_fallback_done = True
+            for ko in sorted(src_dir.rglob("*.ko")):
+                copy_kernel_module(ko)
+        if len(copied) == copied_before:
+            build_runs.append({"ok": False, "reason": "dependency_dir_no_ko", "dir": rel})
     # Rebuild the OOT module after dependency modules have been built so
     # modpost can use Module.symvers and depmod can infer depends= entries.
     oot_rebuild = build_external(kernel_tree, oot_module_ko.parent, jobs, extra_make_args or [])
@@ -270,7 +306,7 @@ def prepare_qemu_module_tree(
     shutil.copy2(oot_module_ko, extra / oot_module_ko.name)
     depmod = run(["depmod", "-b", str(stage), krel], timeout=300)
     modules_root = stage / "lib" / "modules"
-    build_ok = all(bool(x.get("ok")) for x in build_runs) if build_runs else True
+    build_ok = all(bool(x.get("ok")) or bool(x.get("nonfatal")) for x in build_runs) if build_runs else True
     ok = build_ok and bool(oot_rebuild.get("ok")) and bool(depmod.get("ok"))
     return {
         "ok": ok,

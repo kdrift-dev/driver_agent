@@ -539,11 +539,34 @@ def _split_function_signature(sig: str, symbol: str) -> tuple[str, str] | None:
     return ret, params_norm
 
 
+def _split_macro_signature(sig: str, symbol: str) -> tuple[str, str] | None:
+    if not sig or not symbol:
+        return None
+    m = re.match(rf"^\s*#\s*define\s+{re.escape(symbol)}\s*(?:\((?P<params>[^)]*)\))?", sig)
+    if not m:
+        return None
+    params = m.group("params")
+    if params is None:
+        return "#define", ""
+    params_norm = _norm(",".join(_norm(p) for p in params.split(",")))
+    return "#define", params_norm
+
+
 def _function_signature_change_type(symbol: str, old_def: str, new_def: str, current_change_type: str) -> str:
     old_sig = _extract_function_signature(old_def, symbol)
     new_sig = _extract_function_signature(new_def, symbol)
     if not old_sig or not new_sig:
         if current_change_type == "signature_change":
+            return "unknown"
+        return current_change_type
+    if old_sig.lstrip().startswith("#define") or new_sig.lstrip().startswith("#define"):
+        old_parts = _split_macro_signature(old_sig, symbol)
+        new_parts = _split_macro_signature(new_sig, symbol)
+        if old_parts and new_parts and old_parts[1] != new_parts[1]:
+            return "signature_change"
+        # Macro body-only changes are kernel implementation/context evidence,
+        # not a source-level driver callsite signature change.
+        if current_change_type in {"signature_change", "return_value_change"}:
             return "unknown"
         return current_change_type
     if re.match(rf"^#\s*define\s+{re.escape(symbol)}\s*\(\s*\.\.\.\s*\)", new_sig):
@@ -1627,6 +1650,19 @@ def run_kernel_diff_builder(
         elif kind == "include" and old_exists != new_exists:
             definition_changed = True
 
+        # Function prototypes in kernel headers are commonly split across
+        # multiple lines. Some fallback locators record only the first matched
+        # line or the bare symbol name, so old_match_cmp/new_match_cmp can look
+        # unchanged even when a later parameter line changed. Compare the
+        # extracted signature block before downstream obligation construction.
+        signature_change_type = "unknown"
+        if kind == "function" and old_def and new_def:
+            signature_change_type = _function_signature_change_type(
+                str(symbol or ""), old_def, new_def, "unknown"
+            )
+            if signature_change_type in {"signature_change", "return_value_change"}:
+                definition_changed = True
+
         diff_text = ""
         if old_def or new_def:
             diff_lines = list(
@@ -1714,7 +1750,10 @@ def run_kernel_diff_builder(
         if not definition_changed and not (old_exists and not new_exists) and kind != "include":
             change_type = "unknown"
         if kind == "function" and definition_changed and old_def and new_def:
-            change_type = _function_signature_change_type(str(symbol or ""), old_def, new_def, change_type)
+            if signature_change_type in {"signature_change", "return_value_change"}:
+                change_type = signature_change_type
+            else:
+                change_type = _function_signature_change_type(str(symbol or ""), old_def, new_def, change_type)
         if kind == "function" and _signature_annotation_only(old_match_cmp, new_match_cmp):
             change_type = "annotation_only"
         # Conservative: table should mainly reinforce migration semantics (replacement signals),

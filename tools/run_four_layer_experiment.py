@@ -163,7 +163,11 @@ def old_source_files(repo: Path, old_ref: str, module_path: str, kbuild_target: 
                 f"--kbuild-target {kbuild_target!r} under {module_path!r} resolved no old source files; "
                 f"warnings={resolution.warnings}"
             )
-        return resolution.files
+        files = list(resolution.files)
+        for rel in [resolution.makefile_path, f"{module_path.rstrip('/')}/Kconfig"]:
+            if rel and accessor.path_exists("old", rel) and rel not in files:
+                files.append(rel)
+        return files
     files = git_lines(repo, ["ls-tree", "-r", "--name-only", old_ref, "--", module_path])
     return [p for p in files if Path(p).suffix in SOURCE_SUFFIXES]
 
@@ -203,6 +207,37 @@ def module_compile_cmd(module_dir: str, jobs: int, kbuild_target: str | None = N
         cmd.append("KBUILD_MODPOST_WARN=1")
     cmd.append(goal or "modules")
     return cmd
+
+
+def _kbuild_target_rule_missing(run: dict[str, Any]) -> bool:
+    text = (run.get("stdout") or "") + "\n" + (run.get("stderr") or "")
+    return "No rule to make target" in text
+
+
+def module_compile_with_fallback(
+    module_dir: str,
+    jobs: int,
+    kbuild_target: str | None = None,
+    *,
+    cwd: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Compile one in-tree module dir, with a conservative target fallback.
+
+    `make M=<dir> <target>.ko` is not reliable for all in-tree composite
+    modules after modules_prepare. When Kbuild reports that the explicit target
+    rule is unavailable, fall back to the directory `modules` target so P0 and
+    validation measure source/API breakage instead of target-invocation syntax.
+    """
+    first = run_cmd(module_compile_cmd(module_dir, jobs, kbuild_target), cwd=cwd, timeout=3600)
+    first["compile_strategy"] = "kbuild_target" if kbuild_target else "module_dir"
+    runs = [first]
+    if kbuild_target and (not first.get("ok")) and _kbuild_target_rule_missing(first):
+        fallback_cmd = ["make", f"-j{max(1, jobs)}", f"M={module_dir}", "KBUILD_MODPOST_WARN=1", "modules"]
+        fallback = run_cmd(fallback_cmd, cwd=cwd, timeout=3600)
+        fallback["compile_strategy"] = "module_dir_fallback"
+        fallback["fallback_for_kbuild_target"] = kbuild_target
+        runs.append(fallback)
+    return runs
 
 
 def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
@@ -255,9 +290,9 @@ def run_intree_p0(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
         dirs = find_makefile_dirs(new_tree, args.module_path, copied)
         compile_ok = True
         for d in dirs:
-            r = run_cmd(module_compile_cmd(d, args.jobs, args.kbuild_target), cwd=new_tree, timeout=3600)
-            compile_runs.append(r)
-            if not r.get("ok"):
+            runs = module_compile_with_fallback(d, args.jobs, args.kbuild_target, cwd=new_tree)
+            compile_runs.extend(runs)
+            if not runs[-1].get("ok"):
                 compile_ok = False
     else:
         dirs = []

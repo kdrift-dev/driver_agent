@@ -1656,6 +1656,30 @@ def _compile_command_for_dir(d: str, jobs: int, kbuild_target: str | None = None
     return cmd
 
 
+def _kbuild_target_rule_missing(run: dict[str, Any]) -> bool:
+    text = (run.get("stdout", "") or "") + "\n" + (run.get("stderr", "") or "")
+    return "No rule to make target" in text
+
+
+def _compile_dir_with_fallback(new_tree: Path, d: str, jobs: int, kbuild_target: str | None = None) -> list[dict[str, Any]]:
+    """Compile a module dir, falling back when explicit in-tree target rules are unavailable."""
+    run = _run_cmd(_compile_command_for_dir(d, jobs, kbuild_target), cwd=new_tree, timeout=3600)
+    run = _normalize_partial_module_compile_result(run)
+    run["compile_strategy"] = "kbuild_target" if kbuild_target else "module_dir"
+    runs = [run]
+    if kbuild_target and (not run.get("ok")) and _kbuild_target_rule_missing(run):
+        fallback_cmd = ["make", f"-j{max(1, jobs)}", f"M={d}", "KBUILD_MODPOST_WARN=1", "modules"]
+        fallback = _run_cmd(fallback_cmd, cwd=new_tree, timeout=3600)
+        fallback = _normalize_partial_module_compile_result(fallback)
+        fallback["compile_strategy"] = "module_dir_fallback"
+        fallback["fallback_for_kbuild_target"] = kbuild_target
+        runs.append(fallback)
+    for item in runs:
+        item["stdout"] = _truncate(item.get("stdout", ""))
+        item["stderr"] = _truncate(item.get("stderr", ""))
+    return runs
+
+
 def _rerun_module_compile(
     new_tree: Path,
     compile_dirs: list[str],
@@ -1665,12 +1689,9 @@ def _rerun_module_compile(
     runs: list[dict[str, Any]] = []
     ok = True
     for d in compile_dirs:
-        run = _run_cmd(_compile_command_for_dir(d, jobs, kbuild_target), cwd=new_tree, timeout=3600)
-        run = _normalize_partial_module_compile_result(run)
-        run["stdout"] = _truncate(run.get("stdout", ""))
-        run["stderr"] = _truncate(run.get("stderr", ""))
-        runs.append(run)
-        if not run.get("ok"):
+        dir_runs = _compile_dir_with_fallback(new_tree, d, jobs, kbuild_target)
+        runs.extend(dir_runs)
+        if not dir_runs[-1].get("ok"):
             ok = False
     return ok, runs
 
@@ -2407,13 +2428,9 @@ def run_validation_agent(
         compile_result["compiled_goals"] = [_target_build_goal(kbuild_target)] if kbuild_target else ["modules"]
         all_ok = True
         for d in compile_dirs:
-            cmd = _compile_command_for_dir(d, jobs, kbuild_target)
-            run = _run_cmd(cmd, cwd=new_tree, timeout=3600)
-            run = _normalize_partial_module_compile_result(run)
-            run["stdout"] = _truncate(run.get("stdout", ""))
-            run["stderr"] = _truncate(run.get("stderr", ""))
-            compile_result["runs"].append(run)
-            if not run.get("ok"):
+            runs = _compile_dir_with_fallback(new_tree, d, jobs, kbuild_target)
+            compile_result["runs"].extend(runs)
+            if not runs[-1].get("ok"):
                 all_ok = False
         compile_result["success"] = all_ok
         if not all_ok:

@@ -1,173 +1,271 @@
-# Driver Agent Pipeline
+# Driver-Agent Workflow
 
-`driver_agent_pregen` now supports both:
-- pre-generation migration analysis
-- patch generation + validation loop (apply, compile, spec-consistency check, deterministic/existing runtime hooks when available)
-
-## Scope
-
-Implemented now:
-- stage 1..10 pre-generation pipeline
-- git repo + old/new ref as first-class input
-- old/new source tree fallback mode
-- dry-run LLM support with full artifact persistence
-- patch generation agent (`llm_calls/03_patch_generation` + patch line fixer)
-- validation agent:
-  - apply patch on old ref worktree
-  - stage patched files into new ref worktree
-  - compile module directories
-  - post-patch reasoner (`llm_calls/04_post_reasoner`) as stated-spec consistency check, not proof of correctness
-  - deterministic/existing runtime hook selection for known kselftest/KUnit/QEMU-smoke cases
-  - optional suite command execution / QEMU-triggered command capture when a deterministic or explicit hook exists
-
-## Layout
+Driver-Agent is a Linux-driver migration workflow for adapting old driver code to a newer kernel version. It is intentionally **not** a generic repository repair agent. The paper-facing input boundary is:
 
 ```text
-workflow/
-  pregen_driver_agent.py
-  driver_agent_pregen/
-    __init__.py
-    cli.py
-    repo_utils.py
-    module_source_loader.py
-    symbol_scanner.py
-    definition_locator.py
-    kernel_diff_builder.py
-    impact_graph_builder.py
-    obligation_builder.py
-    llm_client.py
-    prompts.py
-    spec_agent.py
-    reasoner_agent.py
-    patch_line_fixer.py
-    patch_generation.py
-    validation.py
-    context_packet.py
-    report.py
-    utils.py
+old target driver source
++ old/new Linux kernel source
++ kernel-side definitions/diffs used by the old driver
 ```
 
-## Usage
+The workflow must not use the target driver's new-version diff as agent input. Reference diffs are allowed only for evaluation and manual case-pack labeling.
 
-### Preferred: git repo + old/new refs
+## What The Pipeline Does
+
+Driver-Agent currently supports:
+
+- Pre-generation migration analysis.
+- Kernel-side definition location and diff evidence extraction.
+- Affected-function discovery with edit-scope tiers.
+- Obligation-specific FM-Agent-style local specs for patch guidance.
+- Patch generation with optional repair iterations.
+- Validation as a layered evidence vector, not as a single proof of correctness.
+- In-tree and out-of-tree driver validation paths.
+- Four-layer experiments for comparing source-only baselines, kernel-evidence baselines, and the full Driver-Agent pipeline.
+
+The public/default workflow uses kernel-side evidence only. Collateral driver migration examples, semantic-obligation tables built from other drivers, target new-driver diffs, and hand-written case-specific replacement hints are disabled by default.
+
+## Case Definition
+
+### In-Tree Cases
+
+An in-tree case is preferably scoped at the **Kbuild module target** level:
+
+```text
+(module_path, kbuild_target, old_ref, new_ref)
+```
+
+Example:
+
+```text
+module_path   = drivers/block/zram
+kbuild_target = zram.ko
+old_ref       = v6.19
+new_ref       = v7.0
+```
+
+This is stricter than directory-only cases. A directory may build multiple `.ko` modules, so using only `module_path` can mix sibling drivers and inflate source scope. In Kbuild-target mode, Driver-Agent resolves the target's owning source files from the old tree Makefile/Kbuild and loads only those source files plus local headers.
+
+If a directory contains exactly one relevant target, directory mode is still supported.
+
+### Out-of-Tree Cases
+
+An OOT case is scoped to either an OOT repository or a selected subdirectory/module inside that repository, plus an old source ref and target Linux kernel ref. OOT validation is integrated into the same generation/validation framework, but may additionally use compile diagnostics and explicit QEMU smoke scripts.
+
+## Main Entry Point
 
 ```bash
 python pregen_driver_agent.py \
   --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
   --old-ref v6.19 \
-  --new-ref v7.0-rc1 \
-  --module-path drivers/dax/hmem \
+  --new-ref v7.0 \
+  --module-path drivers/block/zram \
+  --kbuild-target zram.ko \
   --out-dir runs/pregen \
-  --jobs 16 \
+  --jobs 8 \
+  --kernel-config-target allmodconfig \
   --enable-llm \
   --llm-provider openrouter \
-  --llm-model anthropic/claude-sonnet-4.6
+  --llm-model anthropic/claude-sonnet-4.6 \
+  --config-ini /mnt/disk7/jw_ai4os/driver-agent/workflow/config.ini \
+  --patch-candidates 1 \
+  --max-patch-iterations 3 \
+  --patch-source-mode focused \
+  --patch-prompt-strength strict \
+  --enable-qemu \
+  --qemu-timeout-sec 1800 \
+  --cleanup-worktrees
 ```
 
-DeepSeek is also supported through its OpenAI-compatible chat API:
+Use `--dry-run` to persist prompts/inputs/artifacts without calling an LLM or generating a patch.
+
+## LLM Configuration
+
+Supported providers include:
+
+- `openrouter`
+- `deepseek`
+- `openai`
+
+Credentials should be supplied through environment variables or `config.ini`. Do not commit real API keys.
+
+Example `config.ini` keys:
+
+```ini
+OPEN_ROUTER_KEY=...
+DEEPSEEK_API_KEY=...
+```
+
+For paper-facing experiments, use the configured paper model consistently. If the provider returns an auth/quota error, that run should be labeled as provider failure, not as a model or pipeline patch failure.
+
+## Pipeline Stages
+
+A normal run writes all intermediate artifacts under:
+
+```text
+runs/pregen/<case_id>/<timestamp>/
+```
+
+Main stages:
+
+1. `module_source_loader`
+   - Reads old target source only.
+   - In Kbuild-target mode, resolves target-owned sources from old Makefile/Kbuild.
+   - Records whether the same path exists in the new kernel, but does not use the new driver source.
+
+2. `symbol_scanner`
+   - Extracts driver-local functions, kernel-side symbol usage, includes, callbacks, and an approximate call graph.
+   - Distinguishes driver-local symbols from kernel-side symbols when possible.
+
+3. `definition_locator`
+   - Locates old/new definitions or declarations for non-local kernel symbols.
+   - Uses lightweight source search fallbacks when stronger tooling is unavailable.
+
+4. `kernel_diff_builder`
+   - Builds focused kernel-side evidence for symbols actually used by the old driver.
+   - Detects removed symbols, include dependency changes, struct/field changes, and multi-line function signature changes.
+   - Kernel commit information is disabled by default.
+
+5. `impact_graph_builder`
+   - Builds function-to-symbol impact edges.
+   - Produces edit-scope tiers:
+     - `edit_required`: direct changed-symbol use with an evidence-backed obligation.
+     - `edit_candidate`: caller/callee/resource-paired context that may need edits.
+     - `context_only`: lifecycle/callback/resource context for reasoning only.
+
+6. `obligation_builder`
+   - Converts kernel-side changes into deterministic compatibility obligations.
+   - Outputs hard checks, semantic checks, confidence, and evidence.
+
+7. `pre_spec` and `pre_reasoner`
+   - Generate obligation-specific local specs and pre-patch guidance.
+   - These specs are guidance/consistency artifacts, not correctness proofs.
+
+8. `patch_generation`
+   - Generates a unified diff patch candidate.
+   - Supports focused source mode by default.
+   - Applies line-number/hunk repair to model output.
+
+9. `validation`
+   - Applies the patch to an old-ref worktree.
+   - Stages patched files into a new-ref worktree.
+   - Builds the target directory or Kbuild target.
+   - Runs deterministic runtime hooks when available.
+   - Optionally performs repair iterations using compile/runtime feedback.
+
+10. `report`
+   - Writes context packets and markdown/JSON reports.
+
+## Patch Source Modes
+
+`--patch-source-mode focused` is the default paper-facing mode.
+
+Focused mode provides:
+
+- Editable function slices for `edit_required` and supported `edit_candidate` functions.
+- Read-only caller/callback/resource context.
+- Line-numbered snippets for patch localization.
+- Full file/module source only when focused extraction is empty or when explicitly requested.
+
+`--patch-source-mode full_module` provides full old target-module source files. Use it for debugging, difficult multi-file migrations, or ablations; it is noisier and can encourage unnecessary edits.
+
+## Patch Iteration
+
+Enable iterative repair with:
 
 ```bash
-python pregen_driver_agent.py \
+--max-patch-iterations 3
+```
+
+Each iteration is a new LLM call with the previous patch-generation metadata and validation feedback. It is not a persistent chat session. Artifacts are saved under:
+
+```text
+llm_calls/03_patch_generation/
+llm_calls/03_patch_repair_iter_02/
+llm_calls/03_patch_repair_iter_03/
+patch_iterations/
+```
+
+If patch generation fails because the provider returns an API/auth/quota error, the run should be interpreted as provider failure. It should not be counted as a no-op success or a semantic model failure.
+
+## Four-Layer Experiments
+
+Use `tools/run_four_layer_experiment.py` to compare input/control settings on the same case:
+
+- `P0`: problem reproduction. Old target source staged into the new kernel must fail.
+- `B0`: source-only LLM baseline.
+- `B1`: old source plus compact kernel evidence baseline.
+- `D`: full Driver-Agent pipeline.
+
+Example:
+
+```bash
+python tools/run_four_layer_experiment.py \
+  --case-kind intree \
   --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
   --old-ref v6.19 \
   --new-ref v7.0 \
-  --module-path drivers/dax/hmem \
-  --out-dir runs/pregen \
+  --module-path drivers/block/zram \
+  --kbuild-target zram.ko \
+  --out-dir runs/four_layer_zram \
   --jobs 8 \
+  --kernel-config-target allmodconfig \
   --enable-llm \
-  --llm-provider deepseek \
-  --llm-model deepseek-v4-pro \
-  --config-ini /mnt/disk7/jw_ai4os/driver-agent/workflow/config.ini
+  --llm-provider openrouter \
+  --llm-model anthropic/claude-sonnet-4.6 \
+  --config-ini /mnt/disk7/jw_ai4os/driver-agent/workflow/config.ini \
+  --patch-candidates 1 \
+  --max-patch-iterations 3 \
+  --patch-source-mode focused \
+  --patch-prompt-strength strict \
+  --methods B0,B1,D \
+  --runtime-policy d-only \
+  --qemu-timeout-sec 1800 \
+  --layer-timeout-sec 10800 \
+  --cleanup-worktrees
 ```
 
-Set `DEEPSEEK_API_KEY=...` or `DEEPSEEK_KEY=...` in `config.ini` or the environment.
+`P0` is always evaluation/setup evidence, not agent input.
 
-### Dry-run
+## Validation Philosophy
+
+Linux driver correctness has no single universal oracle. Driver-Agent therefore reports validation as an evidence vector.
+
+Current evidence levels:
+
+- Level 0: patch sanity, no-op detection, staged files, edit-scope policy.
+- Level 1: target module build correctness.
+- Level 2: deterministic runtime hooks, kselftest/KUnit/QEMU smoke when registered.
+- Level 3: deterministic migration obligation checks for supported symbol/edit patterns.
+- Level 4: spec consistency via FM-Agent-style post reasoning.
+- Level 5-7: placeholders for static checker, CBMC/formal checks, and evaluation-only/manual evidence.
+
+Important caveat:
+
+```text
+spec_consistency PASS means the patch satisfies stated/generated local obligations.
+It does not prove that the generated spec is complete or that the driver is globally correct.
+```
+
+Runtime validation is meaningful only when the registered hook actually exercises the target behavior. Hardware-dependent drivers may only get build/smoke evidence in QEMU.
+
+## Runtime Hooks
+
+Driver-Agent can run deterministic or explicit runtime hooks:
+
+- In-tree kselftest targets.
+- In-tree KUnit targets.
+- QEMU boot smoke tests.
+- OOT custom in-guest shell scripts.
+- OOT deterministic load/unload or device-node smoke.
+
+LLM-generated tests are disabled by default and are not part of the paper-facing correctness metric. Enable them only for private/debug exploration with:
 
 ```bash
-python pregen_driver_agent.py \
-  --repo /path/to/linux.git \
-  --old-ref v6.19 \
-  --new-ref v7.0-rc1 \
-  --module-path drivers/dax/hmem \
-  --out-dir runs/pregen \
-  --dry-run
+--enable-llm-test-generation
 ```
 
-### Kbuild target scope
-
-By default, an in-tree case is scoped to the whole `--module-path` directory. If
-that directory contains multiple Kbuild module objects, use `--kbuild-target` to
-scope the case to one target:
-
-```bash
-python pregen_driver_agent.py \
-  --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
-  --old-ref v6.12 \
-  --new-ref v7.0 \
-  --module-path drivers/iio/dummy \
-  --kbuild-target iio_dummy.o \
-  --out-dir runs/pregen \
-  --jobs 8 \
-  --dry-run
-```
-
-In target mode, Driver-Agent resolves the target's owning source files from the
-old tree `Makefile`/`Kbuild`, records `case_scope=kbuild_target` in artifacts,
-loads only those source files plus local headers, and validates with a
-target-specific command such as:
-
-```bash
-make -j8 M=drivers/iio/dummy iio_dummy.ko
-```
-
-This keeps sibling targets such as `iio_dummy_evgen.o` out of affected-function
-analysis, patch generation, and validation unless they are explicitly selected.
-
-### Optional runtime execution switches
-
-- `--patch-candidates N`: request N patch candidates from LLM (default `1`)
-- `--patch-generation-mode {agent|baseline_source_only|baseline_kernel_evidence}`:
-  - `agent` (default): current Driver-Agent patch input with obligations, affected graph, pre-reasoning, context packet, and old source.
-  - `baseline_source_only` (B0): fixed baseline prompt with old target-module source only; no kernel evidence, affected graph, obligations, specs, or reasoning.
-  - `baseline_kernel_evidence` (B1): fixed baseline prompt with old target-module source plus compact kernel-side evidence; no affected graph, obligations, specs, or reasoning.
-  - All modes use the same patch post-processing, line fixing, apply/compile/post-reasoning validation path.
-- `--patch-source-mode {full_module|focused}`:
-  - `focused` (default): provide edit-scope function slices plus read-only caller/callback/resource context.
-  - `full_module`: provide full old-module source files; use as fallback/debug mode, not the paper-facing default.
-- `--patch-source-with-lineno` / `--patch-source-no-lineno`:
-  - control whether patch-generation source snippets include `L<line>:` prefixes for location hints.
-- Affected-function edit scopes:
-  - `edit_required`: direct changed-symbol use with evidence-backed obligation; default edit target.
-  - `edit_candidate`: caller/callee/resource-paired context; editable only with cited candidate evidence.
-  - `context_only`: lifecycle/callback/resource context for reasoning; not editable by default.
-- `--include-kernel-commit-info`:
-  - disabled by default; enables sanitized kernel commit subjects/messages/diff excerpts for private/debug ablations only.
-  - paper-facing runs should leave this disabled.
-  - synthetic replacement hints and case-specific patch fixups are also disabled by default and require private/debug environment flags.
-- `--enable-qemu`: allow validation stage to execute suite commands that invoke `kunit.py run` / `qemu-system-*`
-- `--qemu-timeout-sec SEC`: timeout for suite/qemu commands (default `3600`)
-- `--skip-system-test-generation`: skip all runtime hook selection/execution, including deterministic kselftest/KUnit/QEMU hooks (still runs patch apply/compile/spec-consistency)
-- `--enable-llm-test-generation`: private/debug opt-in for LLM-generated in-tree system tests. This is disabled by default and should not be used as a paper-facing correctness signal.
-- `--enable-host-suite`: explicitly run generated suite commands on the host. This is disabled by default because generated driver suites may contain `modprobe`, `mount`, suspend/resume`, or hardware-specific operations. QEMU/KUnit execution only runs standalone deterministic or explicit runtime hooks.
-- `--cleanup-worktrees`: remove temporary old/new git worktrees after validation
-
-Out-of-tree QEMU validation:
-
-- `--oot-pipeline-mode integrated`: route OOT source through the full Driver-Agent analysis/generation/validation pipeline.
-- `--oot-qemu-check-script PATH`: use a caller-provided in-QEMU shell script.
-- `--oot-qemu-test-mode {auto|custom|llm|default}`:
-  - `auto` (default): use custom script if provided, otherwise use deterministic fallback. LLM script generation is considered only when `--enable-llm-test-generation` is explicitly set.
-  - `llm`: private/debug opt-in path to generate an in-QEMU script from patched OOT source and evidence; invalid scripts fall back to deterministic smoke.
-  - `default`: deterministic load/unload or device-node smoke.
-- `--oot-qemu-test-level {load_unload|interface_smoke|semantic_scenario}`: request the depth of deterministic/custom OOT runtime validation.
-- LLM-generated OOT scripts, when explicitly enabled, are saved under `validation/oot_qemu_generated_check.sh` and their prompt/input/output under `llm_calls/05_oot_qemu_test_generation/`.
-
-FM-Agent-style specs:
-
-- `01_pre_spec` generates obligation-specific local specs for patch guidance.
-- `02_pre_reasoner` and `04_post_reasoner` check consistency with stated obligations/specs.
-- A post-reasoning `PASS` is not a proof of full driver correctness; correctness must be reported with compile, semantic keys, kselftest/QEMU when meaningful, CBMC/KUnit/manual verdict, or other external evidence.
+Host-side suite execution is disabled by default because generated or subsystem tests may invoke privileged operations. Use QEMU/KUnit hooks or explicit scripts for controlled runtime validation.
 
 ## Output Tree
 
@@ -176,14 +274,30 @@ runs/pregen/<case_id>/<timestamp>/
   metadata.json
 
   extracted/
-    ... pregen artifacts ...
+    module_source.json
+    old_module_file_list.txt
+    old_module_sources/
+    driver_used_symbols.json
+    driver_includes.json
+    driver_functions.json
+    driver_callbacks.json
+    call_graph.json
+    kernel_definition_locations.json
+    kernel_definition_diffs.json
+    kernel_relevant_diff.patch
+    impact_graph.json
+    callback_graph.json
+    compatibility_obligations.json
+    affected_function_slices/
 
   llm_calls/
     01_pre_spec/
     02_pre_reasoner/
     03_patch_generation/
+    03_patch_repair_iter_02/
+    03_patch_repair_iter_03/
     04_post_reasoner/
-    05_system_test_generation/   # deterministic selection metadata; LLM generation is opt-in only
+    05_system_test_generation/
 
   patch_runs/
     <candidate_id>/
@@ -191,12 +305,14 @@ runs/pregen/<case_id>/<timestamp>/
       02_fixed_patch.diff
       patch_fix_report.json
 
-  generated_tests/
-    test_manifest.json
-    run_generated_tests.sh
+  patch_iterations/
+    iter_01/
+    iter_02/
+    iter_03/
 
   validation/
   patch_generation.json
+  patch_iterations.json
   validation.json
   validation_summary_v2.json
   validation_summary_v2.md
@@ -208,24 +324,30 @@ runs/pregen/<case_id>/<timestamp>/
     pre_generation_report.json
 ```
 
-## Notes
+## Datasets And Case Catalogs
 
-- Symbol scanning / call graph / callback extraction currently use regex-first heuristics.
-- The patch line fixer repairs hunk counts and attempts line-number alignment from old module sources.
-- Validation currently uses `make defconfig + olddefconfig + modules_prepare` before module compile.
-- In-tree QEMU execution depends on deterministic/existing runtime hooks; if no kselftest/KUnit/QEMU hook is registered, qemu stage is reported but not actively booted. OOT integrated validation can execute a custom or deterministic in-guest initramfs script.
-- `validation_summary_v2.json` reports an evidence vector, not a single correctness oracle. `post_reasoning` is treated as `spec_consistency`: it checks whether the patch satisfies generated local specs/stated obligations, not whether the spec is complete.
+Current dataset directories live under `datasets/`.
 
-## Validation Summary v2
+Useful datasets include:
 
-The validation summary can be generated by the main pipeline or rebuilt for existing runs:
+- `intree_kbuild_target_hardbreak_20_v0`: Kbuild target-level hard-break cases.
+- `intree_virtual_qemu_hardbreak_5_v0`: virtual/software in-tree drivers with QEMU-oriented validation potential.
+- `intree_showcase_5_v0`: selected in-tree showcase candidates.
+- `oot_showcase_5_v0`: selected out-of-tree showcase candidates.
+- `oot_hardbreak_small_10_v0`: smaller OOT hard-break candidates.
+
+Dataset artifacts may include reference diffs and manual notes. Those are evaluation-only and must not be passed into the agent pipeline.
+
+## Validation Summary Tool
+
+Rebuild a validation evidence summary for an existing run:
 
 ```bash
 python tools/build_validation_summary_v2.py \
   --run-dir runs/pregen/<case_id>/<timestamp>
 ```
 
-For read-only or root-owned runs, write summaries to a separate directory:
+For read-only or root-owned runs:
 
 ```bash
 python tools/build_validation_summary_v2.py \
@@ -233,18 +355,9 @@ python tools/build_validation_summary_v2.py \
   --out-dir runs/validation_summary_v2
 ```
 
-The first implemented checks are intentionally conservative:
-- Level 0: patch apply/no-op/staged files/edit-scope sanity.
-- Level 1: target-module build correctness.
-- Level 2: runtime hooks, with skipped suite/QEMU separated from real PASS.
-- Level 3: deterministic migration checks for symbol replacement/edit scope only.
-- Level 4: LLM post reasoning as spec consistency only.
-- Level 5-7: static checker, CBMC, and evaluation-only evidence placeholders.
+## Spec Gap Analysis
 
-## Spec Gap Evaluation Harness
-
-Use `tools/analyze_spec_gap.py` to audit FM-Agent-style spec/reasoning gaps on existing run artifacts.
-The goal is to find cases where the generated specs/obligations are incomplete or misleading; this harness should not be interpreted as proving patch correctness.
+Use `tools/analyze_spec_gap.py` to audit cases where generated specs/reasoning may be incomplete or misleading. This is an evaluation harness; it may use reference diffs, but those diffs must not become agent input.
 
 ```bash
 python tools/analyze_spec_gap.py \
@@ -257,57 +370,43 @@ python tools/analyze_spec_gap.py \
   --emit-8case-table
 ```
 
-Outputs:
+Typical outputs:
+
 - `spec_gap_cases.csv`
 - `spec_gap_summary.json`
 - `spec_gap_report.md`
 - `case_reports/<case_id>.md`
-- `8case_spec_gap_table.csv` (when `--emit-8case-table` is enabled)
+- `8case_spec_gap_table.csv`
 
-For targeted `AFFECTED_FUNCTION_MISS` tracing:
+For targeted affected-function misses:
 
 ```bash
 python tools/analyze_affected_miss.py \
   --baseline-dir workflow/runs/spec_gap_analysis_20260512_8cases_v2 \
-  --out-dir workflow/runs/affected_miss_analysis_20260513_baseline
+  --out-dir workflow/runs/affected_miss_analysis
 ```
 
-Outputs:
-- `affected_miss_root_cause.csv`
-- `affected_miss_root_cause_summary.json`
-- `affected_miss_report.md`
-- `case_reports/<case_id>_affected_miss.md`
+## Paper-Facing Policy
 
-## In-Tree Mini Dataset
+- Default input: old target driver source plus old/new kernel-side definitions/diffs.
+- Default no: target new-driver diff, other-driver migration examples, hand-written per-case hints.
+- Kernel commit messages/diffs are disabled by default.
+- Reference diffs are evaluation-only.
+- LLM-generated tests are disabled by default.
+- Post reasoning is `spec_consistency`, not correctness proof.
+- Report skipped runtime validation separately from passed runtime validation.
 
-Build the 10-case evaluation-only mini dataset:
+See also:
 
-```bash
-python tools/build_intree_mini_dataset.py \
-  --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
-  --old-ref v6.19 \
-  --new-ref v7.0-rc1 \
-  --cases-csv /mnt/disk7/jw_ai4os/driver-agent/tools/driver_module_cases_v6.19_to_v7.0-rc1_all_marker_modules.csv \
-  --out-dir datasets/intree_mini_v0 \
-  --force
-```
+- `docs/paper_requirements.md`
+- `docs/reviewer_feedback_response.md`
+- `docs/reviewer_feedback_matrix.csv`
 
-Analyze Driver-Agent runs against that dataset:
+## Implementation Notes
 
-```bash
-python tools/analyze_intree_mini_results.py \
-  --dataset-dir datasets/intree_mini_v0 \
-  --runs-dir runs \
-  --repo /mnt/disk7/jw_ai4os/linux_source_code/linux.git \
-  --old-ref v6.19 \
-  --new-ref v7.0-rc1 \
-  --out-dir runs/intree_mini_v0_analysis
-```
-
-Reference diffs inside the dataset are evaluation-only and must not be used as Driver-Agent input.
-
-Reviewer feedback tracking:
-
-- `docs/paper_requirements.md`: living paper-facing input/evidence/correctness policy.
-- `docs/reviewer_feedback_response.md`: detailed mapping from OSDI reviews to current status and required revisions.
-- `docs/reviewer_feedback_matrix.csv`: machine-readable action matrix for paper/workflow gaps.
+- Symbol scanning, call graph extraction, and callback detection are currently lightweight and regex/tree-sitter-style where available.
+- Definition lookup uses source search fallbacks and is optimized for old/new git refs.
+- Multi-line kernel function prototypes are compared at the signature-block level, not only by first matched line.
+- Kbuild target compilation may fall back to directory module builds when explicit target invocation is not supported by the local Kbuild command shape.
+- `make defconfig` may not enable the target module. Use `--kernel-config-target allmodconfig` for cases such as `zram` where target coverage matters.
+- QEMU validation may require root or a narrow sudo rule for the pipeline/QEMU commands.

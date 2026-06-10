@@ -109,7 +109,7 @@ def make_initramfs(out_dir: Path) -> Path:
         shutil.rmtree(root)
     for d in ["bin", "sbin", "proc", "sys", "dev", "tmp"]:
         (root / d).mkdir(parents=True, exist_ok=True)
-    shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
+    shutil.copy2(os.environ.get("DRIVER_AGENT_BUSYBOX", "/usr/bin/busybox"), root / "bin" / "busybox")
     for app in ["sh", "mount", "cat", "grep", "awk", "mknod", "poweroff", "echo", "sleep", "find", "test", "ls", "printf", "dmesg", "uname", "mkdir", "rmdir", "head", "wc"]:
         target = root / "bin" / app
         if not target.exists():

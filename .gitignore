@@ -18,6 +18,11 @@ venv/
 .venv/
 config.ini
 
+# Nix / direnv
+.direnv/
+result
+result-*
+
 # Editor / OS
 .DS_Store
 .idea/

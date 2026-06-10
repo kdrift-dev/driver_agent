@@ -512,7 +512,7 @@ def make_initramfs(
         shutil.rmtree(root)
     for d in ["bin", "sbin", "proc", "sys", "dev", "lib/modules"]:
         (root / d).mkdir(parents=True, exist_ok=True)
-    shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
+    shutil.copy2(os.environ.get("DRIVER_AGENT_BUSYBOX", "/usr/bin/busybox"), root / "bin" / "busybox")
     shutil.copy2(module_ko, root / module_ko.name)
     if modules_root and modules_root.exists():
         shutil.copytree(modules_root, root / "lib" / "modules", dirs_exist_ok=True, symlinks=True)

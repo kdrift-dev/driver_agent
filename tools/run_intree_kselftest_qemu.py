@@ -230,7 +230,7 @@ def make_initramfs(out_dir: Path, install_dir: Path, spec: dict[str, Any]) -> Pa
         shutil.rmtree(root)
     for d in ["bin", "sbin", "proc", "sys", "dev", "tmp", "kselftest"]:
         (root / d).mkdir(parents=True, exist_ok=True)
-    shutil.copy2("/usr/bin/busybox", root / "bin" / "busybox")
+    shutil.copy2(os.environ.get("DRIVER_AGENT_BUSYBOX", "/usr/bin/busybox"), root / "bin" / "busybox")
     host_binary_results = [
         copy_host_binary_with_libs(root, name)
         for name in (spec.get("host_binaries") or [])

@@ -13,6 +13,7 @@ from typing import Any
 
 from .context_packet import run_context_packet_builder
 from .definition_locator import run_definition_locator
+from .evolve_search import run_evolutionary_patch_search
 from .impact_graph_builder import run_impact_graph_builder
 from .kernel_diff_builder import run_kernel_diff_builder
 from .llm_client import LLMClient, LLMConfig
@@ -152,6 +153,38 @@ def build_parser() -> argparse.ArgumentParser:
         default="kernel_only",
         help=argparse.SUPPRESS,
     )
+
+    evo = p.add_argument_group("evolutionary patch search (OpenEvolve)")
+    evo.add_argument(
+        "--patch-search-strategy",
+        type=str,
+        choices=["linear", "evolutionary"],
+        default="linear",
+        help=(
+            "patch search strategy: linear (default: single candidate + greedy repair iterations) "
+            "or evolutionary (OpenEvolve population/MAP-Elites search; requires the openevolve package)"
+        ),
+    )
+    evo.add_argument("--evolve-iterations", type=int, default=20, help="OpenEvolve max iterations")
+    evo.add_argument("--evolve-population-size", type=int, default=30, help="OpenEvolve population size")
+    evo.add_argument("--evolve-num-islands", type=int, default=3, help="OpenEvolve island count")
+    evo.add_argument(
+        "--evolve-temperature",
+        type=float,
+        default=0.8,
+        help="LLM sampling temperature for evolutionary diversity (OpenEvolve's own client)",
+    )
+    evo.add_argument(
+        "--evolve-runtime-policy",
+        type=str,
+        choices=["none", "elites", "all"],
+        default="none",
+        help=(
+            "when to run expensive runtime/QEMU during the search: none (build-only inner loop; "
+            "runtime only in the final authoritative validation), elites, or all. v1 implements 'none'."
+        ),
+    )
+    evo.add_argument("--evolve-checkpoint-interval", type=int, default=10, help="OpenEvolve checkpoint interval")
     p.add_argument(
         "--validation-patch-file",
         type=str,
@@ -608,6 +641,11 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
     oot_integrated = bool(args.oot_repo_url and args.oot_pipeline_mode == "integrated")
     if args.kbuild_target and oot_integrated:
         raise SystemExit("--kbuild-target is only supported for the in-tree driver pipeline")
+    if oot_integrated and getattr(args, "patch_search_strategy", "linear") == "evolutionary":
+        raise SystemExit(
+            "--patch-search-strategy evolutionary is not supported for out-of-tree "
+            "(integrated) cases in v1; use the linear strategy"
+        )
 
     accessor = RepositoryAccessor.from_args(
         repo=args.repo,
@@ -1038,30 +1076,47 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
         ),
     )
 
-    patch_generation = stage(
-        "09b_patch_generation_agent",
-        lambda: run_patch_generation_agent(
-            llm_client=llm_client,
-            llm_calls_dir=llm_calls_dir,
-            run_dir=run_dir,
-            extracted_dir=extracted_dir,
-            case_id=case_id,
-            module_path=args.module_path,
-            context_packet=context_packet,
-            pre_reasoning=pre_reasoning,
-            impact_graph=impact_graph,
-            compatibility_obligations=obligations,
-            dry_run=args.dry_run,
-            max_candidates=max(1, args.patch_candidates),
-            prompt_strength=args.patch_prompt_strength,
-            source_mode=args.patch_source_mode,
-            source_with_line_numbers=bool(args.patch_source_with_lineno),
-            patch_generation_mode=args.patch_generation_mode,
-            old_ref=args.old_ref,
-            new_ref=args.new_ref,
-            kernel_definition_diffs=kernel_diffs,
-        ),
-    )
+    evolutionary = getattr(args, "patch_search_strategy", "linear") == "evolutionary"
+    if evolutionary:
+        patch_generation = stage(
+            "09b_evolutionary_patch_search",
+            lambda: run_evolutionary_patch_search(
+                run_dir=run_dir,
+                extracted_dir=extracted_dir,
+                case_id=case_id,
+                module_path=args.module_path,
+                context_packet=context_packet,
+                impact_graph=impact_graph,
+                compatibility_obligations=obligations,
+                module_result=module_result,
+                args=args,
+            ),
+        )
+    else:
+        patch_generation = stage(
+            "09b_patch_generation_agent",
+            lambda: run_patch_generation_agent(
+                llm_client=llm_client,
+                llm_calls_dir=llm_calls_dir,
+                run_dir=run_dir,
+                extracted_dir=extracted_dir,
+                case_id=case_id,
+                module_path=args.module_path,
+                context_packet=context_packet,
+                pre_reasoning=pre_reasoning,
+                impact_graph=impact_graph,
+                compatibility_obligations=obligations,
+                dry_run=args.dry_run,
+                max_candidates=max(1, args.patch_candidates),
+                prompt_strength=args.patch_prompt_strength,
+                source_mode=args.patch_source_mode,
+                source_with_line_numbers=bool(args.patch_source_with_lineno),
+                patch_generation_mode=args.patch_generation_mode,
+                old_ref=args.old_ref,
+                new_ref=args.new_ref,
+                kernel_definition_diffs=kernel_diffs,
+            ),
+        )
 
     if args.validation_patch_file:
         patch_generation = stage(
@@ -1075,10 +1130,14 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
 
     if oot_integrated:
         assert external_source_root is not None
-        max_patch_iterations = max(
-            1,
-            int(args.max_patch_iterations or 1),
-            int(args.oot_max_patch_iterations or 1),
+        max_patch_iterations = (
+            1
+            if evolutionary
+            else max(
+                1,
+                int(args.max_patch_iterations or 1),
+                int(args.oot_max_patch_iterations or 1),
+            )
         )
         repair_enabled = bool(
             max_patch_iterations > 1
@@ -1213,7 +1272,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[Path, bool]:
                 ),
             )
     else:
-        max_patch_iterations = max(1, int(args.max_patch_iterations or 1))
+        max_patch_iterations = 1 if evolutionary else max(1, int(args.max_patch_iterations or 1))
         repair_enabled = bool(
             max_patch_iterations > 1
             and args.enable_llm

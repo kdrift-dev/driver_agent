@@ -16,6 +16,7 @@ tmp_*_probe/
 .env.*
 venv/
 .venv/
+.venv-openevolve/
 config.ini
 
 # Nix / direnv

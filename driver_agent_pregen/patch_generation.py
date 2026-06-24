@@ -1355,6 +1355,7 @@ def _edit_scope_policy_check(
     impact_graph: dict[str, Any],
     candidate_rationale_text: str = "",
     extra_editable_keys: set[tuple[str, str]] | None = None,
+    citation_exempt_keys: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     required = {_function_key(x) for x in impact_graph.get("edit_required_functions", []) or []}
     candidates = {_function_key(x) for x in impact_graph.get("edit_candidate_functions", []) or []}
@@ -1366,6 +1367,7 @@ def _edit_scope_policy_check(
     candidates.discard(None)
     context_only.discard(None)
     extra_editable = set(extra_editable_keys or set())
+    citation_exempt = set(citation_exempt_keys or set())
     context_only -= extra_editable
     editable = set(required) | set(candidates) | extra_editable
     candidate_meta: dict[tuple[str, str], dict[str, Any]] = {}
@@ -1405,7 +1407,7 @@ def _edit_scope_policy_check(
         if key not in editable:
             violations.append({"reason": "function_outside_edit_scope", **item})
             continue
-        if key in candidates:
+        if key in candidates and key not in citation_exempt:
             meta = candidate_meta.get(key, {})
             fn_low = key[1].lower()
             reason_terms = [str(x).lower() for x in meta.get("candidate_reasons", []) or [] if str(x).strip()]

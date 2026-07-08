@@ -118,6 +118,21 @@
             help = "Run a single case with OpenRouter LLM + module compile";
             command = "MODE=llm exec scripts/repro_case.sh \"$@\"";
           }
+          {
+            name = "da-evolve";
+            help = "Run a case with the OpenEvolve evolutionary patch search (isolated venv)";
+            command = ''
+              set -euo pipefail
+              VENV="''${DRIVER_AGENT_EVOLVE_VENV:-.venv-openevolve}"
+              if [ ! -x "$VENV/bin/python" ]; then
+                echo "[da-evolve] creating venv at $VENV with openevolve..." >&2
+                python -m venv --system-site-packages "$VENV"
+                "$VENV/bin/pip" install --quiet --upgrade pip "openevolve==0.2.27"
+              fi
+              MODE=llm PYTHON="$VENV/bin/python" exec scripts/repro_case.sh \
+                --patch-search-strategy evolutionary "$@"
+            '';
+          }
         ];
       };
     };

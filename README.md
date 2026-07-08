@@ -188,6 +188,53 @@ patch_iterations/
 
 If patch generation fails because the provider returns an API/auth/quota error, the run should be interpreted as provider failure. It should not be counted as a no-op success or a semantic model failure.
 
+## Evolutionary Patch Search (OpenEvolve)
+
+The default patch search is **linear**: one candidate plus greedy repair iterations
+(`--max-patch-iterations`). An optional **evolutionary** strategy replaces that inner
+loop with [OpenEvolve](https://github.com/codelion/openevolve)'s population /
+MAP-Elites search:
+
+```bash
+--patch-search-strategy evolutionary \
+--evolve-iterations 20 --evolve-population-size 30 --evolve-num-islands 3 \
+--evolve-temperature 0.8
+```
+
+It is **non-default and evaluation/research-oriented**. Requires the `openevolve`
+package; in the Nix devshell use the `da-evolve` command, which provisions an
+isolated venv (OpenEvolve is not in nixpkgs) and runs the pipeline with it.
+Not supported for out-of-tree (integrated) cases in v1: the inner-loop build
+session compiles the in-tree `module_path`, which for an OOT case is a different
+build than the OOT validator judges, so the pipeline refuses the combination.
+
+How it works (source-to-patch bridge): OpenEvolve mutates the **in-scope old driver
+source** (the editable functions, wrapped in `EVOLVE-BLOCK` markers). For each
+mutant, the evaluator derives a unified diff, normalizes it (line fixer), enforces
+the **same edit-scope policy** as linear mode, then builds it on the new kernel and
+scores a **multi-objective fitness** from the validation evidence vector
+(`combined_score` + MAP-Elites feature dimensions `build_tier`/`patch_size`/
+`files_touched`). The best genome is converted back into the standard
+`patch_generation` result, after which the normal **authoritative validation +
+`validation_summary_v2` + report** run unchanged.
+
+Input-boundary discipline is preserved: the OpenEvolve system prompt and the
+evaluator are fed **only** old driver source plus kernel-side evidence (change
+summary, obligations, edit targets), never the target driver's new-version diff.
+Inner-loop evaluation is build-only and shares one pair of prepared git worktrees
+(`--evolve-runtime-policy none` in v1); runtime/QEMU evidence comes from the single
+final validation pass. Artifacts are written under:
+
+```text
+evolve/
+  initial_program.c          # the genome (in-scope source + EVOLVE-BLOCK markers)
+  system_message.txt         # kernel-evidence-only domain prompt
+  eval_context.json          # out-of-band context for the evaluator
+  openevolve_config.yaml
+  openevolve_output/         # OpenEvolve population, checkpoints, best/
+patch_runs/EVOLVE-BEST/02_fixed_patch.diff
+```
+
 ## Four-Layer Experiments
 
 Use `tools/run_four_layer_experiment.py` to compare input/control settings on the same case:

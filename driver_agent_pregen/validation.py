@@ -2140,6 +2140,220 @@ def _write_and_print_stage_summary(run_dir: Path, stage_results: list[dict[str, 
         print(f"[validation-summary] {line}")
 
 
+class BuildSession:
+    """Reusable apply/stage/compile harness for inner-loop patch evaluation.
+
+    The expensive setup (worktree checkout plus ``make modules_prepare``) runs once
+    in :meth:`prepare`; each :meth:`evaluate_patch` call resets the worktrees,
+    applies a candidate patch on the old-ref tree, stages the patched sources onto
+    the new-ref tree and runs an incremental module compile, reusing the same build
+    primitives as :func:`run_validation_agent`. Build-only: test generation, QEMU
+    and post-reasoning stay in the authoritative validation pass.
+    """
+
+    def __init__(
+        self,
+        *,
+        accessor: RepositoryAccessor,
+        run_dir: Path,
+        module_path: str,
+        old_ref: Optional[str],
+        new_ref: Optional[str],
+        jobs: int = 8,
+        kernel_config_target: str = "defconfig",
+        kbuild_target: str | None = None,
+        target_source_files: list[str] | None = None,
+    ) -> None:
+        self.accessor = accessor
+        self.run_dir = Path(run_dir)
+        self.module_path = module_path
+        self.old_ref = old_ref
+        self.new_ref = new_ref
+        self.jobs = jobs
+        self.kernel_config_target = (
+            kernel_config_target
+            if kernel_config_target in {"defconfig", "allmodconfig", "allyesconfig"}
+            else "defconfig"
+        )
+        self.kbuild_target = kbuild_target
+        self.target_source_files = list(target_source_files) if target_source_files else None
+
+        worktrees_dir = (self.run_dir / "worktrees").resolve()
+        self.old_tree = (worktrees_dir / "old").resolve()
+        self.new_tree = (worktrees_dir / "new").resolve()
+        self.prepared = False
+        self.prepare_error: str | None = None
+        self.module_source_files: list[str] = []
+        self._stage_source_files: list[str] = []
+        self._prepared_marker = self.run_dir / "evolve" / ".worktrees_prepared"
+
+    def prepare(self, reuse: bool = True) -> dict[str, Any]:
+        """Check out worktrees and run kernel ``modules_prepare`` on the new tree.
+
+        When ``reuse`` is set and a marker from a previous :meth:`prepare` exists,
+        the checkout and kernel prepare are skipped and the worktrees are reused.
+        The marker lives outside the worktrees so per-candidate resets keep it.
+        """
+        if self.accessor.mode != "git" or not self.accessor.repo or not self.old_ref or not self.new_ref:
+            self.prepare_error = "build_session_requires_git_mode_with_old_ref_and_new_ref"
+            return {"ok": False, "error": self.prepare_error}
+
+        if reuse and self.old_tree.exists() and self.new_tree.exists() and self._prepared_marker.exists():
+            self.module_source_files = list(
+                self.target_source_files or _list_module_source_files(self.old_tree, self.module_path)
+            )
+            self.prepared = True
+            return {"ok": True, "reused": True, "module_source_files": self.module_source_files}
+
+        wt_old = _prepare_git_worktree(self.accessor.repo, self.old_ref, self.old_tree)
+        wt_new = _prepare_git_worktree(self.accessor.repo, self.new_ref, self.new_tree)
+        if not wt_old.get("ok") or not wt_new.get("ok"):
+            self.prepare_error = "failed_to_prepare_worktrees"
+            return {"ok": False, "error": self.prepare_error, "old": wt_old, "new": wt_new}
+
+        self.module_source_files = list(
+            self.target_source_files or _list_module_source_files(self.old_tree, self.module_path)
+        )
+
+        prep_steps = [
+            _run_cmd(["make", self.kernel_config_target], cwd=self.new_tree, timeout=1800),
+            _run_cmd(["make", "olddefconfig"], cwd=self.new_tree, timeout=1800),
+            _run_cmd(["make", "modules_prepare"], cwd=self.new_tree, timeout=2400),
+        ]
+        for step in prep_steps:
+            step["stdout"] = _truncate(step.get("stdout", ""))
+            step["stderr"] = _truncate(step.get("stderr", ""))
+        if not all(step.get("ok") for step in prep_steps):
+            self.prepare_error = "kernel_prepare_failed"
+            return {"ok": False, "error": self.prepare_error, "prepare_steps": prep_steps}
+
+        self.prepared = True
+        self._prepared_marker.parent.mkdir(parents=True, exist_ok=True)
+        write_text(self._prepared_marker, "prepared\n")
+        return {"ok": True, "prepare_steps": prep_steps, "module_source_files": self.module_source_files}
+
+    def _dirty_tracked_paths(self, tree: Path) -> list[str]:
+        status = _run_cmd(
+            ["git", "status", "--porcelain", "--no-renames", "--untracked-files=no"],
+            cwd=tree,
+            timeout=600,
+        )
+        paths: list[str] = []
+        for line in (status.get("stdout") or "").splitlines():
+            rel = line[3:].strip()
+            if rel.startswith('"') and rel.endswith('"'):
+                rel = rel[1:-1]
+            if rel:
+                paths.append(rel)
+        return paths
+
+    def _reset_module_sources(self) -> None:
+        """Restore the pristine ref state of everything previous evaluations touched.
+
+        Tracked modifications are discovered via ``git status``, so files dirtied by
+        an evaluation that was killed mid-run (or by another process) are still
+        reset. Untracked files are cleaned only under ``module_path`` so the kernel
+        build state produced by :meth:`prepare` survives.
+        """
+        for tree in (self.old_tree, self.new_tree):
+            dirty = self._dirty_tracked_paths(tree)
+            if dirty:
+                _run_cmd(["git", "checkout", "--", *dirty], cwd=tree, timeout=600)
+            _run_cmd(["git", "clean", "-fdq", "--", self.module_path], cwd=tree, timeout=300)
+
+    def evaluate_patch(self, patch_text: str) -> dict[str, Any]:
+        """Apply ``patch_text`` on old_ref, stage onto new_ref and compile incrementally.
+
+        Returns ``apply`` and ``compile`` blocks shaped like the ones produced by
+        :func:`run_validation_agent`, so callers can score them with the same fields.
+        """
+        if not self.prepared:
+            return {
+                "apply": {"ok": False, "reason": self.prepare_error or "build_session_not_prepared"},
+                "compile": {"success": False, "error": self.prepare_error or "build_session_not_prepared", "runs": []},
+            }
+
+        self._reset_module_sources()
+
+        patch_path = (self.run_dir / "evolve" / "current_candidate.diff").resolve()
+        patch_path.parent.mkdir(parents=True, exist_ok=True)
+        write_text(patch_path, patch_text if patch_text.endswith("\n") else patch_text + "\n")
+
+        touched_files = _extract_touched_files_from_patch(patch_text)
+        no_op = not _patch_has_effective_changes(patch_text)
+
+        apply_block: dict[str, Any] = {"no_op_candidate": no_op, "touched_files": touched_files}
+        if no_op:
+            apply_block["ok"] = True
+            apply_block["reason"] = "noop_candidate_skip_apply"
+        else:
+            check = _run_cmd(["git", "apply", "--check", str(patch_path)], cwd=self.old_tree, timeout=300)
+            if not check.get("ok"):
+                return {
+                    "apply": {
+                        **apply_block,
+                        "ok": False,
+                        "reason": "patch_apply_failed_on_old_ref",
+                        "stderr": _truncate(check.get("stderr", "")),
+                    },
+                    "compile": {"success": False, "error": "patch_apply_failed", "runs": []},
+                }
+            apply_res = _run_cmd(["git", "apply", str(patch_path)], cwd=self.old_tree, timeout=300)
+            apply_block["ok"] = bool(apply_res.get("ok"))
+            if not apply_res.get("ok"):
+                return {
+                    "apply": {
+                        **apply_block,
+                        "reason": "patch_apply_failed_on_old_ref",
+                        "stderr": _truncate(apply_res.get("stderr", "")),
+                    },
+                    "compile": {"success": False, "error": "patch_apply_failed", "runs": []},
+                }
+
+        stage_files = _ordered_unique([*self.module_source_files, *touched_files])
+        copied: list[str] = []
+        missing: list[str] = []
+        for rel in stage_files:
+            src = self.old_tree / rel
+            dst = self.new_tree / rel
+            if not src.exists():
+                missing.append(rel)
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied.append(rel)
+
+        compile_dirs = _find_makefile_dirs(self.new_tree, copied or touched_files, self.module_path)
+        runs: list[dict[str, Any]] = []
+        all_ok = True
+        for d in compile_dirs:
+            dir_runs = _compile_dir_with_fallback(self.new_tree, d, self.jobs, self.kbuild_target)
+            runs.extend(dir_runs)
+            if not dir_runs[-1].get("ok"):
+                all_ok = False
+
+        return {
+            "apply": apply_block,
+            "stage_patched_files": {"copied_files": copied, "missing_files": missing, "count": len(copied)},
+            "compile": {
+                "success": bool(all_ok and compile_dirs),
+                "error": "" if (all_ok and compile_dirs) else ("module_compile_failed" if compile_dirs else "no_compile_dirs"),
+                "compiled_dirs": compile_dirs,
+                "compiled_goals": [_target_build_goal(self.kbuild_target)] if self.kbuild_target else ["modules"],
+                "kbuild_target": self.kbuild_target,
+                "runs": runs,
+            },
+        }
+
+    def close(self) -> None:
+        """Remove the worktrees created by :meth:`prepare`."""
+        if self.accessor.mode != "git" or not self.accessor.repo:
+            return
+        for tree in (self.old_tree, self.new_tree):
+            _run_cmd(["git", "-C", str(self.accessor.repo), "worktree", "remove", "-f", str(tree)], timeout=600)
+            shutil.rmtree(tree, ignore_errors=True)
+
+
 def run_validation_agent(
     *,
     accessor: RepositoryAccessor,

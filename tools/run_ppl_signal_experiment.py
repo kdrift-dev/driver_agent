@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import math
 import os
 import sys
@@ -56,6 +55,7 @@ from ppl_context_scorer import (  # noqa: E402
     expressibility_check,
     make_scorer,
 )
+from ctxlab.dataset import load_cases  # noqa: E402
 
 CONDITIONS = ["gold", "gold_distractors", "distractors_only", "random", "none"]
 
@@ -104,89 +104,8 @@ def build_config(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 # ---------------------------------------------------------------------------
-# Case loading
+# Conditions (case loading lives in ctxlab.dataset)
 # ---------------------------------------------------------------------------
-
-def _evidence_text(item: dict[str, Any]) -> str:
-    """Render one kernel-evidence item as context text (both pack shapes)."""
-    parts = [f"symbol: {item.get('symbol', '?')}"]
-    for key in ("definition_diff", "old_definition", "new_definition",
-                "old_definition_excerpt", "new_definition_excerpt"):
-        val = item.get(key)
-        if isinstance(val, str) and val.strip():
-            parts.append(f"--- {key} ---\n{val.strip()}")
-    for side in ("old_locations", "new_locations"):
-        locs = item.get(side) or []
-        lines = [f"{loc.get('path')}:{loc.get('line')}: {loc.get('text', '')}"
-                 for loc in locs if isinstance(loc, dict)]
-        if lines:
-            parts.append(f"--- {side} ---\n" + "\n".join(lines))
-    return "\n".join(parts)
-
-
-def load_case(case_dir: Path) -> Optional[dict[str, Any]]:
-    case_json = case_dir / "case.json"
-    reference = case_dir / "reference.diff"
-    evidence_path = case_dir / "kernel_evidence.json"
-    if not (case_json.exists() and reference.exists() and evidence_path.exists()):
-        return None
-    meta = json.loads(case_json.read_text())
-    evidence = json.loads(evidence_path.read_text())
-
-    if "gold" in evidence:  # mined_migration_bench shape
-        gold_items = evidence.get("gold") or []
-        distractor_items = evidence.get("distractors") or []
-    else:  # intree_* shape: split items via expected_semantic_keys.json
-        items = evidence.get("items") or []
-        gold_symbols: set[str] = set()
-        keys_path = case_dir / "expected_semantic_keys.json"
-        if keys_path.exists():
-            keys = json.loads(keys_path.read_text())
-            for sym in keys.get("required_added_symbols") or []:
-                gold_symbols.add(sym)
-            for pat in keys.get("expected_removed_patterns") or []:
-                gold_symbols.add(pat.rstrip("(").split("(")[0])
-        gold_items = [it for it in items
-                      if any(g and g in (it.get("symbol") or "") or (it.get("symbol") or "") in g
-                             for g in gold_symbols)]
-        distractor_items = [it for it in items if it not in gold_items]
-
-    sources = []
-    src_root = case_dir / "old_module_sources"
-    if src_root.exists():
-        for path in sorted(src_root.rglob("*")):
-            if path.is_file() and path.suffix in (".c", ".h"):
-                sources.append(path.read_text(errors="replace"))
-    if not sources:
-        return None
-    return {
-        "case_id": meta.get("case_id", case_dir.name),
-        "reference_diff": reference.read_text(errors="replace"),
-        "gold_text": "\n\n".join(_evidence_text(it) for it in gold_items),
-        "distractor_text": "\n\n".join(_evidence_text(it) for it in distractor_items),
-        "old_source": "\n\n".join(sources),
-    }
-
-
-def load_cases(dataset_dir: Path, max_cases: int) -> list[dict[str, Any]]:
-    roots = [dataset_dir / "cases", dataset_dir]
-    case_dirs: list[Path] = []
-    for root in roots:
-        if root.exists():
-            case_dirs = sorted(d for d in root.iterdir() if d.is_dir() and (d / "case.json").exists())
-            if case_dirs:
-                break
-    cases = []
-    for d in case_dirs:
-        case = load_case(d)
-        if case is None:
-            print(f"[experiment] skip {d.name}: incomplete case pack")
-            continue
-        cases.append(case)
-        if max_cases and len(cases) >= max_cases:
-            break
-    return cases
-
 
 def condition_context(case: dict[str, Any], all_cases: list[dict[str, Any]],
                       idx: int, condition: str, budget: int) -> tuple[str, bool]:

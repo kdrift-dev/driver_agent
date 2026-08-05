@@ -45,6 +45,9 @@ DEFINE_RE = re.compile(r"#\s*define\s+([A-Za-z_]\w*)")
 STRUCT_RE = re.compile(r"\b(?:struct|union|enum)\s+([A-Za-z_]\w*)")
 CALLABLE_RE = re.compile(r"\b([A-Za-z_]\w{2,})\s*\(")
 ENUM_CONST_RE = re.compile(r"\b([A-Z][A-Z0-9_]{3,})\b")
+# declarator names ("int payload_len;" / "u8 buf[4];"): a struct-field rename
+# hunk has no call/define/struct-tag token at all, only the field declarators
+FIELD_DECL_RE = re.compile(r"\b([A-Za-z_]\w{3,})\s*(?:;|\[)")
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +107,7 @@ def kernel_symbols_from_segments(kernel_segments: list[dict[str, Any]]) -> dict[
     for seg in kernel_segments:
         for raw in changed_content_lines(seg["lines"]):
             code = strip_comments_and_strings(raw)
-            for regex in (DEFINE_RE, STRUCT_RE, CALLABLE_RE, ENUM_CONST_RE):
+            for regex in (DEFINE_RE, STRUCT_RE, CALLABLE_RE, ENUM_CONST_RE, FIELD_DECL_RE):
                 for m in regex.finditer(code):
                     note(m.group(1), seg["path"], raw)
     return symbols

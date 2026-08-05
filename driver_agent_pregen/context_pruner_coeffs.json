@@ -1,0 +1,7 @@
+{
+ "_comment": "Auditable coefficients for the obligation-anchored context pruner. Placeholder values until calibrated on mined migrations; every change is a reviewable diff.",
+ "version": "context_pruner_v0",
+ "w_obligation_cover": 1.0,
+ "w_locus_cover": 0.25,
+ "w_size_penalty": 0.002
+}

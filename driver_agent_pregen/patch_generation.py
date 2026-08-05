@@ -1079,6 +1079,20 @@ def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: 
     notes: list[str] = []
     initial_size = _json_size(payload)
 
+    # Default-OFF obligation-anchored pruning hook. Only entered when the env
+    # flag is set; with it unset this block is skipped and behavior is
+    # unchanged. Reorders read-only source blocks by overlap with the
+    # machine-derived obligation symbols so the budget below keeps the useful
+    # ones instead of dropping read-only context blindly. Boundary-safe: uses
+    # only compatibility_obligations, never reference diffs or gold labels.
+    if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
+        from .context_pruner import obligation_symbols_from_payload, prune_old_module_sources
+        raw_sources = list(payload.get("old_module_sources") or [])
+        if raw_sources:
+            obl = obligation_symbols_from_payload(payload.get("compatibility_obligations"))
+            payload["old_module_sources"] = prune_old_module_sources(raw_sources, obl)
+            notes.append(f"context_pruner reordered {len(raw_sources)} sources (obl={len(obl)})")
+
     # Always cap very large source blocks. OOT focused slices can remain below
     # the global budget while still being too noisy for model/provider behavior.
     sources = _prioritize_patch_sources(list(payload.get("old_module_sources") or []))

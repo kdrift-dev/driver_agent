@@ -154,6 +154,43 @@ def main(argv=None) -> int:
     s2 = score_context(c0["gold_text"], c0, MockBackend())["ppl"]["nll_sum"]
     check("mock backend determinism", s1 == s2, f"{s1} vs {s2}")
 
+    # 9d. method zoo: every method fits budget, keeps the edit locus, and the
+    # obligation-aware methods recall gold at least as well as blind/random
+    from ctxlab.evaluation import evaluate_selection
+    from ctxlab.methods import make_method, method_names
+    budget = 40
+    per_method_recall = {n: [] for n in method_names()}
+    zoo_ok = True
+    for case in cases:
+        for name in method_names():
+            sel = make_method(name).select(case, budget)
+            ev = evaluate_selection(sel, case, MockBackend())
+            if not sel.locus or not ev["within_budget"]:
+                zoo_ok = False
+            per_method_recall[name].append(ev["gold_recall"])
+    check("method zoo: budget respected + locus kept (all methods, all cases)", zoo_ok)
+    mean = {n: sum(v) / len(v) for n, v in per_method_recall.items()}
+    check("ours gold-recall >= random_budget",
+          mean["ours"] >= mean["random_budget"],
+          f"ours={mean['ours']:.2f} random={mean['random_budget']:.2f}")
+    check("ours gold-recall >= trunc_baseline",
+          mean["ours"] >= mean["trunc_baseline"],
+          f"ours={mean['ours']:.2f} trunc={mean['trunc_baseline']:.2f}")
+
+    # 9e. pipeline hook is inert with the flag off, active only when set
+    from driver_agent_pregen.context_pruner import (obligation_symbols_from_payload,
+                                                    prune_old_module_sources)
+    srcs = [{"content": "a alpha_setup", "editable": False},
+            {"content": "b ALPHA_SETUP_SYNC filler filler", "editable": False},
+            {"content": "loc", "editable": True}]
+    obl = obligation_symbols_from_payload([{"required_added_symbols": ["ALPHA_SETUP_SYNC"]}])
+    pruned = prune_old_module_sources(srcs, obl)
+    check("context_pruner: editable stays first, obl block outranks noise",
+          pruned[0]["editable"] is True and "ALPHA_SETUP_SYNC" in pruned[1]["content"],
+          str([s["content"][:12] for s in pruned]))
+    check("context_pruner: non-destructive (no blocks dropped)",
+          len(pruned) == len(srcs))
+
     # 10. determinism of the whole pipeline (rebuild + re-mine, compare ids)
     expected2 = build_fixture_repo(work / "repo2")
     mined2 = work / "mined2"

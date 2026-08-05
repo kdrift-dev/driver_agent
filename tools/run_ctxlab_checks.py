@@ -191,6 +191,30 @@ def main(argv=None) -> int:
     check("context_pruner: non-destructive (no blocks dropped)",
           len(pruned) == len(srcs))
 
+    # 9f. comparison harness: shape, budget adherence, and the two null arms
+    from ctxlab.compare import aggregate, run_comparison
+    comp_methods = ["trunc_baseline", "ours"]
+    comp_budgets = [30, 80]
+    comp_arms = ["full", "skeleton", "drop", "guidance"]
+    comp_rows = run_comparison(cases, comp_methods, comp_budgets, MockBackend(),
+                               arms=comp_arms)
+    expect_rows = len(cases) * len(comp_methods) * len(comp_budgets) * len(comp_arms)
+    check("comparison harness row count", len(comp_rows) == expect_rows,
+          f"{len(comp_rows)} vs {expect_rows}")
+    check("comparison: all cells within budget",
+          all(r["within_budget"] for r in comp_rows))
+    agg = {(r["method"], r["budget"], r["arm"]): r for r in aggregate(comp_rows)}
+    # Sam-Bodden transfer: dropping evidence cannot pass the gate more than full
+    drop_gate = agg[("ours", 30, "drop")]["gate_pass_rate"]
+    full_gate = agg[("ours", 30, "full")]["gate_pass_rate"]
+    check("null arm: drop gate <= full gate", drop_gate <= full_gate,
+          f"drop={drop_gate} full={full_gate}")
+    # ETH null: generated guidance adds no NLL gain over full under the mock
+    g_nll = agg[("ours", 80, "guidance")]["edit_nll"]
+    f_nll = agg[("ours", 80, "full")]["edit_nll"]
+    check("ETH null: guidance NLL not better than full", g_nll >= f_nll,
+          f"guidance={g_nll} full={f_nll}")
+
     # 10. determinism of the whole pipeline (rebuild + re-mine, compare ids)
     expected2 = build_fixture_repo(work / "repo2")
     mined2 = work / "mined2"

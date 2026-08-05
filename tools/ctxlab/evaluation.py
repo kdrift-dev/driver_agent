@@ -15,7 +15,10 @@ from .metrics import score_context
 
 
 def evaluate_selection(selection, case: dict[str, Any], backend=None,
-                       cache=None) -> dict[str, Any]:
+                       cache=None, context_text: str = None) -> dict[str, Any]:
+    """Score a selection. `context_text` overrides the evidence rendering (an
+    ablation arm supplies its own text); recall/precision stay defined by the
+    chunks the method actually picked, not the rendering."""
     obligations = set(obligation_symbols(case))
     all_evidence = evidence_chunks(case)
     full_tokens = sum(c.tokens for c in all_evidence) + \
@@ -33,7 +36,8 @@ def evaluate_selection(selection, case: dict[str, Any], backend=None,
         covered |= set(c.symbols) & obligations
     obl_recall = len(covered) / len(obligations) if obligations else 1.0
 
-    scored = score_context(selection.context_text(), case, backend, cache)
+    ctx = selection.context_text() if context_text is None else context_text
+    scored = score_context(ctx, case, backend, cache)
     return {
         "method": selection.method,
         "budget": selection.budget,

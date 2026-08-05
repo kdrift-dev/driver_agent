@@ -48,14 +48,9 @@ from typing import Any, Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ppl_context_scorer import (  # noqa: E402
-    ProviderFailure,
-    ScoreCache,
-    cached_score,
-    expressibility_check,
-    make_scorer,
-)
+from ctxlab.backends import ScoreCache, make_backend  # noqa: E402
 from ctxlab.dataset import load_cases  # noqa: E402
+from ctxlab.metrics import score_context  # noqa: E402
 
 CONDITIONS = ["gold", "gold_distractors", "distractors_only", "random", "none"]
 
@@ -67,15 +62,6 @@ FIELDS = [
     "cache_hit", "status",
 ]
 
-PROMPT_TEMPLATE = (
-    "You are migrating a Linux kernel driver from an old kernel version to a "
-    "new one. Using the kernel-side evidence below (if any) and the old driver "
-    "source, produce the unified diff that adapts the driver to the new kernel.\n\n"
-    "=== KERNEL-SIDE EVIDENCE ===\n{context}\n\n"
-    "=== OLD DRIVER SOURCE ===\n{old_source}\n\n"
-    "=== MIGRATION DIFF ===\n"
-)
-
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -86,7 +72,7 @@ def build_config(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--dataset-dir", default=_env("DATASET_DIR", str(REPO_ROOT / "datasets" / "intree_mini_v0")))
     p.add_argument("--out-root", default=_env("OUT_ROOT", str(REPO_ROOT / "runs" / "ppl_signal_experiment")))
     p.add_argument("--scorer", default=_env("PPL_SCORER", "expressibility-only"),
-                   choices=["expressibility-only", "hf", "openrouter"])
+                   choices=["expressibility-only", "hf", "openrouter", "mock"])
     p.add_argument("--model", default=os.environ.get("PPL_MODEL"))
     p.add_argument("--context-budget", type=int, default=int(_env("PPL_CONTEXT_BUDGET", "8000")))
     p.add_argument("--old-source-budget", type=int, default=int(_env("PPL_OLD_SOURCE_BUDGET", "12000")))
@@ -137,39 +123,32 @@ def run_experiment(args: argparse.Namespace) -> list[dict[str, Any]]:
         raise SystemExit(f"[experiment] no usable case packs under {args.dataset_dir}")
     print(f"[experiment] {len(cases)} cases, conditions={args.condition_list}, scorer={args.scorer}")
 
-    scorer = None
+    backend = None
     cache = ScoreCache(out_root / "ppl_cache")
     if args.scorer != "expressibility-only":
-        scorer = make_scorer(args.scorer, args.model)
+        backend = make_backend(args.scorer, args.model)
 
     rows: list[dict[str, Any]] = []
     for idx, case in enumerate(cases):
-        # PPL prompt is budgeted; the gate always sees the FULL old source
-        # (availability must not depend on the prompt budget).
-        old_source = case["old_source"][: args.old_source_budget]
         for condition in args.condition_list:
             context, truncated = condition_context(case, cases, idx, condition, args.context_budget)
-            gate = expressibility_check(context, case["old_source"], case["reference_diff"])
+            scored = score_context(context, case, backend, cache, args.old_source_budget)
+            gate = scored["gate"]
             row: dict[str, Any] = {
                 "case_id": case["case_id"],
                 "condition": condition,
                 "scorer": args.scorer,
-                "model": getattr(scorer, "model_name", ""),
+                "model": getattr(backend, "model_name", ""),
                 "context_chars": len(context),
                 "context_truncated": truncated,
                 "gate_coverage": gate["coverage"],
                 "gate_pass": gate["gate_pass"],
                 "gate_missing_count": len(gate["missing_identifiers"]),
-                "status": "ok",
+                "status": scored["status"],
             }
-            if scorer is not None:
-                prompt = PROMPT_TEMPLATE.format(context=context or "(none)", old_source=old_source)
-                try:
-                    score = cached_score(scorer, cache, prompt, case["reference_diff"])
-                    row.update({k: score.get(k) for k in
-                                ("nll_sum", "n_target_tokens", "nll_per_token", "ppl", "cache_hit")})
-                except ProviderFailure as exc:
-                    row["status"] = f"provider_failure: {exc}"
+            if scored["ppl"] is not None:
+                row.update({k: scored["ppl"].get(k) for k in
+                            ("nll_sum", "n_target_tokens", "nll_per_token", "ppl", "cache_hit")})
             rows.append(row)
         print(f"[experiment] {idx + 1}/{len(cases)} {case['case_id']} done")
     return rows

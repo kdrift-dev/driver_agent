@@ -136,6 +136,24 @@ def main(argv=None) -> int:
           and "| 100% | 1.000 |" in gold_row and "| 0% |" in none_row,
           f"gold={gold_row!r} none={none_row!r}")
 
+    # 9b. mock backend orders gold below none (offline PPL signal exists)
+    from ctxlab.backends import MockBackend
+    from ctxlab.metrics import score_context
+    backend = MockBackend()
+    gold_beats_none = 0
+    for case in cases:
+        gold_ppl = score_context(case["gold_text"], case, backend)["ppl"]["nll_per_token"]
+        none_ppl = score_context("", case, backend)["ppl"]["nll_per_token"]
+        gold_beats_none += gold_ppl < none_ppl
+    check("mock backend: gold NLL < none NLL on every case",
+          gold_beats_none == len(cases), f"{gold_beats_none}/{len(cases)}")
+
+    # 9c. mock backend is deterministic (identical repeat score)
+    c0 = cases[0]
+    s1 = score_context(c0["gold_text"], c0, MockBackend())["ppl"]["nll_sum"]
+    s2 = score_context(c0["gold_text"], c0, MockBackend())["ppl"]["nll_sum"]
+    check("mock backend determinism", s1 == s2, f"{s1} vs {s2}")
+
     # 10. determinism of the whole pipeline (rebuild + re-mine, compare ids)
     expected2 = build_fixture_repo(work / "repo2")
     mined2 = work / "mined2"

@@ -16,13 +16,29 @@ reviewed, reported, committed. Nothing pushed; no remote or retro operations.
 
 ## Standing regression gate
 
-`python3 tools/run_ctxlab_checks.py` — 27 checks, all green: fixture mine
+`python3 tools/run_ctxlab_checks.py` — 28 checks, all green: fixture mine
 (exact gold labels, junk filtered, per-commit sampling cap, sanity gauges,
 schema, loader round-trip, catalog stats), mock-backend ordering + determinism,
 method zoo (budget/locus invariants, ours ≥ random/trunc gold recall), pruner
-ranking + non-destructiveness, comparison shape + both nulls, end-to-end
-determinism. Run it after any change to the miner / data / metric / method
-code. Notebooks execute under `.venv-analysis`.
+ranking + non-destructiveness, comparison shape + both nulls, frozen-sample
+manifest restrict + digest guard, end-to-end determinism. Run it after any
+change to the miner / data / metric / method code. Notebooks execute under
+`.venv-analysis`.
+
+## Phase-2 offline prep (retro-gated run not yet executed)
+
+Added ahead of the real run so it needs no code changes on the build host:
+
+- `tools/run_ppl_signal_experiment.py --manifest <frozen>`: restricts scoring to
+  the `draw_ppl_sample.py` frozen sample's `case_ids`, with a `dataset_digest`
+  guard (refuses to score a mine other than the one the pre-registration froze;
+  bypass only via `PPL_ALLOW_DIGEST_MISMATCH=1`, testing only). Without
+  `--manifest`, behavior is unchanged.
+- `docs/ppl_signal_preregistration.md`: sample now defined by the frozen manifest
+  (digest + n_selected placeholders filled at freeze time); still **DRAFT**.
+- `scripts/run_oacd_retro.sh`: stage-based, resumable Phase-3 runbook for retro
+  (`pilot | mine | draw | ppl | compare | all`). The `pilot` stage enforces the
+  pre-registered gold expressibility-gate ≥ 80% before allowing the full mine.
 
 ## Input-boundary status
 

@@ -13,6 +13,7 @@ to the miner / data layer:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import shutil
 import subprocess
@@ -214,6 +215,39 @@ def main(argv=None) -> int:
     f_nll = agg[("ours", 80, "full")]["edit_nll"]
     check("ETH null: guidance NLL not better than full", g_nll >= f_nll,
           f"guidance={g_nll} full={f_nll}")
+
+    # 9g. frozen-sample manifest restriction scores exactly the sampled ids
+    from draw_ppl_sample import build_manifest
+    man = build_manifest(mined, n=2, seed=0)
+    man_path = work / "sample_manifest.json"
+    man_path.write_text(json.dumps(man))
+    want_ids = set(man["case_ids"])
+    mrun = subprocess.run(
+        [sys.executable, str(TOOLS / "run_ppl_signal_experiment.py"),
+         "--dataset-dir", str(mined), "--out-root", str(work / "manifest_run"),
+         "--scorer", "expressibility-only", "--manifest", str(man_path)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    mcsv = work / "manifest_run" / "experiment_results.csv"
+    got_ids: set[str] = set()
+    if mcsv.exists():
+        with mcsv.open() as fh:
+            got_ids = {r["case_id"] for r in csv.DictReader(fh)}
+    check("manifest restrict: only sampled case_ids scored",
+          mrun.returncode == 0 and len(want_ids) == 2 and got_ids == want_ids,
+          f"got={sorted(got_ids)} want={sorted(want_ids)}")
+
+    # 9h. digest guard rejects a manifest drawn from a different mine
+    tampered = dict(man, dataset_digest="0" * 64)
+    tam_path = work / "tampered_manifest.json"
+    tam_path.write_text(json.dumps(tampered))
+    trun = subprocess.run(
+        [sys.executable, str(TOOLS / "run_ppl_signal_experiment.py"),
+         "--dataset-dir", str(mined), "--out-root", str(work / "tampered_run"),
+         "--scorer", "expressibility-only", "--manifest", str(tam_path)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    check("manifest digest guard: mismatch is fatal",
+          trun.returncode != 0 and "digest" in trun.stdout.lower(),
+          f"rc={trun.returncode}")
 
     # 10. determinism of the whole pipeline (rebuild + re-mine, compare ids)
     expected2 = build_fixture_repo(work / "repo2")

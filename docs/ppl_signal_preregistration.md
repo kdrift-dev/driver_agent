@@ -4,6 +4,9 @@ Status: **DRAFT** — becomes binding when frozen by a commit made *before* the 
 full scoring run on mined cases. The smoke runs on `datasets/intree_mini_v0`
 (mechanics only, expressibility-only scorer) do not count as scoring runs.
 
+Frozen sample (filled at freeze time, Phase 3): `dataset_digest = <TBD>`,
+`n_selected = <TBD>`, manifest `runs/mined/ppl_sample_manifest.json`.
+
 ## Question
 
 Does teacher-forced perplexity of the reference edit, conditioned on a candidate
@@ -18,9 +21,15 @@ obligation-symbol overlap + submodular coverage under budget).
   `tools/ppl_context_scorer.py` `hf` backend, model `Qwen/Qwen2.5-Coder-0.5B`,
   CPU, deterministic, sha256 disk cache. Prompt template and conditions as
   implemented at the freezing commit.
-- Sample: the first **200** cases from `datasets/mined_migration_bench` with
-  ≥1 gold symbol, stratified by `treewide_scale` (mined by
-  `tools/mine_migration_bench.py`, to be built — Step 0).
+- Sample: **200** cases drawn by `tools/draw_ppl_sample.py --n 200 --seed 0`
+  from the Step-0 mine (`tools/mine_migration_bench.py`, `v6.19..v7.0-rc1`) —
+  every case with ≥1 gold symbol, stratified by `treewide_scale` in a seeded,
+  deterministic round-robin. The draw writes a frozen manifest
+  (`case_ids` + `dataset_digest`); this pre-registration is bound to that
+  manifest by digest, and the scoring run consumes exactly it via
+  `run_ppl_signal_experiment.py --manifest`, which refuses to run if the
+  dataset digest does not match. If the eligible pool is < 200, all eligible
+  cases are used and the realized `n` is recorded here at freeze time.
 - Conditions per case, size-matched to `PPL_CONTEXT_BUDGET` (default 8000 chars):
   `gold`, `gold_distractors`, `distractors_only`, `random`, `none`.
 - Provider/infra failures are excluded from denominators, never counted as losses.

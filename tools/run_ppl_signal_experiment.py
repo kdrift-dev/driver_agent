@@ -27,6 +27,9 @@ Environment overrides:
     PPL_MODEL           HF model name          (default Qwen/Qwen2.5-Coder-0.5B)
     PPL_CONTEXT_BUDGET  context chars          (default 8000)
     MAX_CASES           limit cases            (default 0 = all)
+    PPL_MANIFEST        restrict to a frozen draw_ppl_sample manifest (pre-reg)
+    PPL_ALLOW_DIGEST_MISMATCH  set to 1 to bypass the manifest digest guard
+                        (testing only; the pre-registered run must NOT set this)
 
 Example (local smoke, no ML deps):
     python3 tools/run_ppl_signal_experiment.py --max-cases 2
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import os
 import sys
@@ -51,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ctxlab.backends import ScoreCache, make_backend  # noqa: E402
 from ctxlab.dataset import load_cases  # noqa: E402
 from ctxlab.metrics import score_context  # noqa: E402
+from draw_ppl_sample import dataset_digest, eligible_cases  # noqa: E402
 
 CONDITIONS = ["gold", "gold_distractors", "distractors_only", "random", "none"]
 
@@ -77,6 +82,9 @@ def build_config(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--context-budget", type=int, default=int(_env("PPL_CONTEXT_BUDGET", "8000")))
     p.add_argument("--old-source-budget", type=int, default=int(_env("PPL_OLD_SOURCE_BUDGET", "12000")))
     p.add_argument("--max-cases", type=int, default=int(_env("MAX_CASES", "0")))
+    p.add_argument("--manifest", default=os.environ.get("PPL_MANIFEST"),
+                   help="restrict scoring to the case_ids in a draw_ppl_sample "
+                        "manifest (the frozen pre-registered sample)")
     p.add_argument("--conditions", default=",".join(CONDITIONS),
                    help="comma-separated subset of: " + ",".join(CONDITIONS))
     p.add_argument("--reparse", action="store_true",
@@ -87,6 +95,50 @@ def build_config(argv: Optional[list[str]] = None) -> argparse.Namespace:
     if unknown:
         p.error(f"unknown conditions: {sorted(unknown)}")
     return args
+
+
+# ---------------------------------------------------------------------------
+# Case selection (frozen pre-registered sample restriction)
+# ---------------------------------------------------------------------------
+
+def select_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Load case packs, optionally restricted to a frozen sample manifest.
+
+    Without --manifest: today's behavior (walk dataset dir, honor --max-cases).
+    With --manifest: score exactly the manifest's case_ids, in the manifest's
+    order, after verifying the manifest was drawn from *this* dataset (digest
+    guard) — so the pre-registered run cannot silently score a different mine.
+    """
+    dataset_dir = Path(args.dataset_dir)
+    if not args.manifest:
+        return load_cases(dataset_dir, args.max_cases)
+
+    manifest = json.loads(Path(args.manifest).read_text())
+    want_ids = list(manifest.get("case_ids") or [])
+    if not want_ids:
+        raise SystemExit(f"[experiment] manifest {args.manifest} has no case_ids")
+
+    frozen_digest = manifest.get("dataset_digest")
+    if frozen_digest:
+        actual_digest = dataset_digest(eligible_cases(dataset_dir))
+        if actual_digest != frozen_digest:
+            msg = (f"[experiment] manifest digest {frozen_digest[:12]} != dataset "
+                   f"digest {actual_digest[:12]}: the frozen sample was drawn from a "
+                   f"different mine than {dataset_dir}")
+            if os.environ.get("PPL_ALLOW_DIGEST_MISMATCH") == "1":
+                print(msg + " (bypassed via PPL_ALLOW_DIGEST_MISMATCH=1)")
+            else:
+                raise SystemExit(msg)
+
+    by_id = {c["case_id"]: c for c in load_cases(dataset_dir, 0, verbose=False)}
+    missing = [cid for cid in want_ids if cid not in by_id]
+    if missing:
+        raise SystemExit(f"[experiment] {len(missing)} manifest case_ids absent from "
+                         f"{dataset_dir} (e.g. {missing[:3]}): incomplete mine?")
+    cases = [by_id[cid] for cid in want_ids]
+    if args.max_cases:
+        cases = cases[:args.max_cases]
+    return cases
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +170,11 @@ def condition_context(case: dict[str, Any], all_cases: list[dict[str, Any]],
 def run_experiment(args: argparse.Namespace) -> list[dict[str, Any]]:
     out_root = Path(args.out_root)
     out_root.mkdir(parents=True, exist_ok=True)
-    cases = load_cases(Path(args.dataset_dir), args.max_cases)
+    cases = select_cases(args)
     if not cases:
         raise SystemExit(f"[experiment] no usable case packs under {args.dataset_dir}")
+    if args.manifest:
+        print(f"[experiment] manifest {Path(args.manifest).name}: {len(cases)} cases restricted")
     print(f"[experiment] {len(cases)} cases, conditions={args.condition_list}, scorer={args.scorer}")
 
     backend = None

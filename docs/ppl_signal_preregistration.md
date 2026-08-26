@@ -1,11 +1,18 @@
 # Pre-registration: PPL context-value signal check (Step 1)
 
-Status: **DRAFT** — becomes binding when frozen by a commit made *before* the first
-full scoring run on mined cases. The smoke runs on `datasets/intree_mini_v0`
-(mechanics only, expressibility-only scorer) do not count as scoring runs.
+Status: **FROZEN** (2026-08-26) — this commit binds the protocol, thresholds and
+sample below before any scoring run. The earlier smoke runs on
+`datasets/intree_mini_v0` (mechanics only) and the 2-case HF smoke on curated
+`intree_mini_v0` packs do not count as *the* scoring run; the pre-registered run
+is the 200-case one defined here. No protocol/threshold/sample change past this
+commit (only the single retry the criteria already allow).
 
-Frozen sample (filled at freeze time, Phase 3): `dataset_digest = <TBD>`,
-`n_selected = <TBD>`, manifest `runs/mined/ppl_sample_manifest.json`.
+Frozen sample: mined from `v6.19..v7.0-rc1` (685 cases, 579 with ≥1 gold),
+drawn by `draw_ppl_sample.py --n 200 --seed 0`.
+`dataset_digest = 32ecbf4da490b32ba86c9fc7e0eed268bd444a2890b675ab0d9409914b11c723`,
+`n_selected = 200`, manifest `runs/mined/ppl_sample_manifest.json`. The scoring
+run must reproduce this digest (enforced by `run_ppl_signal_experiment.py
+--manifest`).
 
 ## Question
 

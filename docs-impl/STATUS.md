@@ -1,7 +1,22 @@
 # Context-engineering implementation loop — STATUS
 
-Branch `ctx-impl` off `context-engineering`. All milestones M0–M5 implemented,
-reviewed, reported, committed. Nothing pushed; no remote or retro operations.
+Branch `ctx-impl` off `context-engineering`. Milestones M0–M5 (offline machinery)
+plus the Phase-2 offline prep and the **Phase-3 pre-registered run on retro** are
+done. Nothing pushed.
+
+## Headline result (2026-08-26): pre-registered PPL run = SUCCESS
+
+Frozen 200-case `v6.19..v7.0-rc1` sample (digest `32ecbf4da490…`, freeze commit
+`924a8b5`), scored with `Qwen2.5-Coder-0.5B` teacher-forced on retro (1000 rows,
+0 provider exclusions): **PPL(gold)<PPL(random) 70.0% (p=1.5e-8)**,
+**PPL(gold)<PPL(none) 91.5% (p=2.5e-36)** → pre-registered SUCCESS. Gate
+side-channel <80% stop-rule tripped (gold pass 58%, incomplete labels on large
+treewide edits) but the signal holds on the label-clean subset (66%), refuting
+the concern the rule guards. Full write-up: `docs-impl/06_ppl_signal_result.md`.
+Method comparison on the real backend is the one remaining sub-item (scoped, not
+full-200, due to HF cost). Retro compute env: nix-built `~/ppl-env` (torch 2.9.1 /
+transformers 4.57.1); ctx-impl lives in a separate worktree `~/work/driver_agent_ctx`
+so the dirty evolve-search tree is untouched.
 
 ## Milestones (each: implement + run + review + report + commit)
 

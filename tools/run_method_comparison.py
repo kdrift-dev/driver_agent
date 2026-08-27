@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctxlab.backends import ScoreCache, make_backend  # noqa: E402
 from ctxlab.compare import ARMS, aggregate, run_comparison, summary_markdown  # noqa: E402
-from ctxlab.dataset import load_cases  # noqa: E402
 from ctxlab.methods import method_names  # noqa: E402
+from run_ppl_signal_experiment import select_cases  # noqa: E402  (frozen-sample restrict)
 
 
 def _env(name, default):
@@ -45,6 +45,9 @@ def build_config(argv=None):
                    choices=["mock", "hf", "openrouter"])
     p.add_argument("--model", default=os.environ.get("PPL_MODEL"))
     p.add_argument("--max-cases", type=int, default=int(_env("MAX_CASES", "0")))
+    p.add_argument("--manifest", default=os.environ.get("PPL_MANIFEST"),
+                   help="restrict to the case_ids of a draw_ppl_sample manifest "
+                        "(digest-guarded); combine with --max-cases for a subset")
     args = p.parse_args(argv)
     args.method_list = [m for m in args.methods.split(",") if m]
     args.budget_list = [int(b) for b in args.budgets.split(",") if b]
@@ -62,7 +65,7 @@ def main(argv=None):
     args = build_config(argv)
     out_root = Path(args.out_root)
     out_root.mkdir(parents=True, exist_ok=True)
-    cases = load_cases(Path(args.dataset_dir), args.max_cases, verbose=False)
+    cases = select_cases(args)
     if not cases:
         raise SystemExit(f"[compare] no usable case packs under {args.dataset_dir}")
     backend = make_backend(args.scorer, args.model)

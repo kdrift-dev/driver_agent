@@ -57,6 +57,47 @@ improve gold labeling for large treewide edits (resolve typedef/macro indirectio
 so the strict-coverage gate rises above 80%. This is label tooling, not a change
 to the frozen protocol.
 
+## Method comparison (real HF backend, 40-case subset of the frozen sample)
+
+Scored on retro over 40 frozen-sample cases (`--manifest ... --max-cases 40`),
+8 methods, real teacher-forced backend. Two honest findings:
+
+**1. The default budgets (30, 80 tokens) are miscalibrated for real cases.** The
+edit locus alone is ~125 tokens on the mined distribution, so at budget 30/80 the
+locus overflows and *no* method can add any kernel evidence — every method
+degenerates to locus-only, gold recall ≈ 0, and `ours = trunc = random`. Those
+budgets were set for the 8-case synthetic fixture, not real drivers. (Diagnostic
+run archived at `runs/oacd_results/mc_v1_summary.md`.)
+
+**2. At realistic budgets (400/1200/3000), `ours` does NOT beat the baselines on
+this distribution.** Gold recall:
+
+| budget | ours | trunc_baseline | random_budget | shapley_probe | keepdrop_dd |
+|---|---|---|---|---|---|
+| 400 | 0.86 | **0.94** | 0.87 | 0.92 | 0.18 |
+| 1200 | 1.00 | 1.00 | 0.98 | 1.00 | 0.18 |
+| 3000 | 1.00 | 1.00 | 0.98 | 1.00 | 0.18 |
+
+Obligation recall is ~0.97 for every method (except the over-dropping
+`keepdrop_dd`/`longcodezip` at ~0.88), and edit-NLL is flat (~337–338) across
+methods. Interpretation: the mined atomic-commit cases are **small enough that
+once the budget clears the locus + gold evidence (~384 tokens), essentially any
+method fits all the gold** → gold/obligation recall saturates to ~1.0 and the
+selection strategy stops mattering. The only real budget pressure (budget 400)
+slightly *favors* blind truncation over `ours`, not the reverse.
+
+**Honest conclusion.** On this benchmark, obligation-anchored submodular selection
+(`ours`) is **not** demonstrably better than blind truncation or random — the
+distribution lacks the budget-overflow regime the method targets, and `ours`'
+coefficients are uncalibrated placeholders. The earlier mock-fixture ordering
+(`ours ≥ random/trunc`) was an artifact of the tiny-budget regime. The
+load-bearing, positive contribution here is the **PPL-proxy signal** (above) and
+the **self-labeling benchmark/methodology**, not a demonstrated selection win.
+`keepdrop_dd` is the one clear laggard (over-drops, gold recall stuck at 0.18).
+Follow-up if the selection claim is to be pursued: find or construct the
+overflow regime (large multi-symbol migrations that exceed budget) and calibrate
+`ours`' coefficients there.
+
 ## Artifacts
 
 - retro: `~/work/driver_agent_ctx/runs/oacd/ppl_signal/{experiment_results.csv,experiment_summary.md}`

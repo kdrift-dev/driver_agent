@@ -124,9 +124,11 @@ concern the rule guards against does not materialize. Full write-up:
 1. ~~Full `v6.19..v7.0-rc1` mine~~ — **DONE** on `retro` (685 cases, 579 gold).
 2. ~~Freeze the pre-registration before scoring~~ — **DONE** (commit `924a8b5`,
    digest `32ecbf4da490…`).
-3. ~~Real 200-case pre-registered PPL run~~ — **DONE, SUCCESS** (§5). *Method
-   comparison on the real backend is the remaining sub-item* — scoped rather than
-   full-200 (HF cost: 8 methods × budgets × 200 ≈ many hours), pending a scope call.
+3. ~~Real 200-case pre-registered PPL run~~ — **DONE, SUCCESS** (§5). Method
+   comparison on the real backend (40-case HF subset) — **DONE, and it is a NULL**:
+   `ours` does not beat blind truncation/random on this mined distribution (cases
+   fit the budget, so selection doesn't separate; see `docs-impl/06`). The positive
+   contribution is the PPL proxy + benchmark, not (yet) a selection-method win.
 4. **Decide whether to commit mined data** (default: no — eval-only, regenerable;
    the freeze binds the sample by digest, not by committing the packs).
 5. **Clear the gate flag (follow-up, not blocking):** improve gold labeling for
@@ -152,7 +154,11 @@ concern the rule guards against does not materialize. Full write-up:
   stop-rule is tripped by incomplete labels on large treewide edits; the signal
   survives on the label-clean subset, so it is a label-completeness caveat, not a
   result-validity one (§6.5 is the follow-up).
-- Selection coefficients are **uncalibrated placeholders**.
+- Selection coefficients are **uncalibrated placeholders** — and the real-backend
+  40-case method comparison is a **null**: `ours` does not beat blind truncation or
+  random on the mined distribution, because the atomic-commit cases fit the budget
+  and the overflow regime the method targets is rare here (§6.3, `docs-impl/06`).
+  Do not claim a selection-method win from current evidence.
 - Gold labeling is token-intersection: it misses typedef/macro indirection and can over-count coincidental symbols — hence the gate's <80% stop rule.
 - The pipeline hook currently **reorders, never drops**; a dropping variant is later, riskier work.
 

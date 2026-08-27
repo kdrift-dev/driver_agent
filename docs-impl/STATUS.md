@@ -13,8 +13,11 @@ Frozen 200-case `v6.19..v7.0-rc1` sample (digest `32ecbf4da490…`, freeze commi
 side-channel <80% stop-rule tripped (gold pass 58%, incomplete labels on large
 treewide edits) but the signal holds on the label-clean subset (66%), refuting
 the concern the rule guards. Full write-up: `docs-impl/06_ppl_signal_result.md`.
-Method comparison on the real backend is the one remaining sub-item (scoped, not
-full-200, due to HF cost). Retro compute env: nix-built `~/ppl-env` (torch 2.9.1 /
+Method comparison on the real backend (40-case HF subset) is **done and is a
+NULL**: `ours` does not beat blind truncation/random — the mined cases fit the
+budget, so selection doesn't separate (default budgets 30/80 were also miscalibrated
+vs the ~125-token locus). Positive contribution = PPL proxy + benchmark, not a
+selection-method win. Retro compute env: nix-built `~/ppl-env` (torch 2.9.1 /
 transformers 4.57.1); ctx-impl lives in a separate worktree `~/work/driver_agent_ctx`
 so the dirty evolve-search tree is untouched.
 

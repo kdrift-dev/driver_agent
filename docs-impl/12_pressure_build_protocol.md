@@ -108,3 +108,19 @@ their development include directories are now exposed through
 `CPLUS_INCLUDE_PATH` for the host C++ compiler. Kernel configuration and driver
 source are not changed by this correction. A fresh census directory records
 the corrected environment and code identity.
+
+## Reproduction
+
+On retro, enter `/home/arina/bin/driver-agent-shell` and use a fresh output
+directory; the command retains two kernel worktrees per comparable case.
+
+```bash
+python3 tools/run_pressure_build_checks.py
+python3 tools/run_pressure_build_eligibility.py \
+  --repo /home/arina/repos/linux \
+  --dataset-dir /home/arina/work/driver_agent_ctx/runs/mined \
+  --manifest runs/context_pressure_set_v1_20260914/reserved_4096.json \
+  --mapping datasets/pressure_build_mapping_v1.json \
+  --out-dir runs/pressure_build_reproduction \
+  --jobs 8 --timeout-sec 600
+```

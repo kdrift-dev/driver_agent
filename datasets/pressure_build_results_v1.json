@@ -1,0 +1,1050 @@
+{
+  "schema_version": 1,
+  "protocol": "pressure_file_build_results_v1",
+  "evaluation_only": true,
+  "scope": "translation-unit compilation only; no module links, generation, PPL or runtime tests",
+  "artifact_directory": "runs/pressure_build_eligibility_v1_20260914_fixedenv",
+  "retro_artifact_directory": "/home/arina/work/driver_agent_build_eligibility/runs/pressure_build_eligibility_v1_20260914_fixedenv",
+  "runner_commit": "d02ed15",
+  "execution_commit": "c69f0b342d33c5b30eebf4f939e0281dfbe39024",
+  "source_digest": "aa54cc263e6bb5a654cf4c5bc3917a329f530f684be0f8d7a559f05038b0388e",
+  "started_at_utc": "2026-09-14T16:02:14.920771+00:00",
+  "finished_at_utc": "2026-09-14T16:14:44.116768+00:00",
+  "manifest_sha256": "ab21a8ce8fa3fac193de3ea0d11f7038ddf68a72dc68000bcb866867b49e9388",
+  "mapping_sha256": "a1206c6835c9a398cdc34be2d8c9814986ebbfb25ccbb43ff8494f00d6766050",
+  "integrity": {
+    "code_unchanged": true,
+    "full_frozen_pool_unchanged": true,
+    "manifest_unchanged": true,
+    "mapping_unchanged": true,
+    "verified": true
+  },
+  "n_cases": 11,
+  "n_migration_commits": 10,
+  "n_file_compilations": 40,
+  "n_successful_compilations": 38,
+  "classifications": {
+    "observed_file_compile_break": 2,
+    "old_source_compiles": 8,
+    "target_removed": 1
+  },
+  "diagnostic_subclasses": {
+    "kernel_argument_type_mismatch": 1,
+    "removed_public_prototypes_warning_as_error": 1
+  },
+  "result_files": {
+    "summary.json": "39f6811d23f0a63fff8815a64adf8edc8366ad6f91b27ac02f37667d97f29d66",
+    "run_metadata.started.json": "7c33ac5ab45175c981afd6e0343d8c528cbe3e184333577cab97525ef2f62169",
+    "run_metadata.json": "895cfb990f4b3c2d463a9a6f4a8bf354a9f7d62c6b41eed2341cde0d1f1e7164"
+  },
+  "artifact_hash_index": {
+    "path": "runs/pressure_build_results_audit_20260914/artifacts_sha256.json",
+    "sha256": "6a29c602e9d00839c70e54f3341c3a6dceb105c1ad10cf3a0bfbd6bf04598f2f",
+    "n_files": 572
+  },
+  "binary_reproducibility_note": "VXCAN and Xilinx new/restored object hashes differ in one 8-byte latent-entropy random immediate in .init.text; GCC_PLUGIN_LATENT_ENTROPY is enabled. Controls require fresh successful compilation with identical source/configuration, not bit-identical objects.",
+  "initial_incomplete_attempt": {
+    "path": "runs/pressure_build_eligibility_v1_20260914",
+    "execution_commit": "d02ed15",
+    "status": "interrupted after modules_prepare failures due missing host C++ GMP header; no four-condition measurements",
+    "summary_sha256": "260312b35d5bb480dccd6a6552c81b31368ecb430448c5f33c91ac44cb953a51"
+  },
+  "module_builds": 0,
+  "runtime_tests": 0,
+  "model_inference_calls": 0,
+  "cases": [
+    {
+      "case_id": "158ebb578cd5__drivers_hv_hv_proc_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/hv/hv_proc.c": "2d1bdf6280f42e909c5c33d830ea96e87e4b7e6ff5cb18fe6da64e6a1687ca5c"
+      },
+      "old_commit": "cf82dd5ea95815e6c0612b61118d2358ef5c05b0",
+      "new_commit": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+      "source_file": "drivers/hv/hv_proc.c",
+      "object_target": "drivers/hv/hv_proc.o",
+      "owner_target": "drivers/hv/hv_proc.o",
+      "case_content_sha256": "3789fc7a13b5db7c372c3589d0126ceed96e25159505e34227efff9064f00e17",
+      "result_path": "cases/158ebb578cd5__drivers_hv_hv_proc_c/result.json",
+      "result_sha256": "a8edccabaac719cf10a8e5e7af806948ea6714881a6aca07f3d3446cf9e5926f",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "564c168decc1933863d731f637ac1c0b58a6a5eec423b8ed2e32cbd956aac0fd",
+          "artifact_sha256": "e8378633f1ab84b2e0458d4e45855160dda547d6ec6925341828ee05baa9ca09",
+          "artifact_bytes": 41232,
+          "kbuild_cmd_sha256": "dca58e1b20cc4511e7288458801385bd9c108454dcec93309bbde820568b9af9",
+          "compiler_command_seen": true,
+          "config_before_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "config_after_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "returncode": 0,
+          "log_path": "cases/158ebb578cd5__drivers_hv_hv_proc_c/logs/017_new_on_new.log",
+          "log_sha256": "153b5d0e1585cfceaebefcad372eac1a7a9a5cb4d45aa8f9303ec47efede6f1e",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "2d1bdf6280f42e909c5c33d830ea96e87e4b7e6ff5cb18fe6da64e6a1687ca5c",
+          "artifact_sha256": "3ae317f817dd30baa67b6bfc53ca21dfc91183671f7c6dc0d9f5428e20f2010b",
+          "artifact_bytes": 39720,
+          "kbuild_cmd_sha256": "dca58e1b20cc4511e7288458801385bd9c108454dcec93309bbde820568b9af9",
+          "compiler_command_seen": true,
+          "config_before_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "config_after_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "returncode": 0,
+          "log_path": "cases/158ebb578cd5__drivers_hv_hv_proc_c/logs/018_old_on_new.log",
+          "log_sha256": "153b5d0e1585cfceaebefcad372eac1a7a9a5cb4d45aa8f9303ec47efede6f1e",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "2d1bdf6280f42e909c5c33d830ea96e87e4b7e6ff5cb18fe6da64e6a1687ca5c",
+          "artifact_sha256": "3ae317f817dd30baa67b6bfc53ca21dfc91183671f7c6dc0d9f5428e20f2010b",
+          "artifact_bytes": 39720,
+          "kbuild_cmd_sha256": "dca58e1b20cc4511e7288458801385bd9c108454dcec93309bbde820568b9af9",
+          "compiler_command_seen": true,
+          "config_before_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "config_after_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "returncode": 0,
+          "log_path": "cases/158ebb578cd5__drivers_hv_hv_proc_c/logs/016_old_on_old.log",
+          "log_sha256": "aa6d2da7e09df04474013de343aac86317aaa1b5ac98c648f295f97b888e96e3",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "564c168decc1933863d731f637ac1c0b58a6a5eec423b8ed2e32cbd956aac0fd",
+          "artifact_sha256": "e8378633f1ab84b2e0458d4e45855160dda547d6ec6925341828ee05baa9ca09",
+          "artifact_bytes": 41232,
+          "kbuild_cmd_sha256": "dca58e1b20cc4511e7288458801385bd9c108454dcec93309bbde820568b9af9",
+          "compiler_command_seen": true,
+          "config_before_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "config_after_sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "returncode": 0,
+          "log_path": "cases/158ebb578cd5__drivers_hv_hv_proc_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "153b5d0e1585cfceaebefcad372eac1a7a9a5cb4d45aa8f9303ec47efede6f1e",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "required_values": {
+            "HYPERV": "y",
+            "MSHV_ROOT": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "413420360c5a592bd4497c8a2d5e44ea9dbd092dad00a10f2b6aaa30a5246ec1",
+          "required_values": {
+            "HYPERV": "y",
+            "MSHV_ROOT": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "21bab791346e__drivers_base_revocable_c",
+      "classification": "target_removed",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/base/revocable.c": "33284253045f7d34067f8973a81bf851b18614b085d53557b30c2ee86f9eb12a"
+      },
+      "old_commit": "7149ce34dd48886b3f69153c7f5533dd3fd5f47e",
+      "new_commit": "21bab791346e5b7902a04709231c0642ff6d69bc",
+      "source_file": "drivers/base/revocable.c",
+      "object_target": "drivers/base/revocable.o",
+      "owner_target": null,
+      "case_content_sha256": "84535679e0238e4e1b2800611e78c8273ccf5b123a2c3e1284b67da83c1d7522",
+      "result_path": "cases/21bab791346e__drivers_base_revocable_c/result.json",
+      "result_sha256": "393f291065522e799091e9a17c99a0a7bfff05be77b1527c557431094599d9a5",
+      "phases": {},
+      "interpretation": "source removed from target tree; no comparable build target",
+      "configurations": {}
+    },
+    {
+      "case_id": "4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/soc/mediatek/mtk-cmdq-helper.c": "f21ab6f845bdbe393c0ad4c4181342340d084e2dc75acac6c8f80382209c3910"
+      },
+      "old_commit": "c775b23b1f78626daca804bd26f1460368f20406",
+      "new_commit": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+      "source_file": "drivers/soc/mediatek/mtk-cmdq-helper.c",
+      "object_target": "drivers/soc/mediatek/mtk-cmdq-helper.o",
+      "owner_target": "drivers/soc/mediatek/mtk-cmdq-helper.o",
+      "case_content_sha256": "7c06a09e6d6c24463371c5bb215383f218871a79273a777a2d4e602913730bc6",
+      "result_path": "cases/4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c/result.json",
+      "result_sha256": "3343a39014a7094fe396b6e028bac34d0890f717bf0ed42d0bddb884e3c52821",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "4475ce399d3c300d358f205742d2d56c6052e475dea7888a68ce2bcb02af045b",
+          "artifact_sha256": "315af22aefc703c45e0ccee726e5f0466fda7881e63ab9adde4bfbbe82e910f7",
+          "artifact_bytes": 60544,
+          "kbuild_cmd_sha256": "0024263e519b8ae561453900748c7f149cfd636053965f3b4f2f76fe217b06f0",
+          "compiler_command_seen": true,
+          "config_before_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "config_after_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "returncode": 0,
+          "log_path": "cases/4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c/logs/017_new_on_new.log",
+          "log_sha256": "e962fff12b203bc4f702fb3f2cf6d14240941a8cee51ec74372e004ba7f31add",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "f21ab6f845bdbe393c0ad4c4181342340d084e2dc75acac6c8f80382209c3910",
+          "artifact_sha256": "215bbb0250482df8084a1a2bfbbd1865fa27a833046f3c1995588a119a94bcff",
+          "artifact_bytes": 58496,
+          "kbuild_cmd_sha256": "df46b54114e3a1669d35292dbe6cd5a6fe4d85d5f30f80174e08d71d5aa95648",
+          "compiler_command_seen": true,
+          "config_before_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "config_after_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "returncode": 0,
+          "log_path": "cases/4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c/logs/018_old_on_new.log",
+          "log_sha256": "e962fff12b203bc4f702fb3f2cf6d14240941a8cee51ec74372e004ba7f31add",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "f21ab6f845bdbe393c0ad4c4181342340d084e2dc75acac6c8f80382209c3910",
+          "artifact_sha256": "298abbb3fd765b7deba5f21ea2a0269c77cb5f377fe814a14112045b40c3d3c0",
+          "artifact_bytes": 58496,
+          "kbuild_cmd_sha256": "df46b54114e3a1669d35292dbe6cd5a6fe4d85d5f30f80174e08d71d5aa95648",
+          "compiler_command_seen": true,
+          "config_before_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "config_after_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "returncode": 0,
+          "log_path": "cases/4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c/logs/016_old_on_old.log",
+          "log_sha256": "4507f9e8c9fd29556524d4d11ef24b73fcbcc793d7d1fcca9558cdbb306c4c37",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "4475ce399d3c300d358f205742d2d56c6052e475dea7888a68ce2bcb02af045b",
+          "artifact_sha256": "315af22aefc703c45e0ccee726e5f0466fda7881e63ab9adde4bfbbe82e910f7",
+          "artifact_bytes": 60544,
+          "kbuild_cmd_sha256": "0024263e519b8ae561453900748c7f149cfd636053965f3b4f2f76fe217b06f0",
+          "compiler_command_seen": true,
+          "config_before_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "config_after_sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "returncode": 0,
+          "log_path": "cases/4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "e962fff12b203bc4f702fb3f2cf6d14240941a8cee51ec74372e004ba7f31add",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "required_values": {
+            "COMPILE_TEST": "y",
+            "MTK_CMDQ": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "4751ec6c1895b1c3cf8963b4ca5446c686a62b137f22ad41b2cfcfbf81d2dd9d",
+          "required_values": {
+            "COMPILE_TEST": "y",
+            "MTK_CMDQ": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "7bd27439a578__drivers_ntb_msi_c",
+      "classification": "observed_file_compile_break",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/ntb/msi.c": "a528dc4de9d479e5c5959837b8ab11e8b056f7b6571b8c6195bed1d05c7743a7"
+      },
+      "old_commit": "b1f4077465b2110d8a486cd6f1aed0c2569c339a",
+      "new_commit": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+      "source_file": "drivers/ntb/msi.c",
+      "object_target": "drivers/ntb/msi.o",
+      "owner_target": "drivers/ntb/ntb.o",
+      "case_content_sha256": "8c5d7d3914b8740dc50cbfefa317b03bdc4eaf40152a6a96160952d24367327e",
+      "result_path": "cases/7bd27439a578__drivers_ntb_msi_c/result.json",
+      "result_sha256": "aaa61849b095f7094055fa2ff4d54226f1b9c1d2570495c0ac4fbb0897de335d",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "f838c0256c010622efc483f5d3f2b861b768faee51980a71777c857ee5a30f51",
+          "artifact_sha256": "a804845cc9a3b759df2f6bf8804d3d6447c29bd133d77774ec14b89634a6a780",
+          "artifact_bytes": 33288,
+          "kbuild_cmd_sha256": "b6e6ad8743462f71f5812a2dcd2ffc9c1ffedb9abfce44a316f29ca6a44366f7",
+          "compiler_command_seen": true,
+          "config_before_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "config_after_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "returncode": 0,
+          "log_path": "cases/7bd27439a578__drivers_ntb_msi_c/logs/017_new_on_new.log",
+          "log_sha256": "36305f4d54e75fb3c294644965faf78f8c516b18fd2faa6ec39f8885945dc273",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": false,
+          "source_sha256": "a528dc4de9d479e5c5959837b8ab11e8b056f7b6571b8c6195bed1d05c7743a7",
+          "artifact_sha256": null,
+          "artifact_bytes": 0,
+          "kbuild_cmd_sha256": null,
+          "compiler_command_seen": true,
+          "config_before_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "config_after_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "returncode": 2,
+          "log_path": "cases/7bd27439a578__drivers_ntb_msi_c/logs/018_old_on_new.log",
+          "log_sha256": "0ffece20e4bfeb8778afe1441e77effe25c649f709bea413fdc66a69baa911c8",
+          "diagnostics": [
+            "drivers/ntb/msi.c:335:6: error: no previous prototype for \u2018ntbm_msi_free_irq\u2019 [-Werror=missing-prototypes]",
+            "drivers/ntb/msi.c:391:5: error: no previous prototype for \u2018ntb_msi_peer_addr\u2019 [-Werror=missing-prototypes]"
+          ]
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "a528dc4de9d479e5c5959837b8ab11e8b056f7b6571b8c6195bed1d05c7743a7",
+          "artifact_sha256": "28108b6b4c00a862257135604bf5c10b8846772060a703f3825f1361e0b50e61",
+          "artifact_bytes": 37424,
+          "kbuild_cmd_sha256": "b6e6ad8743462f71f5812a2dcd2ffc9c1ffedb9abfce44a316f29ca6a44366f7",
+          "compiler_command_seen": true,
+          "config_before_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "config_after_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "returncode": 0,
+          "log_path": "cases/7bd27439a578__drivers_ntb_msi_c/logs/016_old_on_old.log",
+          "log_sha256": "21a0c6340be85a47f3ecd60bfb92362f3e1f2fccc01806c6f94335995217a9a5",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "f838c0256c010622efc483f5d3f2b861b768faee51980a71777c857ee5a30f51",
+          "artifact_sha256": "a804845cc9a3b759df2f6bf8804d3d6447c29bd133d77774ec14b89634a6a780",
+          "artifact_bytes": 33288,
+          "kbuild_cmd_sha256": "b6e6ad8743462f71f5812a2dcd2ffc9c1ffedb9abfce44a316f29ca6a44366f7",
+          "compiler_command_seen": true,
+          "config_before_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "config_after_sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "returncode": 0,
+          "log_path": "cases/7bd27439a578__drivers_ntb_msi_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "36305f4d54e75fb3c294644965faf78f8c516b18fd2faa6ec39f8885945dc273",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "public prototype removal; two -Werror=missing-prototypes diagnostics; report separately from consumer API type mismatches",
+      "configurations": {
+        "new": {
+          "sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "required_values": {
+            "NTB": "y",
+            "NTB_MSI": "y",
+            "PCI": "y",
+            "PCI_MSI": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "0c77ab35805881c0392bd120ef1933cdfe2217bc43799b30681e4d29e97bdf61",
+          "required_values": {
+            "NTB": "y",
+            "NTB_MSI": "y",
+            "PCI": "y",
+            "PCI_MSI": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "96ea3a1e2d31__drivers_net_can_dev_skb_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/net/can/dev/skb.c": "6949be06deb88e96698cae9717604a87fd686cb3b5e0e973b705c385f4e46d96"
+      },
+      "old_commit": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+      "new_commit": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+      "source_file": "drivers/net/can/dev/skb.c",
+      "object_target": "drivers/net/can/dev/skb.o",
+      "owner_target": "drivers/net/can/dev/can-dev.o",
+      "case_content_sha256": "fc77d0b77d4fae96a39af2918a1fc823433c6fea2e1002aa55aaa5cf6009b7c8",
+      "result_path": "cases/96ea3a1e2d31__drivers_net_can_dev_skb_c/result.json",
+      "result_sha256": "51cc050e75a1baaebaeb065beac6fef666e062f2e706a7d59dc019c7716abb83",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "ee05e56d23b9408b90e120e5750e677c5d57854747262f19580e085d86abb03f",
+          "artifact_sha256": "2c01bb4f2efdd6458df5283ba396e695cef225976b047dd84a958a7bbadb5fba",
+          "artifact_bytes": 36016,
+          "kbuild_cmd_sha256": "d231d65e95d37d5019150b43563a7c30973f50fc4d225ae19870d3311ab6f6b7",
+          "compiler_command_seen": true,
+          "config_before_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "config_after_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_dev_skb_c/logs/017_new_on_new.log",
+          "log_sha256": "1fc9749dbd3e42f9c9f684072860db906704910a43ac795ff80322ac4be193b6",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "6949be06deb88e96698cae9717604a87fd686cb3b5e0e973b705c385f4e46d96",
+          "artifact_sha256": "f9c82c29e5a4c061b621996323d73e8d2824c4bece1989d17af3d26f5a7502d9",
+          "artifact_bytes": 34536,
+          "kbuild_cmd_sha256": "d231d65e95d37d5019150b43563a7c30973f50fc4d225ae19870d3311ab6f6b7",
+          "compiler_command_seen": true,
+          "config_before_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "config_after_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_dev_skb_c/logs/018_old_on_new.log",
+          "log_sha256": "1fc9749dbd3e42f9c9f684072860db906704910a43ac795ff80322ac4be193b6",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "6949be06deb88e96698cae9717604a87fd686cb3b5e0e973b705c385f4e46d96",
+          "artifact_sha256": "f9c82c29e5a4c061b621996323d73e8d2824c4bece1989d17af3d26f5a7502d9",
+          "artifact_bytes": 34536,
+          "kbuild_cmd_sha256": "d3695df1991605d5950ad47e557ba147ef5fae1176955ac25f9c07b061f0c6be",
+          "compiler_command_seen": true,
+          "config_before_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "config_after_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_dev_skb_c/logs/016_old_on_old.log",
+          "log_sha256": "827f5f53f0719946468730e50c728d8b5439bc92773176b82647fc0353b0efbf",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "ee05e56d23b9408b90e120e5750e677c5d57854747262f19580e085d86abb03f",
+          "artifact_sha256": "2c01bb4f2efdd6458df5283ba396e695cef225976b047dd84a958a7bbadb5fba",
+          "artifact_bytes": 36016,
+          "kbuild_cmd_sha256": "d231d65e95d37d5019150b43563a7c30973f50fc4d225ae19870d3311ab6f6b7",
+          "compiler_command_seen": true,
+          "config_before_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "config_after_sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_dev_skb_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "1fc9749dbd3e42f9c9f684072860db906704910a43ac795ff80322ac4be193b6",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "required_values": {
+            "CAN": "y",
+            "CAN_DEV": "y",
+            "NET": "y",
+            "NETDEVICES": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "85b2a4b440a96fdd7e727ea52eaf67c5cc4daeb91716df72fa2ac9be8326f9a6",
+          "required_values": {
+            "CAN": "y",
+            "CAN_DEV": "y",
+            "NET": "y",
+            "NETDEVICES": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "96ea3a1e2d31__drivers_net_can_vxcan_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/net/can/vxcan.c": "0d621c5a3413aa10926084014a5adda372d6c4e9120518b36378a5a1aaf3a8f9"
+      },
+      "old_commit": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+      "new_commit": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+      "source_file": "drivers/net/can/vxcan.c",
+      "object_target": "drivers/net/can/vxcan.o",
+      "owner_target": "drivers/net/can/vxcan.o",
+      "case_content_sha256": "969188d4426bfbb8ef7ff3055a86234107a003642a6a51d67fd3bea1496a42e7",
+      "result_path": "cases/96ea3a1e2d31__drivers_net_can_vxcan_c/result.json",
+      "result_sha256": "08f14fbf5951741d282cc1348e35ea843c848db7fd0c14bb69240eb59e8932b9",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "966a9caf35a4c56b9212df3fda466db7f165a79e957f52b5d2d49f90d8208f9c",
+          "artifact_sha256": "218e1a3e808a877847fa41e332c7d9a39999a880ff6d685e8c0cb66a640a0b13",
+          "artifact_bytes": 42872,
+          "kbuild_cmd_sha256": "3e9f5c3ed09c635932c0d91caf616431442bb98f6f59bfc993e096949981950a",
+          "compiler_command_seen": true,
+          "config_before_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "config_after_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_vxcan_c/logs/017_new_on_new.log",
+          "log_sha256": "d41be3205fd9e23bb937a333d8b641fdf8719cc39483d9fc0685c9df22c9316f",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "0d621c5a3413aa10926084014a5adda372d6c4e9120518b36378a5a1aaf3a8f9",
+          "artifact_sha256": "e027230a7231f77f21aff941f9107dd835b00c6b53f02e5167e323a105bf45e3",
+          "artifact_bytes": 42736,
+          "kbuild_cmd_sha256": "3e9f5c3ed09c635932c0d91caf616431442bb98f6f59bfc993e096949981950a",
+          "compiler_command_seen": true,
+          "config_before_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "config_after_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_vxcan_c/logs/018_old_on_new.log",
+          "log_sha256": "d41be3205fd9e23bb937a333d8b641fdf8719cc39483d9fc0685c9df22c9316f",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "0d621c5a3413aa10926084014a5adda372d6c4e9120518b36378a5a1aaf3a8f9",
+          "artifact_sha256": "6ca6fc8d94855309a52d55926eaf20c6605786adf7a7e59334dd4571eb7bed5f",
+          "artifact_bytes": 42736,
+          "kbuild_cmd_sha256": "e9db3d5c6189d20222e94c71b26dcfcc2492c04a7d32ee2f92387edaeea8547e",
+          "compiler_command_seen": true,
+          "config_before_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "config_after_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_vxcan_c/logs/016_old_on_old.log",
+          "log_sha256": "389e8ec0aa3c56e8bb006a1510c8846f1f3df2f49575b38584f7219da848caba",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "966a9caf35a4c56b9212df3fda466db7f165a79e957f52b5d2d49f90d8208f9c",
+          "artifact_sha256": "679337e2c3485abe6a5c40093231f67ee1d680d0ebe2d7a7b701b0e8e476c960",
+          "artifact_bytes": 42872,
+          "kbuild_cmd_sha256": "3e9f5c3ed09c635932c0d91caf616431442bb98f6f59bfc993e096949981950a",
+          "compiler_command_seen": true,
+          "config_before_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "config_after_sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "returncode": 0,
+          "log_path": "cases/96ea3a1e2d31__drivers_net_can_vxcan_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "bacf543918c6e8acfff1d2c03f0e46d8acbf4d55175b47cb64994512255720f0",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "required_values": {
+            "CAN": "y",
+            "CAN_DEV": "y",
+            "CAN_VXCAN": "y",
+            "NET": "y",
+            "NETDEVICES": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "a2fdbd49a86d242148d4403fe51585fd146c4d2012c191749b5b7a14956a1700",
+          "required_values": {
+            "CAN": "y",
+            "CAN_DEV": "y",
+            "CAN_VXCAN": "y",
+            "NET": "y",
+            "NETDEVICES": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": false
+    },
+    {
+      "case_id": "b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c",
+      "classification": "observed_file_compile_break",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/crypto/xilinx/xilinx-trng.c": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f"
+      },
+      "old_commit": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+      "new_commit": "b2c15db74a379a50d723002799c3db0c6781c75a",
+      "source_file": "drivers/crypto/xilinx/xilinx-trng.c",
+      "object_target": "drivers/crypto/xilinx/xilinx-trng.o",
+      "owner_target": "drivers/crypto/xilinx/xilinx-trng.o",
+      "case_content_sha256": "b378d461e69de0dc9b34f2285b1ac3ad92efae400ecb62bf06867fc87bf010a3",
+      "result_path": "cases/b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c/result.json",
+      "result_sha256": "4a27ac3cf4b9eeee92d60e9fb1beef379302f37f86c70575085dca5e64b87927",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "fcb03701415615e66ae387398d5b342ecbd6fb46e57da498edb623f428681859",
+          "artifact_sha256": "81f31260293c63a903fa3f1f99131cb938a503da9a562836f75eb2b1c77b9846",
+          "artifact_bytes": 35232,
+          "kbuild_cmd_sha256": "5a9fa2debc3c5577b36194a988006cd7f3c43f20484f841cd42ffbe990cf3844",
+          "compiler_command_seen": true,
+          "config_before_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "config_after_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "returncode": 0,
+          "log_path": "cases/b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c/logs/017_new_on_new.log",
+          "log_sha256": "b5cd5613f9bb3a0cb85ddbd99b255527e683638d4de47854c4cff75cb2938162",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": false,
+          "source_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+          "artifact_sha256": null,
+          "artifact_bytes": 0,
+          "kbuild_cmd_sha256": null,
+          "compiler_command_seen": true,
+          "config_before_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "config_after_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "returncode": 2,
+          "log_path": "cases/b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c/logs/018_old_on_new.log",
+          "log_sha256": "e196afce34e91be38e6d00a78df9c5cf9499fe39e82b529382d3f93f86d9c63a",
+          "diagnostics": [
+            "drivers/crypto/xilinx/xilinx-trng.c:201:37: error: passing argument 1 of \u2018crypto_drbg_ctr_df\u2019 from incompatible pointer type [-Wincompatible-pointer-types]"
+          ]
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+          "artifact_sha256": "6ba38070b63bf005a27d56e409980f9f6394856d112837daa98e835fa4cd7154",
+          "artifact_bytes": 35232,
+          "kbuild_cmd_sha256": "5a9fa2debc3c5577b36194a988006cd7f3c43f20484f841cd42ffbe990cf3844",
+          "compiler_command_seen": true,
+          "config_before_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "config_after_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "returncode": 0,
+          "log_path": "cases/b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c/logs/016_old_on_old.log",
+          "log_sha256": "d6aff1b7ff4be591fcc859b1433df26c24f04424e711418468acaa26ffb418bc",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "fcb03701415615e66ae387398d5b342ecbd6fb46e57da498edb623f428681859",
+          "artifact_sha256": "576c4110c95f45c6222c19507e97793aac0b37c312829d0ba8c1e5305f0873ed",
+          "artifact_bytes": 35232,
+          "kbuild_cmd_sha256": "5a9fa2debc3c5577b36194a988006cd7f3c43f20484f841cd42ffbe990cf3844",
+          "compiler_command_seen": true,
+          "config_before_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "config_after_sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "returncode": 0,
+          "log_path": "cases/b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "b5cd5613f9bb3a0cb85ddbd99b255527e683638d4de47854c4cff75cb2938162",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "kernel interface argument type changed from crypto_aes_ctx* to aes_enckey*; candidate for scoped pilot with separate link/runtime validation",
+      "configurations": {
+        "new": {
+          "sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "required_values": {
+            "COMPILE_TEST": "y",
+            "CRYPTO": "y",
+            "CRYPTO_DEV_XILINX_TRNG": "y",
+            "CRYPTO_HW": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "7660ffb47329a05278fb0978d241f004c0e7647ab36a03c3454d528f4635cfdb",
+          "required_values": {
+            "COMPILE_TEST": "y",
+            "CRYPTO": "y",
+            "CRYPTO_DEV_XILINX_TRNG": "y",
+            "CRYPTO_HW": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": false
+    },
+    {
+      "case_id": "c789a7f40288__drivers_media_mc_mc_request_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/media/mc/mc-request.c": "c0f27ed67d28e7d06abf1ee46d6079ec49e1c1cf7b2b56270a22afc46414594e"
+      },
+      "old_commit": "a519e21e32398459ba357e67b541402f7295ee1b",
+      "new_commit": "c789a7f40288c19004f786a6da67c3733d38c6af",
+      "source_file": "drivers/media/mc/mc-request.c",
+      "object_target": "drivers/media/mc/mc-request.o",
+      "owner_target": "drivers/media/mc/mc.o",
+      "case_content_sha256": "899ce93f22ff6b913065d8ece510caadb72987fee4472308e2eebdbb816f6b47",
+      "result_path": "cases/c789a7f40288__drivers_media_mc_mc_request_c/result.json",
+      "result_sha256": "c786d364af3981899935663e1601938f79b4845947b2f4efa33b2518e511e8ce",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf",
+          "artifact_sha256": "bbde0e8e1946488998b53b934c8b6a2be27872a38502bc33cdd0f50c3b0203ba",
+          "artifact_bytes": 67144,
+          "kbuild_cmd_sha256": "df8577914a0f1ab0b9c6cd64b0a602aec0cf1b8354697de735839d9e60b71583",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/c789a7f40288__drivers_media_mc_mc_request_c/logs/017_new_on_new.log",
+          "log_sha256": "5e4691cc5f6e19a5943683188ba89e1a6e2b94240fec1d80e6f7d266f18fe315",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "c0f27ed67d28e7d06abf1ee46d6079ec49e1c1cf7b2b56270a22afc46414594e",
+          "artifact_sha256": "f7bf1ea09f6639a8e474cb8a1936b553cbccfd2cc9e4743bfb0ba35539f4bc80",
+          "artifact_bytes": 61632,
+          "kbuild_cmd_sha256": "df8577914a0f1ab0b9c6cd64b0a602aec0cf1b8354697de735839d9e60b71583",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/c789a7f40288__drivers_media_mc_mc_request_c/logs/018_old_on_new.log",
+          "log_sha256": "5e4691cc5f6e19a5943683188ba89e1a6e2b94240fec1d80e6f7d266f18fe315",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "c0f27ed67d28e7d06abf1ee46d6079ec49e1c1cf7b2b56270a22afc46414594e",
+          "artifact_sha256": "7e6f78dcab3484f7f4a05475bd0d33caf212386db3d63eef193f26e82eac43ef",
+          "artifact_bytes": 61704,
+          "kbuild_cmd_sha256": "df8577914a0f1ab0b9c6cd64b0a602aec0cf1b8354697de735839d9e60b71583",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/c789a7f40288__drivers_media_mc_mc_request_c/logs/016_old_on_old.log",
+          "log_sha256": "7ce74ef97ce80989e82cf28baa8188d14b33ced845aae9279e5d492647c01982",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf",
+          "artifact_sha256": "bbde0e8e1946488998b53b934c8b6a2be27872a38502bc33cdd0f50c3b0203ba",
+          "artifact_bytes": 67144,
+          "kbuild_cmd_sha256": "df8577914a0f1ab0b9c6cd64b0a602aec0cf1b8354697de735839d9e60b71583",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/c789a7f40288__drivers_media_mc_mc_request_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "2cd66d7526459060c61c92fc1c361fcafb33421d102a100f188ac1fb97eabab6",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "required_values": {
+            "MEDIA_CONTROLLER": "y",
+            "MEDIA_SUPPORT": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "required_values": {
+            "MEDIA_CONTROLLER": "y",
+            "MEDIA_SUPPORT": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/gpu/drm/tests/drm_gem_shmem_test.c": "0761ed39825bcf940274bb5102e06b6185196a413949851e782e2226724b6b2f"
+      },
+      "old_commit": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+      "new_commit": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+      "source_file": "drivers/gpu/drm/tests/drm_gem_shmem_test.c",
+      "object_target": "drivers/gpu/drm/tests/drm_gem_shmem_test.o",
+      "owner_target": "drivers/gpu/drm/tests/drm_gem_shmem_test.o",
+      "case_content_sha256": "cf8b3166e2c390ef3a7c984ecf0fbc444277ef21c1e19c7b809adb63cf96db76",
+      "result_path": "cases/cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c/result.json",
+      "result_sha256": "d12707635991fa3a85502198879b9cfaee22041c7f6ef6fc4f178f791e22798f",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "50f5b4cf7b2f23f5c8bc02b9c7639804ffa78ec6d2cd240583173d9b19dd74bc",
+          "artifact_sha256": "90d3a1c6e4e0889b96f8a8508fc70d8372cfe383dea4bfdc349d9d445234b9b8",
+          "artifact_bytes": 147952,
+          "kbuild_cmd_sha256": "cd8c0877e451972b4ab58e1217402a4f44c1620b0336205eac7a1cbbac556f23",
+          "compiler_command_seen": true,
+          "config_before_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "config_after_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "returncode": 0,
+          "log_path": "cases/cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c/logs/017_new_on_new.log",
+          "log_sha256": "26eb5bf56e2e8a4a1cbc069b3c0d48f424aeb38aefca18e7dab849767e3b6a68",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "0761ed39825bcf940274bb5102e06b6185196a413949851e782e2226724b6b2f",
+          "artifact_sha256": "6df139935eddb9babb2dfc9ccf86d4f33041119734d30fe50e65ab7791c1d704",
+          "artifact_bytes": 147848,
+          "kbuild_cmd_sha256": "cd8c0877e451972b4ab58e1217402a4f44c1620b0336205eac7a1cbbac556f23",
+          "compiler_command_seen": true,
+          "config_before_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "config_after_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "returncode": 0,
+          "log_path": "cases/cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c/logs/018_old_on_new.log",
+          "log_sha256": "efde32a839808ed0ec74dac4271f6a0a7bae0c07d07c79f882b78351390591fe",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "0761ed39825bcf940274bb5102e06b6185196a413949851e782e2226724b6b2f",
+          "artifact_sha256": "6df139935eddb9babb2dfc9ccf86d4f33041119734d30fe50e65ab7791c1d704",
+          "artifact_bytes": 147848,
+          "kbuild_cmd_sha256": "cd8c0877e451972b4ab58e1217402a4f44c1620b0336205eac7a1cbbac556f23",
+          "compiler_command_seen": true,
+          "config_before_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "config_after_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "returncode": 0,
+          "log_path": "cases/cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c/logs/016_old_on_old.log",
+          "log_sha256": "aa379c588a4bdb75fb909342c060252966f25563ef15c5e3ea3a514d36e74007",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "50f5b4cf7b2f23f5c8bc02b9c7639804ffa78ec6d2cd240583173d9b19dd74bc",
+          "artifact_sha256": "90d3a1c6e4e0889b96f8a8508fc70d8372cfe383dea4bfdc349d9d445234b9b8",
+          "artifact_bytes": 147952,
+          "kbuild_cmd_sha256": "cd8c0877e451972b4ab58e1217402a4f44c1620b0336205eac7a1cbbac556f23",
+          "compiler_command_seen": true,
+          "config_before_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "config_after_sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "returncode": 0,
+          "log_path": "cases/cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "efde32a839808ed0ec74dac4271f6a0a7bae0c07d07c79f882b78351390591fe",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "required_values": {
+            "DRM": "m",
+            "DRM_GEM_SHMEM_HELPER": "m",
+            "DRM_KUNIT_TEST": "m",
+            "KUNIT": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "b6e91cd0828dbee2e76ebe43285648d4955e3e9fb7541ba2f4b981120e0c47b0",
+          "required_values": {
+            "DRM": "m",
+            "DRM_GEM_SHMEM_HELPER": "m",
+            "DRM_KUNIT_TEST": "m",
+            "KUNIT": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "de9f0c2a1ce3__drivers_media_mc_mc_request_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/media/mc/mc-request.c": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf"
+      },
+      "old_commit": "d14d93f940763655c23c9a0012648ec42a06f482",
+      "new_commit": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+      "source_file": "drivers/media/mc/mc-request.c",
+      "object_target": "drivers/media/mc/mc-request.o",
+      "owner_target": "drivers/media/mc/mc.o",
+      "case_content_sha256": "3a3c239f42fc68f23842d2888b55bcf3524b8d8747f60d00f178a4cf81c299fe",
+      "result_path": "cases/de9f0c2a1ce3__drivers_media_mc_mc_request_c/result.json",
+      "result_sha256": "6afa042c87ca3fe91e25a4f5c6b83488cbb18faad579d9cf96ce976c0d4800c1",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "ef22f93eedf17a87f6f75ea3d9bd3981275e4fa3fe593db41a23f35169ef5ac5",
+          "artifact_sha256": "cb38ff485009e7b351571c2a2b9681e3bdfbd08c99124e85bb7bd1401849eef3",
+          "artifact_bytes": 67688,
+          "kbuild_cmd_sha256": "ee689b87ac81994fe5efbb56eda1dc2e04acd63c08c42826dd96b843056fb4ec",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/de9f0c2a1ce3__drivers_media_mc_mc_request_c/logs/017_new_on_new.log",
+          "log_sha256": "02bd595d486223c4e835dc0445527d030b8cd0e8342ddd99871130fab71ee5bb",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf",
+          "artifact_sha256": "d4dc9c0c9f1eaeb76c43c673d195a85d51a46ceec39b7e7cf743b872cfccb7c3",
+          "artifact_bytes": 67144,
+          "kbuild_cmd_sha256": "ee689b87ac81994fe5efbb56eda1dc2e04acd63c08c42826dd96b843056fb4ec",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/de9f0c2a1ce3__drivers_media_mc_mc_request_c/logs/018_old_on_new.log",
+          "log_sha256": "02bd595d486223c4e835dc0445527d030b8cd0e8342ddd99871130fab71ee5bb",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf",
+          "artifact_sha256": "c8efa23bad9b021e09b39c55f4d4522ebaa20371de7c5b34286eaaca8ec1b50e",
+          "artifact_bytes": 67224,
+          "kbuild_cmd_sha256": "df8577914a0f1ab0b9c6cd64b0a602aec0cf1b8354697de735839d9e60b71583",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/de9f0c2a1ce3__drivers_media_mc_mc_request_c/logs/016_old_on_old.log",
+          "log_sha256": "7b94fa2a6a5a79839e654beb9b2e1f150df570f465a218f26864c757cfc677da",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "ef22f93eedf17a87f6f75ea3d9bd3981275e4fa3fe593db41a23f35169ef5ac5",
+          "artifact_sha256": "cb38ff485009e7b351571c2a2b9681e3bdfbd08c99124e85bb7bd1401849eef3",
+          "artifact_bytes": 67688,
+          "kbuild_cmd_sha256": "ee689b87ac81994fe5efbb56eda1dc2e04acd63c08c42826dd96b843056fb4ec",
+          "compiler_command_seen": true,
+          "config_before_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "config_after_sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "returncode": 0,
+          "log_path": "cases/de9f0c2a1ce3__drivers_media_mc_mc_request_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "02bd595d486223c4e835dc0445527d030b8cd0e8342ddd99871130fab71ee5bb",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "required_values": {
+            "MEDIA_CONTROLLER": "y",
+            "MEDIA_SUPPORT": "y"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "830c28943c80b8cc4d2dc8adf0f091868ec81476ddd8aca32ca26722a49f715f",
+          "required_values": {
+            "MEDIA_CONTROLLER": "y",
+            "MEDIA_SUPPORT": "y"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    },
+    {
+      "case_id": "e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c",
+      "classification": "old_source_compiles",
+      "scope": "file_object_only; only packed sources transplanted; sibling sources remain at new commit",
+      "packed_source_sha256": {
+        "drivers/gpu/drm/drm_pagemap_util.c": "1a8fb1049fe87d154743617a6fa0c8a3b67601617adb4658d97f5b723263c569"
+      },
+      "old_commit": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+      "new_commit": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+      "source_file": "drivers/gpu/drm/drm_pagemap_util.c",
+      "object_target": "drivers/gpu/drm/drm_pagemap_util.o",
+      "owner_target": "drivers/gpu/drm/drm_gpusvm_helper.o",
+      "case_content_sha256": "855201b53980158359722f15e7e8b264aa5144b158c0a1f1d1488fe03db4c53c",
+      "result_path": "cases/e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c/result.json",
+      "result_sha256": "de742e6d9c974b1b0409e3ce6c93af8f02b85b6275532efcf154b3c07ff905d3",
+      "phases": {
+        "new_on_new": {
+          "passed": true,
+          "source_sha256": "2bc3970aa01560402bbf618227567dd62a03a41eeb437520de551461af725ad6",
+          "artifact_sha256": "a912c587b5f4a8f8263c3a3d4c4a9b0fda5c5737cb94732b55800007b810ec86",
+          "artifact_bytes": 43256,
+          "kbuild_cmd_sha256": "a1b3ebb6d4c518b70dd6cfb355a593829e906c57ef8d7eff5fde1d5882ed342c",
+          "compiler_command_seen": true,
+          "config_before_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "config_after_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "returncode": 0,
+          "log_path": "cases/e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c/logs/017_new_on_new.log",
+          "log_sha256": "3cb0984e40c899230dc2298569d0a11b04d9c120def6de22e9b252b3cdc592a9",
+          "diagnostics": []
+        },
+        "old_on_new": {
+          "passed": true,
+          "source_sha256": "1a8fb1049fe87d154743617a6fa0c8a3b67601617adb4658d97f5b723263c569",
+          "artifact_sha256": "9e91183bb2db7308daa05fd33a9b9feffa8b160972e59b39ae25ef6a28fbb911",
+          "artifact_bytes": 36408,
+          "kbuild_cmd_sha256": "2ecb34aa12ee4896914b248b5f2d4fe3432e2a588d5355a8a1f79172126753d4",
+          "compiler_command_seen": true,
+          "config_before_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "config_after_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "returncode": 0,
+          "log_path": "cases/e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c/logs/018_old_on_new.log",
+          "log_sha256": "3cb0984e40c899230dc2298569d0a11b04d9c120def6de22e9b252b3cdc592a9",
+          "diagnostics": []
+        },
+        "old_on_old": {
+          "passed": true,
+          "source_sha256": "1a8fb1049fe87d154743617a6fa0c8a3b67601617adb4658d97f5b723263c569",
+          "artifact_sha256": "9e91183bb2db7308daa05fd33a9b9feffa8b160972e59b39ae25ef6a28fbb911",
+          "artifact_bytes": 36408,
+          "kbuild_cmd_sha256": "2ecb34aa12ee4896914b248b5f2d4fe3432e2a588d5355a8a1f79172126753d4",
+          "compiler_command_seen": true,
+          "config_before_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "config_after_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "returncode": 0,
+          "log_path": "cases/e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c/logs/016_old_on_old.log",
+          "log_sha256": "8ac3ae18875a633d84147bb70631f895333edd65020cb6936047b6702a499eb0",
+          "diagnostics": []
+        },
+        "restored_new_on_new": {
+          "passed": true,
+          "source_sha256": "2bc3970aa01560402bbf618227567dd62a03a41eeb437520de551461af725ad6",
+          "artifact_sha256": "a912c587b5f4a8f8263c3a3d4c4a9b0fda5c5737cb94732b55800007b810ec86",
+          "artifact_bytes": 43256,
+          "kbuild_cmd_sha256": "a1b3ebb6d4c518b70dd6cfb355a593829e906c57ef8d7eff5fde1d5882ed342c",
+          "compiler_command_seen": true,
+          "config_before_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "config_after_sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "returncode": 0,
+          "log_path": "cases/e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c/logs/019_restored_new_on_new.log",
+          "log_sha256": "3cb0984e40c899230dc2298569d0a11b04d9c120def6de22e9b252b3cdc592a9",
+          "diagnostics": []
+        }
+      },
+      "interpretation": "no translation-unit compilation repair requirement demonstrated in this configuration; link/runtime behavior untested",
+      "configurations": {
+        "new": {
+          "sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "required_values": {
+            "DEVICE_PRIVATE": "y",
+            "DRM": "m",
+            "DRM_GPUSVM": "m"
+          },
+          "recipe_satisfied": true
+        },
+        "old": {
+          "sha256": "5c71a3008483344a14071def19d1e4a6ffe1066568a946a1af7cb8204a226609",
+          "required_values": {
+            "DEVICE_PRIVATE": "y",
+            "DRM": "m",
+            "DRM_GPUSVM": "m"
+          },
+          "recipe_satisfied": true
+        }
+      },
+      "restored_object_matches_initial_new": true
+    }
+  ],
+  "independent_artifact_audit": {
+    "path": "runs/pressure_build_artifact_audit_20260914.json",
+    "sha256": "40376077559af941a15bf78d5c4e40a7721e0d815c4307b3e50c8c9cb746b3ef",
+    "scope": "retrospective source/config/commands/ELF/provenance verification; no build replay"
+  }
+}

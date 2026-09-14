@@ -1,7 +1,9 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/gate-v2-pressure`, with implementation commit
-`431c7a1`, following `codex/experiment-foundation` (`12940c0`, report `0c7e6be`).
+The current package is on `codex/pressure-build-eligibility`: runner `d02ed15`,
+corrected Nix environment `c69f0b3`. It follows `codex/gate-v2-pressure`
+(`431c7a1`, report `e63f482`) and `codex/experiment-foundation`
+(`12940c0`, report `0c7e6be`).
 Historical run artifacts and the frozen pre-registration are unchanged.
 
 ## Current conclusion
@@ -36,7 +38,16 @@ at 4096 prompt tokens, split into 37 calibration and 11 reserved cases
 Commit assignments are consistent across budgets, and all historically scored
 commits are forced to calibration. The [catalog](../datasets/context_pressure_v1.json)
 pins the six selections and their artifacts. This is a token-budget dataset;
-repair necessity and production retrieval remain unverified.
+production retrieval remains unverified.
+
+The reserved 11-case build census is complete: **eight old files compile on
+the target kernel, two have controlled compiler errors, one was removed**.
+Xilinx has a changed API argument type; NTB fails on two removed prototypes
+under the warning-as-error policy. All 30 pristine/restoration controls pass.
+This establishes file-object evidence only, not module linking or runtime
+correctness. The [build report](13_pressure_build_results.md) and
+[result catalog](../datasets/pressure_build_results_v1.json) record all outcomes.
+The pressure set is not yet a required-repair benchmark for method comparison.
 
 ## First package
 
@@ -92,13 +103,29 @@ canonical artifact verification pass. Commands and results are in reports
 [09](09_gate_review.md), [10](10_context_pressure_set.md), and
 [11](11_gate_v2_pressure_results.md).
 
+## Third package
+
+- Exact-parent Kbuild/Kconfig mapping covers all 11 reserved cases. The runner
+  uses fresh worktrees, active resolved configuration, old/pristine/restored
+  controls, verified packed Git bytes and fresh ELF/compiler-command evidence.
+- The corrected retro run completed 40 source compilations, with 38 successful
+  objects and two old-on-new compiler failures. Source, configuration and
+  artifact hashes are retained. GCC latent-entropy binary variation is recorded.
+- Three new synthetic contract groups pass locally and on retro. The initial
+  environment failure is preserved; host GCC plugin development headers were
+  fixed without changing driver code or case configuration. Nix checks pass for
+  the changed file.
+- Build checkout: `/home/arina/work/driver_agent_build_eligibility`. No model,
+  PPL, module-link or runtime experiments were run in this package. See
+  [protocol](12_pressure_build_protocol.md) and [results](13_pressure_build_results.md).
+
 ## Next TODO, in order
 
-1. Establish build eligibility on the reserved pressure candidates: map each
-   source to a concrete Kbuild target and dependencies, then verify that the old
-   driver fails on the target kernel for a migration-related reason. Record
-   unsupported cases and optional feature changes as exclusions under a new
-   build protocol; preserve the frozen pressure set.
+1. Take the Xilinx API mismatch into a scoped pilot: complete the old-target
+   source boundary and strict module-link controls, then freeze actual
+   generation prompts, budgets, model and validation before patch generation.
+   Keep NTB's removed-prototype diagnostic separate; acquire more qualified
+   migration commits before statistical comparison. Preserve the pressure set.
 2. Complete gate calibration before using it as a quality filter: extend sparse
    occurrence review and unsupported scope/preprocessing handling, distinguish
    extraction misses from unnecessary requirements, and retain explicit unknowns.
@@ -129,4 +156,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–11 describe the current contracts.
+status and reports 08–13 describe the current contracts.

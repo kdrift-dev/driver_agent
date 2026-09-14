@@ -79,6 +79,24 @@ python pregen_driver_agent.py \
 
 Use `--dry-run` to persist prompts/inputs/artifacts without calling an LLM or generating a patch.
 
+For offline paired kernel-evidence selection, reuse a production extraction:
+
+```bash
+python3 tools/prepare_paired_context.py \
+  --extracted-dir /path/to/run/extracted \
+  --repo /path/to/linux \
+  --out-dir runs/paired_context_example \
+  --generation-model anthropic/claude-sonnet-4.6 \
+  --counter message_chars
+```
+
+This opt-in tool saves full old source, one verified kernel-evidence pool and
+first-fit/ranked requests under a shared cap. It never sends model requests.
+Built-in character and cached HF counters are diagnostics and refuse generation
+without verified provider/model/framing binding. See the
+[paired protocol](docs-impl/16_paired_context_protocol.md) and
+[current results](docs-impl/17_paired_context_results.md).
+
 ## LLM Configuration
 
 Supported providers include:
@@ -97,6 +115,11 @@ DEEPSEEK_API_KEY=...
 ```
 
 For paper-facing experiments, use the configured paper model consistently. If the provider returns an auth/quota error, that run should be labeled as provider failure, not as a model or pipeline patch failure.
+
+LLM stages retain `request_body.json` and `provider_audit.json` with response
+metadata and per-attempt accounting. Configured retries are explicit; timeouts
+or worker crashes may leave the exact request count unknown. Check truncation
+and provider status separately from JSON parse success.
 
 ## Pipeline Stages
 

@@ -1,7 +1,9 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/xilinx-module-pilot`: strict module runner
-`9e1f7bd`, with generation preparation measured at `22b0604`. It follows
+The current package is on `codex/paired-context-budget`: shared context
+preparation and provider-attempt accounting at `446e42c`. It follows
+`codex/xilinx-module-pilot` (strict module runner `9e1f7bd`, report `921b9af`,
+with generation preparation measured at `22b0604`),
 `codex/pressure-build-eligibility` (runner `d02ed15`, corrected Nix environment
 `c69f0b3`, report `22b0604`), `codex/gate-v2-pressure`
 (`431c7a1`, report `e63f482`) and `codex/experiment-foundation`
@@ -58,7 +60,7 @@ restoring the new source reproduces the new `.ko` byte for byte. This extends
 the Xilinx evidence to a complete module build, with CRC versioning and runtime
 explicitly untested. See [module controls](14_xilinx_module_controls.md).
 
-Production generation preparation is **NOT_FROZEN**. Dry-run shows that the
+The earlier production dry-run shows that the
 native pruner chooses read-only old-source blocks, while OFF/ON also change
 source retention and budget accounting. All six optional focused blocks have
 zero obligation overlap in this case. A direct flag comparison would therefore
@@ -66,6 +68,16 @@ not isolate useful kernel-evidence selection. Real generation prompts also
 exceed the earlier 4096-token comparison budget under its Qwen diagnostic
 counter; those counts cannot transfer to a different generation model.
 See [measured preparation and prerequisites](15_xilinx_generation_protocol.md).
+
+The separate paired harness now holds full old source, kernel-evidence pool,
+renderer and budget accounting constant. On Xilinx, 62 verified optional blocks
+produce different first-fit/ranked sets under the same cap. Both retain the
+changed API block. Independent replay passes 1731 checks and reproduces 3986
+complete-message counts/selection variants. The Qwen-framed diagnostic counts
+are 9033/8966 under a 9153-token cap; they are not Claude input-token counts.
+Generation admission remains **PROVIDER_COUNTER_BINDING_REQUIRED**: no model
+calls or generated patches exist. See [protocol](16_paired_context_protocol.md)
+and [results](17_paired_context_results.md).
 
 ## First package
 
@@ -153,15 +165,33 @@ canonical artifact verification pass. Commands and results are in reports
 - Machine-readable catalogs: [module controls](../datasets/xilinx_module_controls_v1.json)
   and [generation preparation](../datasets/xilinx_generation_preparation_v1.json).
 
+## Fifth package
+
+- A strict production adapter admits only old target source and verified
+  kernel-side excerpts from allowlisted extraction documents. Both conditions
+  use the same full mandatory source, minimal obligation signal and pool order.
+- One request builder and full-message counter serve first-fit and ranked
+  selection. Every trial re-renders the complete messages; overflow preserves
+  source and refuses dispatch. The native source-pruner default remains OFF.
+- Provider audits retain exact request bodies, response/model/usage/finish
+  metadata and actual attempts. SDK retries and worker-error resubmission are
+  disabled; timed-out or crashed calls retain explicit count uncertainty.
+- Ten client groups, 42 evidence checks, three paired-context groups and the
+  existing pruner/ctxlab checks pass locally and on retro. Independent audit
+  reproduces both canonical runs; all 93 prior dry-run artifacts are unchanged.
+- Current experiment checkout: `/home/arina/work/driver_agent_paired_context`.
+  This package uses no model inference, kernel rebuilds or runtime tests.
+  See the [catalog](../datasets/paired_context_preparation_v1.json).
+
 ## Next TODO, in order
 
-1. Finish the Xilinx generation protocol: use one immutable old-source input
-   and a production-derived optional kernel-evidence pool, a shared renderer,
-   whole-block first-fit/ranked conditions, and the same actual model-token
-   budget. Save response/model/usage/finish metadata and every provider attempt;
-   remove the implicit OpenRouter retry after subprocess provider failure.
-   Freeze the request and conditions before generation. Complete-source and
-   strict module controls are done; native flag OFF/ON alone is not a fair A/B.
+1. Bind the paired harness to a verified generation provider/model and its
+   complete-message input counter. Freeze exact requests, the common token cap
+   and output limit before a bounded Xilinx generation run, then apply strict
+   module validation. The shared renderer, whole-block policies and per-attempt
+   request/response accounting are implemented; hidden retries are removed.
+   Current character/Qwen counters refuse generation because provider framing
+   is unverified. Complete-source and strict module controls are done.
    Keep NTB's removed-prototype diagnostic separate; acquire more qualified
    migration commits before statistical comparison. Preserve the pressure set.
 2. Complete gate calibration before using it as a quality filter: extend sparse
@@ -195,4 +225,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–15 describe the current contracts.
+status and reports 08–17 describe the current contracts.

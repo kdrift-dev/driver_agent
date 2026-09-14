@@ -1,0 +1,242 @@
+{
+  "checkout_preservation": {
+    "path": "runs/paired_context_checkout_preservation_20260914.json",
+    "sha256": "1c8589203545e8e48d028feea8982eb6ac173b9b5db1d3416c30c8e9b8cfca46",
+    "status": "PASS"
+  },
+  "execution_commit": "446e42ceda9f6390be1d227e7b2673239dca6ca2",
+  "execution_source_files": 106,
+  "generation_calls": 0,
+  "generation_protocol_status": "PROVIDER_COUNTER_BINDING_REQUIRED",
+  "independent_audit": {
+    "checks": 1731,
+    "independently_counted_request_variants": 3986,
+    "path": "runs/paired_context_independent_audit_20260914.json",
+    "script": {
+      "path": "runs/xilinx_paired_context_independent_audit_20260914/audit.py",
+      "sha256": "01e4ee01c26f362f284ce146b7393bdebed7cc88b8c8db67c6cc671faad6c6c7"
+    },
+    "sha256": "bd914c1f4283986b8fbe6a6c3358396d4ec7903459f0c346ad66a5048989c6f0",
+    "status": "PASS"
+  },
+  "kbuild_target": "xilinx-trng.ko",
+  "max_output_tokens": 4096,
+  "model_candidate": "anthropic/claude-sonnet-4.6",
+  "module_path": "drivers/crypto/xilinx",
+  "new_ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+  "old_ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+  "protocol": "paired_kernel_context_v1",
+  "report": "docs-impl/17_paired_context_results.md",
+  "runs": {
+    "chars": {
+      "artifact_index": {
+        "path": "runs/paired_context_xilinx_chars_v1_20260914/artifact_index.json",
+        "sha256": "6a83a8933bbe06ef9f2fd08462f7d3d24bcd8fdd0df6db666382d315a7adc638"
+      },
+      "budget_rule": "mandatory + ceil(max(0, full_pool - mandatory) / 4)",
+      "candidate_count": 62,
+      "common_input_budget": 26532,
+      "conditions": {
+        "first_fit": {
+          "dispatch_refusal": "counter_provider_binding_unverified",
+          "generation_ready": false,
+          "input_count": 26316,
+          "messages_sha256": "fbc6c3ef480e99aa14b7ae9c4f8b718465943b6d44a881e13849a4a50a1a199c",
+          "request_sha256": "b45d72b06ecb352f682f48a35783f92108c7372b792782280f280f62d1c11ecc",
+          "selected_ids": [
+            "kernel-0eac6f807d6393acaff0c5ce28f5c2b95fc797b235539941907d050e3d6f4200",
+            "kernel-4be4d68601d2b00962e4c0a57374633fec755a3dfb1f81dc5f7e3dbaa300e65d",
+            "kernel-c45444ddf2993c39f017156465d5b6c7d48fa0b0aaefae65e6f71a2a8f72ab04",
+            "kernel-6ee9d71159147e19bd1d58354c281ff8592d578c6ec7c5b62a71c6d048408a59",
+            "kernel-518f8e8b71bace2a200d1dd9b51ab31e7c1b77dd9e10f4fab5fee5759f02b574",
+            "kernel-912a8e378fd5e3178b11a054c38fcaf6de42076cd709bc71b270da75c7fb17ec",
+            "kernel-e43f1cfbdf17636482396b2f9331fe0f42a4fe08faf0b81e9fd5c12f4efc548a",
+            "kernel-48675d9285903e9487a7e39483781297434f9fbbfb858cbe5ba22ab73d386800",
+            "kernel-3de70f9da7dacea394843ac9bd5f23c8213908077871e5e64a8bb7f38080ff62",
+            "kernel-8cf31a7aecdadc6e5bf07b22c9c5aab377bd7e0d222acfe0a2fe2684381c71e0",
+            "kernel-0a254b3aa8680a62ad887f784fa5a5cc7671ddc0530fefe5d7d345f4bdc09f46",
+            "kernel-518afb2de62aadc242d95d6aa9d4eea39dc5ef7e20279fb99a6e0944551a6825",
+            "kernel-30119631856ecc2dcca687920e424bb4dd7519040f054cafeaef54627875382f",
+            "kernel-3d9809b734a164a5aee1b6ec05d5ad627e7cef1ef3421d37525a6e2a1a5318e3",
+            "kernel-342c38d37e751f30c8777ae9ce2eb16a799dabbc69d30b239b1f22a629734ce3",
+            "kernel-6159888af012403cb75f1d849885f813245973f9dd871b9e1e5a9d484706f8fd",
+            "kernel-ae847ef3fd1148fe1c151864df7863cf1c0070670b925644ec779a2e87d62b28",
+            "kernel-fbf71165d3374651feacd34d1281509609acf9dfc7ed792082e94abd8868cf3e"
+          ],
+          "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+          "status": "within_budget"
+        },
+        "obligation_ranked": {
+          "dispatch_refusal": "counter_provider_binding_unverified",
+          "generation_ready": false,
+          "input_count": 25936,
+          "messages_sha256": "d287a7ae8d1049f3aa67d51af469a69880e70ff1b5d1bf91feb70b75c41cf17e",
+          "request_sha256": "7b11a76a227d59a639640309301c2a6604356161bd335d7850cc90948c819db2",
+          "selected_ids": [
+            "kernel-0eac6f807d6393acaff0c5ce28f5c2b95fc797b235539941907d050e3d6f4200",
+            "kernel-4be4d68601d2b00962e4c0a57374633fec755a3dfb1f81dc5f7e3dbaa300e65d",
+            "kernel-c45444ddf2993c39f017156465d5b6c7d48fa0b0aaefae65e6f71a2a8f72ab04",
+            "kernel-6ee9d71159147e19bd1d58354c281ff8592d578c6ec7c5b62a71c6d048408a59",
+            "kernel-518f8e8b71bace2a200d1dd9b51ab31e7c1b77dd9e10f4fab5fee5759f02b574",
+            "kernel-912a8e378fd5e3178b11a054c38fcaf6de42076cd709bc71b270da75c7fb17ec",
+            "kernel-3de70f9da7dacea394843ac9bd5f23c8213908077871e5e64a8bb7f38080ff62",
+            "kernel-8cf31a7aecdadc6e5bf07b22c9c5aab377bd7e0d222acfe0a2fe2684381c71e0",
+            "kernel-0a254b3aa8680a62ad887f784fa5a5cc7671ddc0530fefe5d7d345f4bdc09f46",
+            "kernel-3d9809b734a164a5aee1b6ec05d5ad627e7cef1ef3421d37525a6e2a1a5318e3",
+            "kernel-342c38d37e751f30c8777ae9ce2eb16a799dabbc69d30b239b1f22a629734ce3",
+            "kernel-ae847ef3fd1148fe1c151864df7863cf1c0070670b925644ec779a2e87d62b28",
+            "kernel-fbf71165d3374651feacd34d1281509609acf9dfc7ed792082e94abd8868cf3e",
+            "kernel-9c15a82248b53fcbb0d3e19e056d68631ea3f27df51d6b2d1428ef33507bce88",
+            "kernel-264468cdf3cf2cdd9347aa883e5dd36678f34b0cf77b0011b8abe216d140c842",
+            "kernel-31d40b1e2f2388cd991ac6949f11628c3ddae9dd6356776cd9123bc9b61d52d1",
+            "kernel-386f056b2a7b38d8191de95a6dcd7b041617b0c8bbafd16eb4cf1d7decd2ea06",
+            "kernel-3104029d12c1683081583b145e9db23a71806b86f3ce8e27e52effa41d97ea65",
+            "kernel-55dd0a960ce86cf9f809c8dacf5a294c000f0d92c4ba0bc226812713951f1425",
+            "kernel-372115428ff359f24f510d40e67d3e537a01a8ebaf6dd7a0cf77712509d73971"
+          ],
+          "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+          "status": "within_budget"
+        }
+      },
+      "counter": {
+        "count_scope": "canonical JSON of complete system/user messages",
+        "generation_binding": "unverified; not a provider context-window counter",
+        "kind": "canonical_messages_chars",
+        "unit": "characters"
+      },
+      "directory": "runs/paired_context_xilinx_chars_v1_20260914",
+      "full_pool_count": 61499,
+      "individually_feasible_count": 62,
+      "mandatory_count": 14876,
+      "pool_sha256": "9f8ca2561631976c2bceba810cfed803ef338e12dfc82818a5f273d9b5ee7558",
+      "requirements_sha256": "ee6fab59db720a3c92b5c58f45953efe5693d05e99a4f6d9e8920fdea0febe75",
+      "retro_directory": "/home/arina/work/driver_agent_paired_context/runs/paired_context_xilinx_chars_v1_20260914",
+      "selected_sets_differ": true,
+      "selection_pressure_eligible": true,
+      "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+      "source_verification": "git_blob_lines_verified",
+      "summary": {
+        "path": "runs/paired_context_xilinx_chars_v1_20260914/summary.json",
+        "sha256": "1b5ddc881a1749af41fd5370d1d766c2b02f67be929e60599533a132e9ec97ad"
+      }
+    },
+    "qwen": {
+      "artifact_index": {
+        "path": "runs/paired_context_xilinx_qwen_v1_20260914/artifact_index.json",
+        "sha256": "1350bfffc403187167a1e25b4134a1f535d567e56ad9d4993db1075dad2e3bd6"
+      },
+      "budget_rule": "mandatory + ceil(max(0, full_pool - mandatory) / 4)",
+      "candidate_count": 62,
+      "common_input_budget": 9153,
+      "conditions": {
+        "first_fit": {
+          "dispatch_refusal": "counter_provider_binding_unverified",
+          "generation_ready": false,
+          "input_count": 9033,
+          "messages_sha256": "308aee867b2b3117d2d81118c1c8250b99f83411500dded5f758192114319e67",
+          "request_sha256": "5c7934b7c3df142868e32ab50b59c08baf84434b1b099438b56052ab5c863c09",
+          "selected_ids": [
+            "kernel-0eac6f807d6393acaff0c5ce28f5c2b95fc797b235539941907d050e3d6f4200",
+            "kernel-4be4d68601d2b00962e4c0a57374633fec755a3dfb1f81dc5f7e3dbaa300e65d",
+            "kernel-c45444ddf2993c39f017156465d5b6c7d48fa0b0aaefae65e6f71a2a8f72ab04",
+            "kernel-6ee9d71159147e19bd1d58354c281ff8592d578c6ec7c5b62a71c6d048408a59",
+            "kernel-518f8e8b71bace2a200d1dd9b51ab31e7c1b77dd9e10f4fab5fee5759f02b574",
+            "kernel-912a8e378fd5e3178b11a054c38fcaf6de42076cd709bc71b270da75c7fb17ec",
+            "kernel-e43f1cfbdf17636482396b2f9331fe0f42a4fe08faf0b81e9fd5c12f4efc548a",
+            "kernel-48675d9285903e9487a7e39483781297434f9fbbfb858cbe5ba22ab73d386800",
+            "kernel-3de70f9da7dacea394843ac9bd5f23c8213908077871e5e64a8bb7f38080ff62",
+            "kernel-8cf31a7aecdadc6e5bf07b22c9c5aab377bd7e0d222acfe0a2fe2684381c71e0",
+            "kernel-0a254b3aa8680a62ad887f784fa5a5cc7671ddc0530fefe5d7d345f4bdc09f46",
+            "kernel-518afb2de62aadc242d95d6aa9d4eea39dc5ef7e20279fb99a6e0944551a6825",
+            "kernel-30119631856ecc2dcca687920e424bb4dd7519040f054cafeaef54627875382f",
+            "kernel-3d9809b734a164a5aee1b6ec05d5ad627e7cef1ef3421d37525a6e2a1a5318e3",
+            "kernel-342c38d37e751f30c8777ae9ce2eb16a799dabbc69d30b239b1f22a629734ce3",
+            "kernel-6159888af012403cb75f1d849885f813245973f9dd871b9e1e5a9d484706f8fd",
+            "kernel-ae847ef3fd1148fe1c151864df7863cf1c0070670b925644ec779a2e87d62b28"
+          ],
+          "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+          "status": "within_budget"
+        },
+        "obligation_ranked": {
+          "dispatch_refusal": "counter_provider_binding_unverified",
+          "generation_ready": false,
+          "input_count": 8966,
+          "messages_sha256": "6e4636abf1d3e8948763c919509b7b0896c1dd2d504bb55a6ac205b555be9ec9",
+          "request_sha256": "8a96f226ac46316d9d916a1fe66a750b76d897cb02cf19f20a6a40354430bf15",
+          "selected_ids": [
+            "kernel-0eac6f807d6393acaff0c5ce28f5c2b95fc797b235539941907d050e3d6f4200",
+            "kernel-c45444ddf2993c39f017156465d5b6c7d48fa0b0aaefae65e6f71a2a8f72ab04",
+            "kernel-6ee9d71159147e19bd1d58354c281ff8592d578c6ec7c5b62a71c6d048408a59",
+            "kernel-518f8e8b71bace2a200d1dd9b51ab31e7c1b77dd9e10f4fab5fee5759f02b574",
+            "kernel-3de70f9da7dacea394843ac9bd5f23c8213908077871e5e64a8bb7f38080ff62",
+            "kernel-8cf31a7aecdadc6e5bf07b22c9c5aab377bd7e0d222acfe0a2fe2684381c71e0",
+            "kernel-0a254b3aa8680a62ad887f784fa5a5cc7671ddc0530fefe5d7d345f4bdc09f46",
+            "kernel-3d9809b734a164a5aee1b6ec05d5ad627e7cef1ef3421d37525a6e2a1a5318e3",
+            "kernel-342c38d37e751f30c8777ae9ce2eb16a799dabbc69d30b239b1f22a629734ce3",
+            "kernel-6159888af012403cb75f1d849885f813245973f9dd871b9e1e5a9d484706f8fd",
+            "kernel-ae847ef3fd1148fe1c151864df7863cf1c0070670b925644ec779a2e87d62b28",
+            "kernel-8b5c04834fd58a730d7216764076ff53a047db6e0cb3e146efeea3ae569afc1f",
+            "kernel-9c15a82248b53fcbb0d3e19e056d68631ea3f27df51d6b2d1428ef33507bce88",
+            "kernel-264468cdf3cf2cdd9347aa883e5dd36678f34b0cf77b0011b8abe216d140c842",
+            "kernel-3104029d12c1683081583b145e9db23a71806b86f3ce8e27e52effa41d97ea65",
+            "kernel-eaa00445ca5ee9093b2eeeab23a21d7f0411efdaf8ba167a6d0d8104523beb72",
+            "kernel-416b618bc858fa9e002e21b24af64970dea48e3b1e25b5295f0719868e8fd4de",
+            "kernel-55dd0a960ce86cf9f809c8dacf5a294c000f0d92c4ba0bc226812713951f1425",
+            "kernel-372115428ff359f24f510d40e67d3e537a01a8ebaf6dd7a0cf77712509d73971"
+          ],
+          "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+          "status": "within_budget"
+        }
+      },
+      "counter": {
+        "chat_template_sha256": "44d5f08f3f72b837eaad09f13a54c1f9f4eb58d75240334548b7fd52a5437fa5",
+        "count_scope": "complete system/user messages plus chat framing and assistant generation prefix",
+        "files_sha256": {
+          "merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+          "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+          "tokenizer_config.json": "283ec39d07ebfd1904aa2dee3c7d73524ed96c489fdb3915629900d3ab3ac319",
+          "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        },
+        "generation_binding": "local tokenizer/template only; remote provider serialization unverified",
+        "kind": "hf_chat_template",
+        "model_id": "Qwen/Qwen2.5-Coder-0.5B",
+        "packages": {
+          "tokenizers": "0.22.1",
+          "transformers": "4.57.1"
+        },
+        "revision": "8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301",
+        "settings": {
+          "add_generation_prompt": true,
+          "local_files_only": true,
+          "tokenize": true
+        },
+        "tokenizer_class": "Qwen2TokenizerFast",
+        "unit": "tokens"
+      },
+      "directory": "runs/paired_context_xilinx_qwen_v1_20260914",
+      "full_pool_count": 22587,
+      "individually_feasible_count": 62,
+      "mandatory_count": 4675,
+      "pool_sha256": "9f8ca2561631976c2bceba810cfed803ef338e12dfc82818a5f273d9b5ee7558",
+      "requirements_sha256": "ee6fab59db720a3c92b5c58f45953efe5693d05e99a4f6d9e8920fdea0febe75",
+      "retro_directory": "/home/arina/work/driver_agent_paired_context/runs/paired_context_xilinx_qwen_v1_20260914",
+      "selected_sets_differ": true,
+      "selection_pressure_eligible": true,
+      "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+      "source_verification": "git_blob_lines_verified",
+      "summary": {
+        "path": "runs/paired_context_xilinx_qwen_v1_20260914/summary.json",
+        "sha256": "d5da0b371a25c256138c337b2e3fd7525616b10d1495024b2c637930a3d06760"
+      }
+    }
+  },
+  "runtime_tests": 0,
+  "schema_version": 1,
+  "scope": "one-case offline paired request preparation; no model efficacy result",
+  "source_digest": "f60e95e40370bfefcc8c9d979ca7903a7f9bb697641ef914a594bee6f7ae677b",
+  "source_mode": "full_module",
+  "verification": {
+    "path": "runs/paired_context_checks_20260914/verification_summary.json",
+    "sha256": "5a9b1c1b45b59d6ecb123f688a36b4dfee6e16577b439a119bafc3451cfcb685"
+  }
+}

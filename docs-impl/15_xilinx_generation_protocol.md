@@ -1,5 +1,11 @@
 # Xilinx generation pilot: preparation, not frozen
 
+Historical preparation at `22b0604`. The subsequent shared renderer, optional
+kernel pool and provider-attempt accounting are implemented at `446e42c`; see
+the [paired protocol](16_paired_context_protocol.md) and
+[replay results](17_paired_context_results.md). Verified generation-provider
+counter binding remains required. Observations below retain their original scope.
+
 Status: **NOT_FROZEN**. No generation request has been sent. This document
 records the generation boundary and the implementation gaps that must be
 resolved before comparing policies. It does not alter the reserved pressure

@@ -105,7 +105,7 @@
           # GCC's arithmetic libraries even when the runtime libraries exist.
           {
             name = "CPLUS_INCLUDE_PATH";
-            prefix = "${pkgs.gmp.dev}/include:${pkgs.mpfr.dev}/include:${pkgs.libmpc.dev}/include";
+            prefix = "${pkgs.lib.getDev pkgs.gmp}/include:${pkgs.lib.getDev pkgs.mpfr}/include:${pkgs.lib.getDev pkgs.libmpc}/include";
           }
           {
             name = "LIBRARY_PATH";

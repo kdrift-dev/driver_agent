@@ -2,7 +2,7 @@
 """PPL-signal experiment for context engineering (pre-registered Step 1).
 
 For every case pack in a dataset, scores the reference edit under several
-size-matched context conditions and reports whether context quality is
+character-capped context conditions and reports whether context quality is
 reflected in teacher-forced PPL (and, independently, in the deterministic
 expressibility gate). Evaluation-only: reads reference diffs, which the agent
 pipeline must never see. Pre-registered success/kill criterion lives in
@@ -12,7 +12,7 @@ Conditions per case (all context conditions truncated to --context-budget):
     gold              gold kernel-side evidence for this case
     gold_distractors  gold + same-case unused evidence
     distractors_only  unused evidence only (negative control)
-    random            gold evidence of the *next* case (size-matched)
+    random            gold evidence of the *next* case (same cap, unequal size)
     none              empty context
 
 Case-pack input (both shapes accepted):
@@ -55,7 +55,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ctxlab.backends import ScoreCache, make_backend  # noqa: E402
 from ctxlab.dataset import load_cases  # noqa: E402
 from ctxlab.metrics import score_context  # noqa: E402
-from draw_ppl_sample import dataset_digest, eligible_cases  # noqa: E402
+from ctxlab.provenance import CONTENT_DIGEST_ALGORITHM, write_run_metadata  # noqa: E402
+from draw_ppl_sample import dataset_digest, eligible_cases, legacy_dataset_digest  # noqa: E402
 
 CONDITIONS = ["gold", "gold_distractors", "distractors_only", "random", "none"]
 
@@ -94,6 +95,10 @@ def build_config(argv: Optional[list[str]] = None) -> argparse.Namespace:
     unknown = set(args.condition_list) - set(CONDITIONS)
     if unknown:
         p.error(f"unknown conditions: {sorted(unknown)}")
+    if not args.condition_list or len(set(args.condition_list)) != len(args.condition_list):
+        p.error("conditions must be nonempty and unique")
+    if min(args.context_budget, args.old_source_budget, args.max_cases) < 0:
+        p.error("budgets and max-cases must be nonnegative")
     return args
 
 
@@ -117,20 +122,50 @@ def select_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
     want_ids = list(manifest.get("case_ids") or [])
     if not want_ids:
         raise SystemExit(f"[experiment] manifest {args.manifest} has no case_ids")
+    if any(not isinstance(cid, str) or not cid for cid in want_ids):
+        raise SystemExit("[experiment] manifest case_ids must be nonempty strings")
+    if len(set(want_ids)) != len(want_ids):
+        raise SystemExit("[experiment] duplicate case_ids in manifest")
+    if manifest.get("n_selected", len(want_ids)) != len(want_ids):
+        raise SystemExit("[experiment] manifest n_selected disagrees with case_ids")
+    schema = manifest.get("schema_version", 1)
+    if schema not in (1, 2):
+        raise SystemExit(f"[experiment] unsupported manifest schema: {schema}")
+    if schema == 2 and manifest.get("digest_algorithm") != CONTENT_DIGEST_ALGORITHM:
+        raise SystemExit("[experiment] unsupported manifest digest algorithm")
+    args.manifest_validation = "content_v2" if schema == 2 else "legacy_ids_only"
+    if schema == 1:
+        print("[experiment] legacy manifest checks IDs only, not frozen file contents; "
+              "run_metadata.json records the actual input content hashes")
 
     frozen_digest = manifest.get("dataset_digest")
+    if schema == 2 and not frozen_digest:
+        raise SystemExit("[experiment] v2 manifest is missing dataset_digest")
     if frozen_digest:
-        actual_digest = dataset_digest(eligible_cases(dataset_dir))
+        eligible = eligible_cases(dataset_dir)
+        actual_digest = (dataset_digest if schema == 2 else legacy_dataset_digest)(eligible)
         if actual_digest != frozen_digest:
             msg = (f"[experiment] manifest digest {frozen_digest[:12]} != dataset "
                    f"digest {actual_digest[:12]}: the frozen sample was drawn from a "
                    f"different mine than {dataset_dir}")
             if os.environ.get("PPL_ALLOW_DIGEST_MISMATCH") == "1":
                 print(msg + " (bypassed via PPL_ALLOW_DIGEST_MISMATCH=1)")
+                args.manifest_validation += "_pool_mismatch_bypassed"
             else:
                 raise SystemExit(msg)
+        if schema == 2:
+            frozen_cases = manifest.get("case_content_sha256")
+            if not isinstance(frozen_cases, dict) or set(frozen_cases) != set(want_ids):
+                raise SystemExit("[experiment] v2 manifest has incomplete case content hashes")
+            actual_cases = {c["case_id"]: c["content_sha256"] for c in eligible}
+            changed = [cid for cid in want_ids if actual_cases.get(cid) != frozen_cases[cid]]
+            if changed:
+                raise SystemExit(f"[experiment] frozen case contents differ: {changed[:3]}")
 
-    by_id = {c["case_id"]: c for c in load_cases(dataset_dir, 0, verbose=False)}
+    loaded = load_cases(dataset_dir, 0, verbose=False)
+    by_id = {c["case_id"]: c for c in loaded}
+    if len(by_id) != len(loaded):
+        raise SystemExit("[experiment] duplicate case_ids in dataset")
     missing = [cid for cid in want_ids if cid not in by_id]
     if missing:
         raise SystemExit(f"[experiment] {len(missing)} manifest case_ids absent from "
@@ -169,6 +204,9 @@ def condition_context(case: dict[str, Any], all_cases: list[dict[str, Any]],
 
 def run_experiment(args: argparse.Namespace) -> list[dict[str, Any]]:
     out_root = Path(args.out_root)
+    if any((out_root / name).exists() for name in
+           ("experiment_results.csv", "run_metadata.json", "run_metadata.started.json", "scoring_inputs.jsonl")):
+        raise SystemExit(f"[experiment] existing run at {out_root}; choose a new --out-root")
     out_root.mkdir(parents=True, exist_ok=True)
     cases = select_cases(args)
     if not cases:
@@ -182,11 +220,24 @@ def run_experiment(args: argparse.Namespace) -> list[dict[str, Any]]:
     if args.scorer != "expressibility-only":
         backend = make_backend(args.scorer, args.model)
 
+    protocol = {"protocol": "ppl_signal_legacy_v1", "phase": "started",
+                "context_budget_unit": "characters", "context_sizes_matched": False,
+                "gate_source": "full_old_source", "scorer_source": "old_source_character_prefix",
+                "reference_used_for": "evaluation_target_and_gold_conditions"}
+    write_run_metadata(out_root, args, cases, backend=backend, extra=protocol)
+
     rows: list[dict[str, Any]] = []
+    scoring_inputs = []
     for idx, case in enumerate(cases):
         for condition in args.condition_list:
             context, truncated = condition_context(case, cases, idx, condition, args.context_budget)
             scored = score_context(context, case, backend, cache, args.old_source_budget)
+            scoring_inputs.append({"case_id": case["case_id"], "condition": condition,
+                                   "prompt": scored["prompt"], "context_text": context,
+                                   "old_source_text": scored["old_source_text"],
+                                   "scoring_protocol": scored["scoring_protocol"],
+                                   "prompt_truncated": (scored["ppl"] or {}).get("prompt_truncated"),
+                                   "n_prompt_tokens": (scored["ppl"] or {}).get("n_prompt_tokens")})
             gate = scored["gate"]
             row: dict[str, Any] = {
                 "case_id": case["case_id"],
@@ -205,6 +256,12 @@ def run_experiment(args: argparse.Namespace) -> list[dict[str, Any]]:
                             ("nll_sum", "n_target_tokens", "nll_per_token", "ppl", "cache_hit")})
             rows.append(row)
         print(f"[experiment] {idx + 1}/{len(cases)} {case['case_id']} done")
+    with (out_root / "scoring_inputs.jsonl").open("w") as fh:
+        for record in scoring_inputs:
+            fh.write(json.dumps(record) + "\n")
+    protocol.update(phase="complete", rows=len(rows),
+                    valid_rows=sum(row["status"] == "ok" for row in rows))
+    write_run_metadata(out_root, args, cases, backend=backend, extra=protocol)
     return rows
 
 
@@ -234,7 +291,10 @@ def summarize(rows: list[dict[str, Any]]) -> str:
     for r in scored:
         by_case.setdefault(r["case_id"], {})[r["condition"]] = r
 
-    lines = ["# PPL signal experiment summary", ""]
+    lines = ["# PPL signal experiment summary (legacy v1 protocol)", "",
+             "Contexts share a character cap; their sizes are not matched. The gate uses "
+             "full old source, while scoring uses a character prefix and may truncate again "
+             "at the model window. These are diagnostic results, not comparison-v2 results.", ""]
     lines.append(f"cases: {len(by_case)}; rows scored: {len(scored)}; provider/infra excluded: {excluded}")
     lines.append("")
     lines.append("## Per-condition aggregates")
@@ -254,10 +314,10 @@ def summarize(rows: list[dict[str, Any]]) -> str:
     lines.append("")
     lines.append("## Pairwise PPL win rates (pre-registered: see docs/ppl_signal_preregistration.md)")
     lines.append("")
-    lines.append("| comparison | wins | n | win rate | sign test p |")
-    lines.append("|---|---|---|---|---|")
+    lines.append("| comparison | wins | ties | n | win rate | legacy p (ties counted as nonwins) |")
+    lines.append("|---|---|---|---|---|---|")
     for a, b in ppl_pairs:
-        wins = n = 0
+        wins = ties = n = 0
         for per_cond in by_case.values():
             ra, rb = per_cond.get(a), per_cond.get(b)
             if not ra or not rb:
@@ -267,11 +327,19 @@ def summarize(rows: list[dict[str, Any]]) -> str:
                 continue
             n += 1
             wins += float(va) < float(vb)
+            ties += float(va) == float(vb)
         if n:
-            lines.append(f"| PPL({a}) < PPL({b}) | {wins} | {n} | {wins / n:.0%} | {_sign_test_p(wins, n):.4f} |")
+            lines.append(f"| PPL({a}) < PPL({b}) | {wins} | {ties} | {n} | {wins / n:.0%} | {_sign_test_p(wins, n):.4f} |")
         else:
-            lines.append(f"| PPL({a}) < PPL({b}) | - | 0 | - | - |")
+            lines.append(f"| PPL({a}) < PPL({b}) | - | - | 0 | - | - |")
     lines.append("")
+    gold = [r for r in rows if r.get("condition") == "gold"]
+    if gold:
+        passes = sum(str(r.get("gate_pass")) in ("True", "true", "1") for r in gold)
+        if passes / len(gold) < 0.8:
+            lines.append(f"**STOP-RULE TRIPPED: gold gate {passes}/{len(gold)} < 80%. "
+                         "Resolve label/gate validity before interpreting PPL; no SUCCESS verdict.**")
+            lines.append("")
     lines.append("Gate validation expectation: gold ~100% pass, none/random low; a deviating "
                  "profile means the gate or the gold labels need work before trusting PPL rows.")
     return "\n".join(lines) + "\n"

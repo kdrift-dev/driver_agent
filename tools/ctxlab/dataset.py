@@ -66,11 +66,14 @@ def load_case(case_dir: Path) -> Optional[dict[str, Any]]:
         gold_items, distractor_items = _split_intree_items(case_dir, evidence.get("items") or [])
 
     sources = []
+    sources_by_path = {}
     src_root = case_dir / "old_module_sources"
     if src_root.exists():
         for path in sorted(src_root.rglob("*")):
             if path.is_file() and path.suffix in (".c", ".h"):
-                sources.append(path.read_text(errors="replace"))
+                text = path.read_text(errors="replace")
+                sources.append(text)
+                sources_by_path[path.relative_to(src_root).as_posix()] = text
     if not sources:
         return None
     return {
@@ -82,6 +85,7 @@ def load_case(case_dir: Path) -> Optional[dict[str, Any]]:
         "gold_text": "\n\n".join(evidence_text(it) for it in gold_items),
         "distractor_text": "\n\n".join(evidence_text(it) for it in distractor_items),
         "old_source": "\n\n".join(sources),
+        "old_sources_by_path": sources_by_path,
     }
 
 

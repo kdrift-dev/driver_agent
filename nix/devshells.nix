@@ -93,7 +93,7 @@
           # openssl / zlib via pkg-config; point it at the dev outputs.
           {
             name = "PKG_CONFIG_PATH";
-            prefix = "${pkgs.elfutils.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.zlib.dev}/lib/pkgconfig";
+            prefix = "${pkgs.elfutils.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.zlib.dev}/lib/pkgconfig:${pkgs.zlib.dev}/share/pkgconfig";
           }
           # Fallback for the few host tools that #include <gelf.h> without pkg-config.
           # Scoped to libelf only to minimise leakage into kernel object compiles.

@@ -6,8 +6,8 @@ arms model two nulls from the meeting deck:
 
   - Sam-Bodden transfer (skeleton vs drop): evidence rendered as full text
     ("full"), one-line skeletons ("skeleton"), or dropped ("drop").
-  - ETH generated-guidance null (pre_spec/pre_reasoner on/off): a generated
-    guidance block restating the obligations is appended ("guidance") or not
+  - ETH generated-guidance null (pre_spec/pre_reasoner on/off): a deterministic
+    guidance block restating the allowed-input obligation approximation is appended ("guidance") or not
     ("full"). Whether that generated block helps or merely costs budget is the
     thing under test.
 
@@ -19,49 +19,30 @@ from __future__ import annotations
 
 from typing import Any
 
-from .chunks import obligation_symbols
+from .backends import MockBackend
 from .evaluation import evaluate_selection
 from .methods import make_method
 
 ARMS = ["full", "skeleton", "drop", "guidance"]
 
 
-def _guidance_block(case: dict[str, Any]) -> str:
-    obl = sorted(obligation_symbols(case))
-    if not obl:
-        return ""
-    return ("GENERATED GUIDANCE: this migration must handle the symbols "
-            + ", ".join(obl) + ". Update each caller accordingly.")
-
-
-def render_arm(selection, case: dict[str, Any], arm: str) -> str:
-    """Context text for an ablation arm (recall/precision come from the picks)."""
-    if arm == "full":
-        return selection.context_text()
-    if arm == "drop":
-        return ""
-    if arm == "skeleton":
-        return "\n".join(c.text.splitlines()[0] if c.text else "" for c in selection.evidence)
-    if arm == "guidance":
-        base = selection.context_text()
-        block = _guidance_block(case)
-        return (base + "\n\n" + block) if block else base
-    raise ValueError(f"unknown arm: {arm}")
-
-
 def run_comparison(cases: list[dict[str, Any]], methods: list[str], budgets: list[int],
-                   backend=None, cache=None, arms: list[str] = ("full",)) -> list[dict[str, Any]]:
+                   backend=None, cache=None, arms: list[str] = ("full",), *,
+                   seed=0, locus_source="old_source") -> list[dict[str, Any]]:
+    backend = backend if backend is not None else MockBackend()
     rows: list[dict[str, Any]] = []
     for case in cases:
         for method_name in methods:
-            method = make_method(method_name)
+            # The same explicit backend/tokenizer is used for selection and scoring.
+            method = make_method(method_name, backend=backend, seed=seed,
+                                 locus_source=locus_source, cache=cache)
             for budget in budgets:
-                selection = method.select(case, budget)
                 for arm in arms:
-                    ctx = render_arm(selection, case, arm)
-                    ev = evaluate_selection(selection, case, backend, cache, context_text=ctx)
+                    # Rendering/guidance overhead affects packing, so select per arm.
+                    selection = method.select(case, budget, arm=arm)
+                    ev = evaluate_selection(selection, case, backend, cache)
                     ev.update({"case_id": case["case_id"], "arm": arm,
-                               "arm_context_chars": len(ctx)})
+                               "arm_context_chars": len(ev["context_text"])})
                     rows.append(ev)
     return rows
 
@@ -77,16 +58,25 @@ def aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         groups.setdefault((r["method"], r["budget"], r["arm"]), []).append(r)
     out = []
     for (method, budget, arm), rs in sorted(groups.items()):
-        gate_pass = sum(1 for r in rs if r["gate_pass"]) / len(rs)
+        valid = [r for r in rs if r["status"] == "ok"]
+        gate_pass = _mean([float(r["gate_pass"]) for r in valid])
         out.append({
             "method": method, "budget": budget, "arm": arm, "n": len(rs),
-            "tokens_kept": _mean([r["tokens_kept"] for r in rs]),
-            "compression": _mean([r["compression"] for r in rs]),
-            "gold_recall": _mean([r["gold_recall"] for r in rs]),
-            "gold_precision": _mean([r["gold_precision"] for r in rs]),
-            "obligation_recall": _mean([r["obligation_recall"] for r in rs]),
-            "gate_pass_rate": round(gate_pass, 4),
-            "edit_nll": _mean([r["edit_nll"] for r in rs]),
+            "n_valid": len(valid), "n_excluded": len(rs) - len(valid),
+            "token_count_kind": sorted({r["token_count_kind"] for r in rs}),
+            "selection_signal": sorted({r["selection_signal"] for r in rs}),
+            "locus_source": sorted({r["locus_source"] for r in rs}),
+            "selection_backend": sorted({r["selection_backend"] for r in rs}),
+            "scoring_backend": sorted({r["scoring_backend"] for r in rs}),
+            "scoring_model": sorted({str(r["scoring_model"]) for r in rs}),
+            "excluded_statuses": sorted({r["status"] for r in rs if r["status"] != "ok"}),
+            "tokens_kept": _mean([r["tokens_kept"] for r in valid]),
+            "compression": _mean([r["compression"] for r in valid]),
+            "gold_recall": _mean([r["gold_recall"] for r in valid]),
+            "gold_precision": _mean([r["gold_precision"] for r in valid]),
+            "obligation_recall": _mean([r["obligation_recall"] for r in valid]),
+            "gate_pass_rate": round(gate_pass, 4) if gate_pass is not None else None,
+            "edit_nll": _mean([r["edit_nll"] for r in valid]),
             "within_budget_rate": round(sum(1 for r in rs if r["within_budget"]) / len(rs), 4),
         })
     return out
@@ -94,14 +84,14 @@ def aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def summary_markdown(agg: list[dict[str, Any]]) -> str:
     lines = ["# Method comparison summary", "",
-             "Backend orderings only (mock is offline; absolute values are not meaningful).",
-             "", "| method | budget | arm | n | tok | compr | gRec | gPrec | oblRec | gate | nll |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "v2: full rendered prompt budgets; invalid rows excluded from quality means. Mock counts are non-model lexical proxies. Case-pack pools remain evaluation-only; oracle rows use reference signals.",
+             "", "| method | signal | budget | arm | valid/total | tok | compr | gRec | gPrec | oblRec | gate | nll |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in agg:
         def f(x, p="{:.2f}"):
             return p.format(x) if isinstance(x, (int, float)) else "-"
         lines.append(
-            f"| {r['method']} | {r['budget']} | {r['arm']} | {r['n']} | "
+            f"| {r['method']} | {', '.join(r['selection_signal'])} | {r['budget']} | {r['arm']} | {r['n_valid']}/{r['n']} | "
             f"{f(r['tokens_kept'], '{:.0f}')} | {f(r['compression'])} | {f(r['gold_recall'])} | "
             f"{f(r['gold_precision'])} | {f(r['obligation_recall'])} | {f(r['gate_pass_rate'])} | "
             f"{f(r['edit_nll'], '{:.1f}')} |")

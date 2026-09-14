@@ -1,106 +1,87 @@
-# M6 — Pre-registered PPL signal experiment: RESULT
+# M6 — historical PPL result, corrected 2026-09-14
 
-The load-bearing experiment from `docs/ppl_signal_preregistration.md`, run on the
-frozen 200-case sample. This is the real Qwen2.5-Coder-0.5B teacher-forced run,
-not a mock or a smoke.
+The real `Qwen/Qwen2.5-Coder-0.5B` teacher-forced run completed on August 26.
+**The pre-registered result cannot be declared SUCCESS:** its gold-gate stop-rule
+failed. This report corrects the interpretation; the frozen pre-registration,
+CSV, manifest, cached scores and original generated summaries are unchanged.
 
-## Provenance (all machine-derived, frozen before scoring)
+## Provenance and descriptive results
 
-- **Mine**: `v6.19..v7.0-rc1`, 685 cases, 579 with ≥1 gold symbol; pilot gold
-  expressibility-gate 87% (≥80% kill-gate passed) before the full mine.
-- **Sample**: `draw_ppl_sample.py --n 200 --seed 0`, frozen manifest
-  `dataset_digest = 32ecbf4da490b32ba86c9fc7e0eed268bd444a2890b675ab0d9409914b11c723`,
-  n_selected 200, pinned by the freeze commit `924a8b5` *before* any scoring.
-- **Scorer**: HF `Qwen/Qwen2.5-Coder-0.5B`, CPU, deterministic, sha256-cached,
-  run on `retro` via a nix-built torch 2.9.1 / transformers 4.57.1 env
-  (`~/ppl-env`). 200 cases × 5 conditions = 1000 rows, **0 provider exclusions**.
-- Harness restricted to the frozen manifest via `--manifest` (digest guard
-  verified the scored mine matches the frozen one).
+Mine: `v6.19..v7.0-rc1`, 685 cases, 579 with at least one gold symbol. The pilot
+reported an 87% gold gate rate, but the full sample has its own failed gate.
+The 200-case sample (`n=200`, `seed=0`) was frozen at `924a8b5` before scoring.
+Historical digest:
+`32ecbf4da490b32ba86c9fc7e0eed268bd444a2890b675ab0d9409914b11c723`.
+This v1 digest hashes eligible case IDs, **not file contents**; it cannot prove
+that the scored files match the frozen files byte for byte.
 
-## Primary result (pre-registered pairwise sign test)
+Retro used CPU torch 2.9.1 / transformers 4.57.1, five conditions, 1000 rows,
+zero recorded provider exclusions. A common 8000-character cap did not make
+contexts equal in length. The scoring source was capped at 12000 characters,
+while the gate saw the entire old source; the HF backend could also trim the
+prompt head at its model window.
 
-| comparison | wins | n | win rate | sign-test p |
-|---|---|---|---|---|
-| PPL(gold) < PPL(random) | 140 | 200 | **70.0%** | 1.5e-08 |
-| PPL(gold) < PPL(none) | 183 | 200 | **91.5%** | 2.5e-36 |
-| PPL(gold) < PPL(distractors_only) | 138 | 200 | 69.0% | 8.0e-08 |
+| Pair | Wins | Cases | Win rate |
+|---|---:|---:|---:|
+| gold < random | 140 | 200 | 70.0% |
+| gold < none | 183 | 200 | 91.5% |
+| gold < distractors_only | 138 | 200 | 69.0% |
 
-Mean `nll_per_token` ordering is monotone and correct:
-gold **0.640** < gold+distractors 0.640 < distractors 0.668 < random 0.682 < none 0.709.
+Gold versus random has **44 exact ties**. The old summary's nominal p-values
+(`1.5e-8`, `2.5e-36`, `8.0e-8`) treated ties as nonwins. They are retained as
+historical outputs, not presented as a corrected paired sign test. Cases can
+also share a migration commit, so independence needs treatment in a new protocol.
+Mean NLL/token was gold 0.640, gold+distractors 0.640, distractors 0.668,
+random 0.682, none 0.709; this ordering is descriptive.
 
-**Pre-registered verdict: SUCCESS.** gold<random = 70.0% meets the ≥70% line
-(exactly at the boundary, 140/200) and gold<none = 91.5% clears the ≥60% line,
-each at p ≪ 0.01. Teacher-forced PPL ranks context quality correctly → the cheap
-dense proxy is validated on this mined distribution. (Numbers independently
-re-derived from the raw `experiment_results.csv`, matching the harness summary.)
+## The stop-rule applies
 
-## Gate side-channel — the pre-registered stop-rule is tripped, but the concern it guards does not materialize
+The frozen pre-registration requires fixing labels before interpreting PPL
+when gold gate pass rate is below 80%. Observed: **116/200 = 58%**, 84 failures,
+mean coverage 0.891058. Passing the two PPL win-rate thresholds does not override
+that condition.
 
-The pre-registration says: *if the gold expressibility-gate pass rate on mined
-cases is < 80%, fix the miner's labels before interpreting any PPL result.*
+The gate-passing subset has gold < random in **77/116 = 66.38%**, with 29 ties.
+That is lower than 70%, is a post-hoc subset, and does not refute the concern
+behind the stop-rule. Gate-passing does not establish label correctness.
 
-- Observed gold gate pass (coverage == 1.0): **58%** (116/200) — **< 80%, tripped.**
-- Mean gold coverage 0.891; buckets ≥0.99: 116, 0.9–0.99: 10, 0.75–0.9: 33,
-  **<0.75: 41**. The low pass rate is driven by ~41 large treewide edits whose
-  added identifiers are not all present in `kernel_evidence` (typedef/macro
-  indirection, big renames) — a label-**completeness** gap, not label-wrongness.
-- **Robustness check.** On the label-clean subset (the 116 gate-passing cases),
-  PPL(gold) < PPL(random) = **66%** — essentially the same signal as the full set,
-  not weaker. So the failure mode the stop-rule guards against (bad labels
-  inflating the PPL signal) is **not** what is happening here; the signal is
-  robust to restricting to clean labels.
+The earlier explanation blaming 41 large treewide edits was unsupported and
+is contradicted by the audit: all 41 cases with coverage below .75 have
+`treewide_scale <= 12`; 83 of the 84 failures have scale <=12. The independent
+[audit](07_gate_audit.md) reproduces all 1000 historical rows and examines every
+missing-identifier occurrence. Its classifications distinguish observations
+from declaration/indirection hypotheses and retain unresolved cases.
 
-Honest reading: the primary PPL criterion is met, and the gate stop-rule is a
-conservative label-quality flag whose underlying worry is empirically refuted by
-the clean-subset check. Follow-up to *clear* the flag (not to rescue the result):
-improve gold labeling for large treewide edits (resolve typedef/macro indirection)
-so the strict-coverage gate rises above 80%. This is label tooling, not a change
-to the frozen protocol.
+## Historical 40-case method comparison
 
-## Method comparison (real HF backend, 40-case subset of the frozen sample)
+At the old budgets, reported gold recall was:
 
-Scored on retro over 40 frozen-sample cases (`--manifest ... --max-cases 40`),
-8 methods, real teacher-forced backend. Two honest findings:
+| Historical budget | ours | trunc_baseline | random_budget | shapley_probe | keepdrop_dd |
+|---|---:|---:|---:|---:|---:|
+| 400 | .86 | .94 | .87 | .92 | .18 |
+| 1200 | 1.00 | 1.00 | .98 | 1.00 | .18 |
+| 3000 | 1.00 | 1.00 | .98 | 1.00 | .18 |
 
-**1. The default budgets (30, 80 tokens) are miscalibrated for real cases.** The
-edit locus alone is ~125 tokens on the mined distribution, so at budget 30/80 the
-locus overflows and *no* method can add any kernel evidence — every method
-degenerates to locus-only, gold recall ≈ 0, and `ours = trunc = random`. Those
-budgets were set for the 8-case synthetic fixture, not real drivers. (Diagnostic
-run archived at `runs/oacd_results/mc_v1_summary.md`.)
+These budgets counted distinct identifiers, not actual model tokens. Budgets
+30/80 could not even contain the roughly 125-unit reference-derived locus.
+Further defects affected interpretation: oracle selectors silently used a mock
+backend while final scores used HF; ordering put gold first; ordinary `ours`
+received gold obligations; the budgeted locus differed from the source scored;
+and Python's salted hash made random selection process-dependent.
 
-**2. At realistic budgets (400/1200/3000), `ours` does NOT beat the baselines on
-this distribution.** Gold recall:
+Thus the archive shows no advantage for `ours`, but establishes neither a fair
+method ranking nor that lack of overflow alone caused the result. Comparison v2
+fixes these contracts and labels oracle access; its smoke results are not a
+replacement research experiment. The old and new numeric budgets are not
+comparable.
 
-| budget | ours | trunc_baseline | random_budget | shapley_probe | keepdrop_dd |
-|---|---|---|---|---|---|
-| 400 | 0.86 | **0.94** | 0.87 | 0.92 | 0.18 |
-| 1200 | 1.00 | 1.00 | 0.98 | 1.00 | 0.18 |
-| 3000 | 1.00 | 1.00 | 0.98 | 1.00 | 0.18 |
+## Artifacts and next step
 
-Obligation recall is ~0.97 for every method (except the over-dropping
-`keepdrop_dd`/`longcodezip` at ~0.88), and edit-NLL is flat (~337–338) across
-methods. Interpretation: the mined atomic-commit cases are **small enough that
-once the budget clears the locus + gold evidence (~384 tokens), essentially any
-method fits all the gold** → gold/obligation recall saturates to ~1.0 and the
-selection strategy stops mattering. The only real budget pressure (budget 400)
-slightly *favors* blind truncation over `ours`, not the reverse.
+- Historical raw local files: `runs/oacd_results/`.
+- Historical retro PPL: `/home/arina/work/driver_agent_ctx/runs/oacd/ppl_signal/`.
+- Original frozen protocol: `docs/ppl_signal_preregistration.md` (unchanged).
+- [Full gate audit](07_gate_audit.md) and [implementation report](08_experiment_foundation.md).
 
-**Honest conclusion.** On this benchmark, obligation-anchored submodular selection
-(`ours`) is **not** demonstrably better than blind truncation or random — the
-distribution lacks the budget-overflow regime the method targets, and `ours`'
-coefficients are uncalibrated placeholders. The earlier mock-fixture ordering
-(`ours ≥ random/trunc`) was an artifact of the tiny-budget regime. The
-load-bearing, positive contribution here is the **PPL-proxy signal** (above) and
-the **self-labeling benchmark/methodology**, not a demonstrated selection win.
-`keepdrop_dd` is the one clear laggard (over-drops, gold recall stuck at 0.18).
-Follow-up if the selection claim is to be pursued: find or construct the
-overflow regime (large multi-symbol migrations that exceed budget) and calibrate
-`ours`' coefficients there.
-
-## Artifacts
-
-- retro: `~/work/driver_agent_ctx/runs/oacd/ppl_signal/{experiment_results.csv,experiment_summary.md}`
-- local copy: `runs/oacd_results/` (csv + summary + frozen manifest).
-- Mined dataset + PPL cache stay under retro `runs/` (git-ignored, regenerable
-  from repo + refs + seed; digest reproducible via the determinism check).
+Resolve gate validity and freeze a new content-pinned, length-controlled protocol
+before new confirmatory scoring. Do not edit the historical protocol to make
+its outcome successful.

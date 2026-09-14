@@ -1,9 +1,9 @@
 """Method zoo: context-selection approaches under one interface.
 
 Every method implements `select(case, budget) -> Selection` (see base.py).
-The registry maps a stable name to a zero-arg factory so harnesses can run any
-subset by name. All methods are evaluation-side; `ours` doubles as the
-default-OFF context_pruner used by the pipeline hook.
+The registry maps stable names to factories; reference-scoring oracles require
+an explicit backend. All methods run over evaluation case packs; `ours` shares
+a scoring formula with the default-OFF pipeline context pruner.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from .base import Method, Selection
 from .keepdrop_dd import KeepDropDD
 from .longcodezip import LongCodeZip
-from .ours import ObligationAnchored
+from .ours import ObligationAnchored, OracleObligations
 from .simple import ErrPrune, RandomBudget, ShapleyProbe, StaticEpam, TruncBaseline
 
 _REGISTRY = {
@@ -23,6 +23,7 @@ _REGISTRY = {
     "shapley_probe": ShapleyProbe,
     "static_epam": StaticEpam,
     "ours": ObligationAnchored,
+    "oracle_obligations": OracleObligations,
 }
 
 

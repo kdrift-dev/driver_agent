@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
 import difflib
 import json
 import os
@@ -139,7 +140,7 @@ def _load_old_module_sources(
             continue
         rel = p.relative_to(extracted_dir / "old_module_sources").as_posix()
         txt = read_text(p)
-        if len(txt) > max_chars_per_file:
+        if len(txt) > max_chars_per_file and not os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
             txt = txt[:max_chars_per_file] + "\n...[truncated]"
         if with_line_numbers:
             txt = _render_with_line_numbers(txt, start_line=1)
@@ -167,7 +168,7 @@ def _extract_function_block(
     end_line: int,
     roles: list[str],
     with_line_numbers: bool,
-    max_chars_per_block: int,
+    max_chars_per_block: int | None,
 ) -> dict[str, Any] | None:
     src_path = extracted_dir / "old_module_sources" / rel_file
     if not src_path.exists() or not src_path.is_file():
@@ -183,7 +184,7 @@ def _extract_function_block(
         return None
 
     raw_text = "\n".join(lines[start - 1 : end])
-    if len(raw_text) > max_chars_per_block:
+    if max_chars_per_block is not None and len(raw_text) > max_chars_per_block:
         raw_text = raw_text[:max_chars_per_block] + "\n...[truncated]"
 
     content = _render_with_line_numbers(raw_text, start_line=start) if with_line_numbers else raw_text
@@ -371,7 +372,7 @@ def _build_focused_old_sources(
                 end_line=end_line,
                 roles=roles,
                 with_line_numbers=with_line_numbers,
-                max_chars_per_block=max_chars_per_block,
+                max_chars_per_block=None if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER") else max_chars_per_block,
             )
             if not block:
                 continue
@@ -404,7 +405,7 @@ def _build_focused_old_sources(
                 }
             )
             blocks.append(block)
-            if len(blocks) >= max_blocks:
+            if len(blocks) >= max_blocks and not os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
                 return blocks
 
     # Focused mode still needs top-of-file include context when obligations
@@ -462,7 +463,7 @@ def _build_focused_old_sources(
                 seen_include_paths.add(hdr)
 
     blocks = include_blocks + blocks
-    if len(blocks) > max_blocks:
+    if len(blocks) > max_blocks and not os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
         return blocks[:max_blocks]
     return blocks
 
@@ -630,7 +631,7 @@ def _load_repair_diagnostic_sources(
                     end_line=end,
                     roles=["compile_failure_diagnostic_context"],
                     with_line_numbers=with_line_numbers,
-                    max_chars_per_block=24000,
+                    max_chars_per_block=None if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER") else 24000,
                 )
                 if block:
                     block["source_item_kind"] = "diagnostic_failure_function"
@@ -668,7 +669,7 @@ def _load_repair_diagnostic_sources(
         if not p.exists():
             continue
         text = read_text(p)
-        if len(text) > max_chars_per_file:
+        if len(text) > max_chars_per_file and not os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
             text = text[:max_chars_per_file] + "\n...[truncated_diagnostic_file]"
         if with_line_numbers:
             text = _render_with_line_numbers(text, start_line=1)
@@ -1067,7 +1068,99 @@ def _source_content_cap(item: dict[str, Any]) -> int:
     return 2600
 
 
-def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: int) -> tuple[dict[str, Any], dict[str, Any]]:
+def _shrink_patch_input_with_pruner(input_payload: dict[str, Any], *, budget_chars: int,
+                                   render_prompt=None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Keep mandatory source intact; select whole read-only blocks by rank.
+
+    Audit records are returned separately and never added to the model input.
+    Generation passes the actual prompt renderer, including its fixed template.
+    Direct callers without a renderer budget the identically formatted JSON.
+    """
+    from .context_pruner import (
+        is_mandatory_source, load_coeffs, marginal_gain, obligation_symbols_from_payload,
+        prune_old_module_sources, _block_symbols,
+    )
+
+    payload = deepcopy(input_payload)
+    sources = list(payload.get("old_module_sources") or [])
+    size = (lambda: len(render_prompt(payload))) if render_prompt else (lambda: len(json.dumps(payload, indent=2)))
+    initial_size = size()
+    symbols = obligation_symbols_from_payload(payload.get("compatibility_obligations"))
+    coeffs = load_coeffs()
+    ranked = prune_old_module_sources(sources, symbols, coeffs)
+    mandatory = [item for item in ranked if is_mandatory_source(item)]
+    readonly = [item for item in ranked if not is_mandatory_source(item)]
+    selected = list(mandatory)
+
+    def set_sources(items: list[dict[str, Any]]) -> None:
+        payload["old_module_sources"] = list(items)
+        summary = payload.get("source_payload_summary")
+        if isinstance(summary, dict) and summary.get("actual_mode") in {"focused", "full_module"}:
+            summary.update(_source_payload_summary(
+                mode=str(summary["actual_mode"]),
+                requested_mode=str(summary.get("requested_mode", summary["actual_mode"])),
+                old_sources=items,
+            ))
+
+    set_sources(selected)
+    mandatory_size = size()
+    dropped_reasons: dict[int, str] = {}
+    for item in readonly:
+        if mandatory_size > budget_chars:
+            dropped_reasons[id(item)] = "mandatory_sources_and_prompt_exceed_budget"
+            continue
+        set_sources(selected + [item])
+        if size() <= budget_chars:
+            selected.append(item)
+        else:
+            dropped_reasons[id(item)] = "whole_block_exceeds_remaining_budget"
+    set_sources(selected)
+    final_size = size()
+    positions = {id(item): i for i, item in enumerate(selected)}
+    ranks = {id(item): i for i, item in enumerate(ranked)}
+    decisions = []
+    for index, item in enumerate(sources):
+        output_index = positions.get(id(item))
+        required = is_mandatory_source(item)
+        decisions.append({
+            "source_index": index,
+            "identity": list(_source_item_dedupe_key(item)),
+            "rank": ranks[id(item)],
+            "output_index": output_index,
+            "action": "kept" if output_index is not None else "dropped",
+            "reason": ("mandatory_edit_source" if required else "ranked_block_fits_budget")
+                if output_index is not None else dropped_reasons[id(item)],
+            "reordered": output_index is not None and output_index != index,
+            "content_chars": len(str(item.get("content", "") or "")),
+            "obligation_overlap": sorted(_block_symbols(item) & symbols),
+            "score": None if required else marginal_gain(
+                _block_symbols(item), symbols, (), len(str(item.get("content", "") or "")), coeffs),
+        })
+    return payload, {
+        "initial_chars": initial_size,
+        "final_chars": final_size,
+        "budget_chars": budget_chars,
+        "budget_unit": "rendered_prompt_chars" if render_prompt else "rendered_payload_json_chars",
+        "trimmed": bool(dropped_reasons),
+        "over_budget_after_trim": final_size > budget_chars,
+        "status": "insufficient_budget" if final_size > budget_chars else "within_budget",
+        "notes": ["editable sources kept intact; complete read-only blocks selected in obligation rank order"],
+        "context_pruner": {
+            "version": coeffs.get("version"),
+            "coefficients": {key: value for key, value in coeffs.items() if not key.startswith("_")},
+            "ranking_size_unit": "source_chars",
+            "obligation_symbols": sorted(symbols),
+            "mandatory_source_count": len(mandatory),
+            "mandatory_payload_chars": mandatory_size,
+            "kept_source_count": len(selected),
+            "dropped_source_count": len(dropped_reasons),
+            "blocks": decisions,
+        },
+    }
+
+
+def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: int,
+                                render_prompt=None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply last-mile prompt-budget trimming without changing evidence sources.
 
     The main compactors above keep the payload small for ordinary modules. This
@@ -1075,27 +1168,16 @@ def _shrink_patch_input_payload(input_payload: dict[str, Any], *, budget_chars: 
     recording exactly what was omitted. It deliberately does not invent
     replacement hints or read new target driver code.
     """
+    if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
+        return _shrink_patch_input_with_pruner(input_payload, budget_chars=budget_chars, render_prompt=render_prompt)
+
     payload = dict(input_payload)
     notes: list[str] = []
     initial_size = _json_size(payload)
 
-    # Default-OFF obligation-anchored pruning hook. Only entered when the env
-    # flag is set; with it unset this block is skipped and behavior is
-    # unchanged. Reorders read-only source blocks by overlap with the
-    # machine-derived obligation symbols so the budget below keeps the useful
-    # ones instead of dropping read-only context blindly. Boundary-safe: uses
-    # only compatibility_obligations, never reference diffs or gold labels.
-    if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
-        from .context_pruner import obligation_symbols_from_payload, prune_old_module_sources
-        raw_sources = list(payload.get("old_module_sources") or [])
-        if raw_sources:
-            obl = obligation_symbols_from_payload(payload.get("compatibility_obligations"))
-            payload["old_module_sources"] = prune_old_module_sources(raw_sources, obl)
-            notes.append(f"context_pruner reordered {len(raw_sources)} sources (obl={len(obl)})")
-
     # Always cap very large source blocks. OOT focused slices can remain below
     # the global budget while still being too noisy for model/provider behavior.
-    sources = _prioritize_patch_sources(list(payload.get("old_module_sources") or []))
+    sources = _prioritize_patch_sources([dict(item) for item in payload.get("old_module_sources") or []])
     if sources:
         compacted = 0
         for item in sources:
@@ -1812,6 +1894,38 @@ def _filter_impact_graph_for_symbols(impact_graph: dict[str, Any], symbol_keys: 
         uses = {str(x) for x in item.get("uses_changed_kernel_symbols", []) or []}
         return bool(uses.intersection(symbol_keys))
 
+    expanded_names: set[str] = set()
+    if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
+        # Expansion records have candidate/context evidence and graph edges,
+        # but intentionally lack direct uses_changed_kernel_symbols. Follow
+        # only native expansion edges directly attached to a relevant seed;
+        # an arbitrary call edge or a transitive component is insufficient.
+        relevant_seeds = {
+            str(item.get("function", ""))
+            for key in ("edit_required_functions", "affected_functions")
+            for item in impact_graph.get(key, []) or []
+            if keep(item) and str(item.get("edit_scope", "edit_required")) == "edit_required"
+        }
+        expansion_kinds = {
+            "edit_candidate_direct_caller", "edit_candidate_paired_cleanup",
+            "edit_candidate_resource_pairing", "edit_candidate_same_driver_state_field",
+            "context_lifecycle_root", "context_callback_chain",
+        }
+        files_by_name: dict[str, set[str]] = defaultdict(set)
+        for key in ("affected_functions", "edit_required_functions", "edit_candidate_functions", "context_only_functions", "context_functions"):
+            for item in impact_graph.get(key, []) or []:
+                files_by_name[str(item.get("function", ""))].add(str(item.get("file", "")))
+        for edge in impact_graph.get("edges", []) or []:
+            source, target = str(edge.get("from", "")), str(edge.get("to", ""))
+            if edge.get("kind") not in expansion_kinds:
+                continue
+            if len(files_by_name[source]) != 1 or len(files_by_name[target]) != 1:
+                continue
+            if source in relevant_seeds:
+                expanded_names.add(target)
+            if target in relevant_seeds:
+                expanded_names.add(source)
+
     out = dict(impact_graph)
     for key in [
         "affected_functions",
@@ -1820,7 +1934,15 @@ def _filter_impact_graph_for_symbols(impact_graph: dict[str, Any], symbol_keys: 
         "context_only_functions",
         "context_functions",
     ]:
-        out[key] = [x for x in impact_graph.get(key, []) or [] if keep(x)]
+        out[key] = [
+            x for x in impact_graph.get(key, []) or []
+            if keep(x) or (
+                key != "edit_required_functions"
+                and str(x.get("function", "")) in expanded_names
+                and (key in {"edit_candidate_functions", "context_only_functions", "context_functions"}
+                     or str(x.get("edit_scope", "")) in {"edit_candidate", "context_only"})
+            )
+        ]
 
     kept_functions = {str(x.get("function", "")) for x in out.get("affected_functions", []) or []}
     out["edges"] = [
@@ -1831,6 +1953,38 @@ def _filter_impact_graph_for_symbols(impact_graph: dict[str, Any], symbol_keys: 
         or str(e.get("to", "")) in symbol_keys
     ]
     out["llm_payload_filter"] = "hard/strong required symbols only; full graph remains in extracted/impact_graph.json"
+    if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
+        kept_records = out["edit_required_functions"] + out["edit_candidate_functions"] + out["context_only_functions"] + out["affected_functions"] + out["context_functions"]
+        kept_functions = {str(item.get("function", "")) for item in kept_records}
+        out["edges"] = [
+            edge for edge in impact_graph.get("edges", []) or []
+            if str(edge.get("from", "")) in kept_functions
+            and (str(edge.get("to", "")) in kept_functions or str(edge.get("to", "")) in symbol_keys)
+        ]
+        out["editable_functions"] = [
+            item for item in impact_graph.get("editable_functions", []) or []
+            if (str(item.get("file", "")), str(item.get("function", ""))) in {
+                (str(rec.get("file", "")), str(rec.get("function", "")))
+                for rec in out["edit_required_functions"] + out["edit_candidate_functions"]
+            }
+        ]
+        out["edit_scope_counts"] = {
+            scope: len(out[key]) for scope, key in (
+                ("edit_required", "edit_required_functions"),
+                ("edit_candidate", "edit_candidate_functions"),
+                ("context_only", "context_only_functions"),
+            )
+        }
+        tier_counts = {"hard": 0, "semantic": 0, "context": 0}
+        for item in out["edit_required_functions"]:
+            tier = str(item.get("tier", "context"))
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        tier_counts["context"] += len(out["edit_candidate_functions"]) + len(out["context_only_functions"])
+        out["tier_counts"] = tier_counts
+        out["llm_payload_filter"] = (
+            "hard/strong required symbols and their directly evidence-linked candidate/context expansion; "
+            "full graph remains in extracted/impact_graph.json"
+        )
     return out
 
 
@@ -2133,15 +2287,26 @@ def run_patch_generation_agent(
 
     budget_info: dict[str, Any] = {}
     if generation_mode == "agent":
+        prompt_renderer = None
+        if os.environ.get("DRIVER_AGENT_CONTEXT_PRUNER"):
+            prompt_builder = build_patch_repair_prompt if is_repair else build_patch_generation_prompt
+            prompt_renderer = lambda data: prompt_builder(
+                data,
+                strict_mode=is_repair or str(prompt_strength or "normal").strip().lower() == "strict",
+                source_mode=mode,
+                source_with_line_numbers=bool(source_with_line_numbers),
+            )
         input_payload, budget_info = _shrink_patch_input_payload(
             input_payload,
             budget_chars=DEFAULT_PATCH_INPUT_BUDGET_CHARS,
+            render_prompt=prompt_renderer,
         )
-        summary = input_payload.get("source_payload_summary")
-        if isinstance(summary, dict):
-            summary["patch_input_budget"] = budget_info
-        else:
-            input_payload["patch_input_budget"] = budget_info
+        if "context_pruner" not in budget_info:
+            summary = input_payload.get("source_payload_summary")
+            if isinstance(summary, dict):
+                summary["patch_input_budget"] = budget_info
+            else:
+                input_payload["patch_input_budget"] = budget_info
 
     strict_mode = str(prompt_strength or "normal").strip().lower() == "strict"
     if is_repair:
@@ -2730,6 +2895,9 @@ def run_patch_generation_agent(
         "strong_semantic_required": strong_semantic_required,
         "effective_patch_required": effective_patch_required,
     }
+    if "context_pruner" in budget_info:
+        out["patch_input_budget"] = budget_info
+        out["source_payload_summary"] = input_payload.get("source_payload_summary", out["source_payload_summary"])
 
     write_json(run_dir / "patch_generation.json", out)
     return out

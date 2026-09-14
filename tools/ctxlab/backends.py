@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import urllib.request
 from pathlib import Path
 
@@ -26,6 +27,15 @@ OPENROUTER_COMPLETIONS_URL = "https://openrouter.ai/api/v1/completions"
 
 class ProviderFailure(RuntimeError):
     pass
+
+
+class ContextWindowExceeded(ValueError):
+    """A comparison prompt cannot be scored intact in the model window."""
+
+
+def lexical_token_count(text):
+    """Offline non-model proxy: word/number and punctuation occurrences."""
+    return len(re.findall(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[^\w\s]", text))
 
 
 class ScoreCache:
@@ -65,7 +75,8 @@ class ScoreCache:
 
 
 def cached_score(backend, cache, prompt, target):
-    key = ScoreCache.key(backend.model_name, prompt, target)
+    identity = f"{type(backend).__name__}:{backend.model_name}:{getattr(backend, 'max_input_tokens', None)}:v2"
+    key = ScoreCache.key(identity, prompt, target)
     hit = cache.get(key)
     if hit is not None:
         return hit
@@ -92,6 +103,11 @@ class MockBackend:
     def __init__(self, model_name="mock"):
         self.model_name = model_name
 
+    token_count_kind = "non_model_lexical_proxy"
+
+    def count_tokens(self, text):
+        return lexical_token_count(text)
+
     def score(self, prompt, target):
         tokens = IDENTIFIER_RE.findall(target)
         if not tokens:
@@ -103,7 +119,9 @@ class MockBackend:
         return {
             "backend": "mock", "model": self.model_name,
             "nll_sum": round(nll_sum, 6), "n_target_tokens": len(tokens),
-            "n_prompt_tokens": len(prompt_tokens),
+            "n_prompt_tokens": self.count_tokens(prompt),
+            "token_count_kind": self.token_count_kind,
+            "target_token_count_kind": "mock_identifier_occurrences",
             "nll_per_token": round(per_token, 6),
             "ppl": round(math.exp(min(per_token, 50.0)), 4),
             "prompt_truncated": False,
@@ -121,12 +139,23 @@ class HFTeacherForcedBackend:
         self._tokenizer = None
         self._torch = None
 
+    token_count_kind = "model_tokens"
+
+    def _load_tokenizer(self):
+        if self._tokenizer is None:
+            from transformers import AutoTokenizer
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+
+    def count_tokens(self, text):
+        self._load_tokenizer()
+        return len(self._tokenizer(text, add_special_tokens=False).input_ids)
+
     def _load(self):
         if self._model is not None:
             return
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoModelForCausalLM
         except ImportError as exc:
             raise RuntimeError(
                 "hf backend needs torch+transformers; create .venv-ppl and run "
@@ -134,7 +163,7 @@ class HFTeacherForcedBackend:
             ) from exc
         self._torch = torch
         torch.manual_seed(0)
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._load_tokenizer()
         self._model = AutoModelForCausalLM.from_pretrained(
             self.model_name, torch_dtype=torch.float32
         )
@@ -165,6 +194,7 @@ class HFTeacherForcedBackend:
         nll_sum = nll_per_token * n_target
         return {
             "backend": "hf", "model": self.model_name,
+            "token_count_kind": self.token_count_kind,
             "nll_sum": round(nll_sum, 6), "n_target_tokens": n_target,
             "n_prompt_tokens": len(prompt_ids),
             "nll_per_token": round(nll_per_token, 6),

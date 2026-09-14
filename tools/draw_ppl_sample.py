@@ -28,6 +28,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ctxlab.dataset import case_dirs  # noqa: E402
+from ctxlab.provenance import CONTENT_DIGEST_ALGORITHM, case_fingerprint  # noqa: E402
 
 
 def eligible_cases(dataset_dir: Path) -> list[dict[str, Any]]:
@@ -45,16 +46,29 @@ def eligible_cases(dataset_dir: Path) -> list[dict[str, Any]]:
             "case_id": meta.get("case_id", d.name),
             "treewide_scale": int(meta.get("treewide_scale", 0)),
             "gold_count": len(gold),
+            "content_sha256": case_fingerprint(d)["sha256"],
         })
     out.sort(key=lambda c: c["case_id"])  # deterministic base order
+    if len({c["case_id"] for c in out}) != len(out):
+        raise ValueError("duplicate eligible case_ids")
     return out
 
 
-def dataset_digest(cases: list[dict[str, Any]]) -> str:
+def legacy_dataset_digest(cases: list[dict[str, Any]]) -> str:
+    """Historical v1 ID-only digest; retained for frozen manifest replay."""
     h = hashlib.sha256()
     for c in cases:  # already sorted by case_id
         h.update(c["case_id"].encode("utf-8"))
         h.update(b"\x00")
+    return h.hexdigest()
+
+
+def dataset_digest(cases: list[dict[str, Any]]) -> str:
+    h = hashlib.sha256()
+    h.update(CONTENT_DIGEST_ALGORITHM.encode() + b"\x00")
+    for case in sorted(cases, key=lambda c: c["case_id"]):
+        h.update(case["case_id"].encode() + b"\x00")
+        h.update(case["content_sha256"].encode() + b"\x00")
     return h.hexdigest()
 
 
@@ -83,18 +97,26 @@ def stratified_sample(cases: list[dict[str, Any]], n: int, seed: int) -> list[st
 
 
 def build_manifest(dataset_dir: Path, n: int, seed: int) -> dict[str, Any]:
+    if n <= 0:
+        raise ValueError("sample size must be positive")
     cases = eligible_cases(dataset_dir)
     if not cases:
         raise SystemExit(f"[sample] no eligible (>=1 gold) case packs under {dataset_dir}")
     selected = stratified_sample(cases, n, seed)
+    selected_set = set(selected)
     by_scale = {c["case_id"]: c["treewide_scale"] for c in cases}
     strata: dict[str, int] = {}
     for cid in selected:
         strata[str(by_scale[cid])] = strata.get(str(by_scale[cid]), 0) + 1
     return {
-        "tool": "draw_ppl_sample_v1",
+        "tool": "draw_ppl_sample_v2",
+        "schema_version": 2,
+        "digest_algorithm": CONTENT_DIGEST_ALGORITHM,
         "dataset_dir": str(dataset_dir),
         "dataset_digest": dataset_digest(cases),
+        "legacy_id_digest": legacy_dataset_digest(cases),
+        "case_content_sha256": {c["case_id"]: c["content_sha256"]
+                                for c in cases if c["case_id"] in selected_set},
         "eligible_cases": len(cases),
         "n_requested": n,
         "n_selected": len(selected),
@@ -115,7 +137,8 @@ def main(argv=None) -> int:
     manifest = build_manifest(Path(args.dataset_dir), args.n, args.seed)
     text = json.dumps(manifest, indent=1)
     if args.out:
-        Path(args.out).write_text(text + "\n")
+        with Path(args.out).open("x") as fh:
+            fh.write(text + "\n")
         print(f"[sample] wrote {args.out}: {manifest['n_selected']}/{manifest['eligible_cases']} "
               f"eligible, strata={manifest['strata_by_treewide_scale']}, "
               f"digest={manifest['dataset_digest'][:12]}")

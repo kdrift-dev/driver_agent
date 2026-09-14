@@ -42,47 +42,63 @@ def obligation_symbols_from_payload(obligations_payload) -> set[str]:
     {"obligations": [...]} wrapper. Never touches target driver new code.
     """
     if isinstance(obligations_payload, dict):
-        records = obligations_payload.get("obligations") or []
+        records = list(obligations_payload.get("obligations") or [])
+        records += list(obligations_payload.get("semantic_obligations") or [])
     else:
         records = obligations_payload or []
     symbols: set[str] = set()
     for rec in records:
         if not isinstance(rec, dict):
             continue
-        for key in ("symbol", "required_added_symbol", "removed_symbol"):
-            val = rec.get(key)
-            if isinstance(val, str) and val:
-                symbols.add(val)
+        for key in ("affected_kernel_symbol", "symbol", "required_added_symbol", "removed_symbol"):
+            symbols.update(_symbol_identifiers(rec.get(key)))
         for key in ("symbols", "required_added_symbols", "expected_removed_patterns"):
-            for val in rec.get(key) or []:
-                if isinstance(val, str) and val:
-                    symbols.add(val.rstrip("(").split("(")[0])
+            values = rec.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            for val in values:
+                symbols.update(_symbol_identifiers(val))
+        for candidate in rec.get("replacement_candidates") or []:
+            val = candidate.get("symbol") if isinstance(candidate, dict) else candidate
+            symbols.update(_symbol_identifiers(val))
     return symbols
+
+
+def _symbol_identifiers(value) -> set[str]:
+    if not isinstance(value, str):
+        return set()
+    # Native keys are e.g. "old_api (function)" or "ops.member (struct_field)".
+    # Do not let the kind suffix or call arguments become relevance signals.
+    name = value.split("(", 1)[0].strip()
+    return set(_IDENT_RE.findall(name)) - {"struct", "union", "enum"}
 
 
 def _block_symbols(item: dict[str, Any]) -> set[str]:
     return set(_IDENT_RE.findall(str(item.get("content", "") or "")))
 
 
+def is_mandatory_source(item: dict[str, Any]) -> bool:
+    """Editable slices and full-module fallback are never optional context."""
+    return (bool(item.get("editable", False))
+            or str(item.get("edit_scope", "")) in ("edit_required", "edit_candidate")
+            or str(item.get("source_item_kind", "")) in (
+                "full_file", "diagnostic_failure_function", "diagnostic_failure_window",
+                "diagnostic_failure_file"))
+
+
 def prune_old_module_sources(sources: list[dict[str, Any]], obligation_symbols,
                              coeffs=None) -> list[dict[str, Any]]:
     """Reorder read-only source blocks by obligation coverage (editable kept first).
 
-    Non-destructive: returns a reordered list, never drops blocks — the
-    existing budget shrink still decides what fits. Editable blocks retain
-    their leading position (the edit locus is never demoted); read-only blocks
-    are ranked by obligation-symbol overlap so the budget keeps the useful
-    ones. Pure and deterministic.
+    Non-destructive ranking helper; the flag-on patch shrink selects complete
+    read-only blocks from this order under its rendered prompt budget. The
+    size penalty uses source characters (not a claimed tokenizer count).
     """
     coeffs = coeffs or load_coeffs()
     obl = set(obligation_symbols)
 
-    def is_editable(item: dict[str, Any]) -> bool:
-        return bool(item.get("editable", False)) or \
-            str(item.get("edit_scope", "")) in ("edit_required", "edit_candidate")
-
-    editable = [it for it in sources if is_editable(it)]
-    readonly = [it for it in sources if not is_editable(it)]
+    editable = [it for it in sources if is_mandatory_source(it)]
+    readonly = [it for it in sources if not is_mandatory_source(it)]
     scored = sorted(
         readonly,
         key=lambda it: marginal_gain(_block_symbols(it), obl, (), len(str(it.get("content", ""))), coeffs),

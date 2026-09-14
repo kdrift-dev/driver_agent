@@ -1,113 +1,93 @@
-# Context-engineering implementation loop — STATUS
+# Context engineering — status, 2026-09-14
 
-Branch `ctx-impl` off `context-engineering`. Milestones M0–M5 (offline machinery)
-plus the Phase-2 offline prep and the **Phase-3 pre-registered run on retro** are
-done. Nothing pushed.
+The first implementation package is on `codex/experiment-foundation`, based on
+`ctx-impl` commit `041e60c`. Historical run artifacts and the frozen
+pre-registration are unchanged.
 
-## Headline result (2026-08-26): pre-registered PPL run = SUCCESS
+## Current conclusion
 
-Frozen 200-case `v6.19..v7.0-rc1` sample (digest `32ecbf4da490…`, freeze commit
-`924a8b5`), scored with `Qwen2.5-Coder-0.5B` teacher-forced on retro (1000 rows,
-0 provider exclusions): **PPL(gold)<PPL(random) 70.0% (p=1.5e-8)**,
-**PPL(gold)<PPL(none) 91.5% (p=2.5e-36)** → pre-registered SUCCESS. Gate
-side-channel <80% stop-rule tripped (gold pass 58%, incomplete labels on large
-treewide edits) but the signal holds on the label-clean subset (66%), refuting
-the concern the rule guards. Full write-up: `docs-impl/06_ppl_signal_result.md`.
-Method comparison on the real backend (40-case HF subset) is **done and is a
-NULL**: `ours` does not beat blind truncation/random — the mined cases fit the
-budget, so selection doesn't separate (default budgets 30/80 were also miscalibrated
-vs the ~125-token locus). Positive contribution = PPL proxy + benchmark, not a
-selection-method win. Retro compute env: nix-built `~/ppl-env` (torch 2.9.1 /
-transformers 4.57.1); ctx-impl lives in a separate worktree `~/work/driver_agent_ctx`
-so the dirty evolve-search tree is untouched.
+The August 26 run completed: 200 cases, five conditions, 1000 scored rows.
+Gold beats random in 140/200 cases (70%, including 44 ties in the denominator)
+and none in 183/200 (91.5%). **The pre-registered stop-rule was tripped:**
+gold passes the expressibility gate in only 116/200 cases (58%, required ≥80%).
+These observations do not establish a successful pre-registered result or
+validate PPL as a migration-quality proxy. The previous SUCCESS claim is
+withdrawn. See [corrected result](06_ppl_signal_result.md).
 
-## Milestones (each: implement + run + review + report + commit)
+The independent [gate audit](07_gate_audit.md) exactly reproduces all historical
+rows before classifying failures. The gate checks identifier mentions, including
+new driver-local names; a failure does not by itself prove missing kernel evidence.
+The historical gate also used more old source than the scorer received.
 
-| # | Milestone | Commit | Report |
-|---|---|---|---|
-| M0 | Migration-bench miner + ctxlab package | `4167e4b` | docs-impl/00_miner.md |
-| M1 | Data layer + deterministic fixture checks | `94b17e5` | docs-impl/01_data_layer.md |
-| M2 | Metric layer (score_context + mock backend) | `0a17e34` | docs-impl/02_metric_layer.md |
-| M3 | Method zoo (8 methods) + default-OFF pruner hook | `6a89b30` | docs-impl/03_method_zoo.md |
-| M4 | Comparison harness + ablation arms | `ba77583` | docs-impl/04_comparison_harness.md |
-| M5 | Analysis notebook (executed) | (this commit) | docs-impl/05_analysis.md |
+The historical 40-case comparison found no selection advantage for `ours`, but
+its backend, budget and oracle-boundary defects prevent attributing the outcome
+solely to cases fitting the budget. It remains an archived diagnostic.
 
-## Standing regression gate
+## First package
 
-`python3 tools/run_ctxlab_checks.py` — 28 checks, all green: fixture mine
-(exact gold labels, junk filtered, per-commit sampling cap, sanity gauges,
-schema, loader round-trip, catalog stats), mock-backend ordering + determinism,
-method zoo (budget/locus invariants, ours ≥ random/trunc gold recall), pruner
-ranking + non-destructiveness, comparison shape + both nulls, frozen-sample
-manifest restrict + digest guard, end-to-end determinism. Run it after any
-change to the miner / data / metric / method code. Notebooks execute under
-`.venv-analysis`.
+- Comparison v2: actual selection backend, model-token prompt budgets for HF,
+  deterministic random ordering, one exact renderer for selection and scoring,
+  explicit oracle methods, label-hidden ordinary selectors, and explicit
+  insufficient-budget/window exclusions. Candidate pools are still evaluation-mined.
+- Production pruner: native obligation fields, ranked whole-block selection,
+  intact mandatory edit source, prompt-character accounting, directly connected
+  scope expansion, per-block decisions outside the model input. Default remains OFF.
+- Reproducibility: v2 manifests hash case-pack contents; legacy ID-only manifests
+  remain readable with an explicit warning. New runs save initial and final code,
+  input, backend and kernel identities, detect changes, and refuse output reuse.
+- All 84 historical gold gate failures are audited separately from measurement
+  changes. No reference-derived information is added to production prompts.
+- Retro setup uses its existing kernel clone and cached CPU Qwen environment;
+  the dirty `evolve-search` checkout is preserved. See [implementation/host report](08_experiment_foundation.md).
 
-## Phase-2 offline prep (retro-gated run not yet executed)
-
-Added ahead of the real run so it needs no code changes on the build host:
-
-- `tools/run_ppl_signal_experiment.py --manifest <frozen>`: restricts scoring to
-  the `draw_ppl_sample.py` frozen sample's `case_ids`, with a `dataset_digest`
-  guard (refuses to score a mine other than the one the pre-registration froze;
-  bypass only via `PPL_ALLOW_DIGEST_MISMATCH=1`, testing only). Without
-  `--manifest`, behavior is unchanged.
-- `docs/ppl_signal_preregistration.md`: sample now defined by the frozen manifest
-  (digest + n_selected placeholders filled at freeze time); still **DRAFT**.
-- `scripts/run_oacd_retro.sh`: stage-based, resumable Phase-3 runbook for retro
-  (`pilot | mine | draw | ppl | compare | all`). The `pilot` stage enforces the
-  pre-registered gold expressibility-gate ≥ 80% before allowing the full mine.
-
-## Input-boundary status
-
-Clean. `driver_agent_pregen/` imports no ctxlab/tools code (grep-verified).
-The one pipeline touch is a default-OFF hook in
-`patch_generation.py::_shrink_patch_input_payload`, gated by
-`DRIVER_AGENT_CONTEXT_PRUNER`; unset, behavior is unchanged (verified: no note,
-ordering identical to the pre-existing prioritizer). The pipeline-side
-`context_pruner.py` reads only machine-derived obligation symbols, never
-reference diffs or gold labels. Mined data and run artifacts stay under
-`runs/` (git-ignored); no dataset is committed.
-
-## Decisions that are the user's (STOP conditions) — none block further offline work
-
-These were deliberately not taken; each needs an explicit call:
-
-1. **Full v6.19..v7.0-rc1 mine.** The miner is validated on fixtures only.
-   Real run (needs a linux.git clone, out of scope for this loop):
-   `REPO=<linux> python3 tools/mine_migration_bench.py --old-ref v6.19 --new-ref v7.0-rc1`
-   Options: (a) run on retro when reachable, (b) run locally against a clone,
-   (c) defer. Recommendation: (a) — the build host already has the clone.
-2. **Committing mined data.** Default is not to (packs are eval-only, tens of
-   MB, regenerable from repo+refs+seed). Options: commit catalog.json + a
-   curated subset / commit nothing / commit everything. Recommendation: catalog
-   + curated 200-case subset once mined, rest regenerated on demand.
-3. **Freezing the pre-registration** (`docs/ppl_signal_preregistration.md`,
-   still DRAFT). Must be frozen by a commit BEFORE the first real PPL scoring
-   run. Recommendation: freeze once mined cases exist and the sample is drawn.
-4. **Real-LLM / HF-backend runs.** The pre-registered PPL experiment and any
-   `--scorer hf/openrouter` run need `.venv-ppl` (torch/transformers) and, for
-   openrouter, a key. Recommendation: run the 0.5B HF backend on retro after
-   the mine; keep it off the paper-facing agent path.
-
-## Real-run recipe (one command per stage, when the user green-lights data)
+## Validation commands
 
 ```bash
-# 0. mine (host with a linux.git clone)
-REPO=<linux> OUT_DIR=runs/mined python3 tools/mine_migration_bench.py \
-    --old-ref v6.19 --new-ref v7.0-rc1
-# 1. freeze pre-registration (commit), then draw the 200-case sample
-# 2. PPL signal check with the real backend
-PPL_SCORER=hf python3 tools/run_ppl_signal_experiment.py --dataset-dir runs/mined
-# 3. method comparison with the real backend
-python3 tools/run_method_comparison.py --dataset-dir runs/mined --scorer hf
+python3 tools/run_ctxlab_checks.py
+python3 tools/run_context_pruner_checks.py
+python3 tools/run_provenance_checks.py
+python3 tools/run_gate_audit_checks.py \
+  --dataset-dir runs/gate_audit_input_20260914 \
+  --manifest runs/oacd_results/ppl_sample_manifest.json \
+  --audit-report runs/gate_audit_20260914/gate_audit.json
 ```
 
-## Caveats carried forward
+These check contracts and failures, not an assertion that a preferred method
+must win. HF smoke tests demonstrate executable machinery, not effect sizes.
+No new 200-case PPL run or end-to-end generated-patch experiment is part of
+this package.
 
-- All committed numbers are mock-backend orderings on an 8-case synthetic
-  fixture: they validate machinery and directions, not effect sizes.
-- The two nulls (Sam-Bodden skeleton-vs-drop, ETH generated-guidance) are
-  reproduced only in *direction* under the mock; their real signs need the HF
-  backend.
-- `--mode split-commits` in the miner is a documented refused stub.
+## Next TODO, in order
+
+1. Resolve the gate's target definition using the audited cases: distinguish
+   external requirements from newly introduced local identifiers; verify uncertain
+   kernel evidence and extraction cutoffs. Do not tune labels to reach 80%.
+2. Freeze a new PPL protocol: exact prompt/source, model tokens, actual
+   length-matched controls, tie treatment, model revision, content hashes,
+   commit-level dependence and explicit handling of oversized cases. Preserve the
+   old pre-registration as history; write a new document before new scoring.
+3. Build a split with genuine evidence-budget pressure. Separate production-derived
+   candidate pools/obligations from evaluation oracles; split by migration commit
+   before coefficient calibration and held-out evaluation.
+4. Run the new PPL and method experiments on retro after those definitions are
+   fixed. Report all exclusions and uncertainty; no win is assumed.
+5. Evaluate patch generation at equal budgets with pruner OFF/ON, then module
+   builds and applicable validation. PPL alone cannot establish patch correctness.
+
+Evolve/fitness experiments stay a separate workstream until this foundation is
+stable. No destructive reset of their checkout or historical worktrees is needed.
+
+## Historical milestones
+
+| Milestone | Commit | Report |
+|---|---|---|
+| M0 miner | `4167e4b` | [00](00_miner.md) |
+| M1 data | `94b17e5` | [01](01_data_layer.md) |
+| M2 metrics | `0a17e34` | [02](02_metric_layer.md) |
+| M3 methods | `6a89b30` | [03](03_method_zoo.md) |
+| M4 comparison | `ba77583` | [04](04_comparison_harness.md) |
+| M5 analysis | `988dc83` | [05](05_analysis.md) |
+| Frozen sample | `924a8b5` | unchanged pre-registration |
+
+Reports 00–05 and the saved notebook describe earlier implementations; this
+status and report 08 describe the current contracts.

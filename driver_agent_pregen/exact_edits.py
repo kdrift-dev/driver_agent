@@ -7,9 +7,11 @@ LF is the only line separator. Unterminated final lines are supported and
 represented with standard no-newline markers in the generated unified diff.
 The v1 entry point requires complete lines; the explicit v2 entry point permits
 exact substrings without changing, normalizing or inferring any supplied text.
+The v3 entry point retains validated identity operations in the complete list.
 """
 from __future__ import annotations
 
+import copy
 import difflib
 import hashlib
 import json
@@ -113,7 +115,17 @@ def compile_substring_edits(sources, output):
     return _compile_edits(sources, output, whole_lines=False)
 
 
-def _compile_edits(sources, output, *, whole_lines):
+def compile_identity_edits(sources, output):
+    """Compile v3 exact substrings while retaining validated identity edits.
+
+    Every submitted span, including an identity, must uniquely match the
+    original source and be disjoint. Identity-only output has no patch and is
+    not a build candidate. No submitted operation is filtered or repaired.
+    """
+    return _compile_edits(sources, output, whole_lines=False, allow_identity=True)
+
+
+def _compile_edits(sources, output, *, whole_lines, allow_identity=False):
     """Return deterministic patched sources, unified diff and provenance.
 
     Invalid inputs raise ValueError. No files are read or written and input
@@ -139,7 +151,7 @@ def _compile_edits(sources, output, *, whole_lines):
     if type(output["edits"]) is not list or len(output["edits"]) > MAX_EDITS:
         raise ValueError(f"edits must be a list of at most {MAX_EDITS} edits")
     spans = {path: [] for path in original}
-    for edit in output["edits"]:
+    for submitted_index, edit in enumerate(output["edits"]):
         _fields(edit, ("path", "old_text", "new_text"), "edit")
         path = _path(edit["path"])
         if path not in original:
@@ -148,7 +160,7 @@ def _compile_edits(sources, output, *, whole_lines):
         new = _text(edit["new_text"], "new_text")
         if not old:
             raise ValueError("old_text must be nonempty")
-        if old == new:
+        if old == new and not allow_identity:
             raise ValueError("no-op edit is forbidden")
         content = original[path]
         start = content.find(old)
@@ -162,13 +174,14 @@ def _compile_edits(sources, output, *, whole_lines):
             raise ValueError("old_text must cover complete original lines")
         if whole_lines and end < len(content) and new and not new.endswith("\n"):
             raise ValueError("new_text must end with LF before unchanged following content")
-        spans[path].append((start, end, old, new))
+        spans[path].append((start, end, old, new, submitted_index))
     old_sources = [{"path": path, "content": original[path]} for path in sorted(original)]
     patched_sources, audits, diffs = [], [], []
+    changed_count = 0
     for source in old_sources:
         path, content = source["path"], source["content"]
         cursor, pieces = 0, []
-        for start, end, old, new in sorted(spans[path]):
+        for start, end, old, new, submitted_index in sorted(spans[path]):
             if start < cursor:
                 raise ValueError("edit spans overlap in the original source")
             pieces.extend((content[cursor:start], new))
@@ -181,6 +194,10 @@ def _compile_edits(sources, output, *, whole_lines):
                 "end_line": content.count("\n", 0, end) + (0 if old.endswith("\n") else 1),
                 "old_text_sha256": _sha(old), "new_text_sha256": _sha(new),
             })
+            changed_count += old != new
+            if allow_identity:
+                audits[-1].update({"submitted_index": submitted_index,
+                                   "effect": "identity" if old == new else "changed"})
             cursor = end
         pieces.append(content[cursor:])
         patched = "".join(pieces)
@@ -188,9 +205,9 @@ def _compile_edits(sources, output, *, whole_lines):
         if patched != content:
             diffs.append(_diff(path, content, patched))
     patch = "".join(diffs)
-    if output["edits"] and not patch:
+    if changed_count and not patch:
         raise ValueError("combined edits produce no source change")
-    return {
+    result = {
         "status": "compiled" if output["edits"] else "no_edits",
         "patched_sources": patched_sources,
         "patch_diff": patch,
@@ -199,3 +216,12 @@ def _compile_edits(sources, output, *, whole_lines):
         "patched_source_sha256": _source_sha(patched_sources),
         "patch_sha256": _sha(patch),
     }
+    if allow_identity:
+        result.update({
+            "status": "compiled" if changed_count else ("identity_only" if output["edits"] else "no_edits"),
+            "submitted_edits": copy.deepcopy(output["edits"]),
+            "submitted_count": len(output["edits"]),
+            "changed_count": changed_count,
+            "identity_count": len(output["edits"]) - changed_count,
+        })
+    return result

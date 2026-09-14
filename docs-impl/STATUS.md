@@ -1,7 +1,9 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/pressure-build-eligibility`: runner `d02ed15`,
-corrected Nix environment `c69f0b3`. It follows `codex/gate-v2-pressure`
+The current package is on `codex/xilinx-module-pilot`: strict module runner
+`9e1f7bd`, with generation preparation measured at `22b0604`. It follows
+`codex/pressure-build-eligibility` (runner `d02ed15`, corrected Nix environment
+`c69f0b3`, report `22b0604`), `codex/gate-v2-pressure`
 (`431c7a1`, report `e63f482`) and `codex/experiment-foundation`
 (`12940c0`, report `0c7e6be`).
 Historical run artifacts and the frozen pre-registration are unchanged.
@@ -48,6 +50,22 @@ This establishes file-object evidence only, not module linking or runtime
 correctness. The [build report](13_pressure_build_results.md) and
 [result catalog](../datasets/pressure_build_results_v1.json) record all outcomes.
 The pressure set is not yet a required-repair benchmark for method comparison.
+
+The scoped Xilinx continuation now has **three strict positive `.ko` controls
+and one reproduced old-on-new compiler API mismatch**. Two independently built
+kernels use byte-identical configurations; all module imports resolve, and
+restoring the new source reproduces the new `.ko` byte for byte. This extends
+the Xilinx evidence to a complete module build, with CRC versioning and runtime
+explicitly untested. See [module controls](14_xilinx_module_controls.md).
+
+Production generation preparation is **NOT_FROZEN**. Dry-run shows that the
+native pruner chooses read-only old-source blocks, while OFF/ON also change
+source retention and budget accounting. All six optional focused blocks have
+zero obligation overlap in this case. A direct flag comparison would therefore
+not isolate useful kernel-evidence selection. Real generation prompts also
+exceed the earlier 4096-token comparison budget under its Qwen diagnostic
+counter; those counts cannot transfer to a different generation model.
+See [measured preparation and prerequisites](15_xilinx_generation_protocol.md).
 
 ## First package
 
@@ -119,11 +137,31 @@ canonical artifact verification pass. Commands and results are in reports
   PPL, module-link or runtime experiments were run in this package. See
   [protocol](12_pressure_build_protocol.md) and [results](13_pressure_build_results.md).
 
+## Fourth package
+
+- Xilinx's full old target is one C file, 430 lines, with no local headers.
+  Two fresh kernel builds and four module phases complete on retro. Three
+  strict `.ko` controls pass; old-on-new fails on the changed public API type.
+  All 231 independent artifact-audit checks pass; historical runs stay intact.
+- Production dry-run and seven diagnostic re-renders expose the current flag's
+  source-truncation and accounting confounds. No model requests or generated
+  patches exist. An independent source/provenance audit checks 93 artifacts and
+  126 kernel excerpts; it finds no prohibited reference or driver-diff input.
+- Two new oracle contract groups pass locally and on retro. Production code,
+  pruner defaults, the reserved pressure set and previous pre-registration are
+  unchanged. Build checkout: `/home/arina/work/driver_agent_xilinx_pilot`.
+- Machine-readable catalogs: [module controls](../datasets/xilinx_module_controls_v1.json)
+  and [generation preparation](../datasets/xilinx_generation_preparation_v1.json).
+
 ## Next TODO, in order
 
-1. Take the Xilinx API mismatch into a scoped pilot: complete the old-target
-   source boundary and strict module-link controls, then freeze actual
-   generation prompts, budgets, model and validation before patch generation.
+1. Finish the Xilinx generation protocol: use one immutable old-source input
+   and a production-derived optional kernel-evidence pool, a shared renderer,
+   whole-block first-fit/ranked conditions, and the same actual model-token
+   budget. Save response/model/usage/finish metadata and every provider attempt;
+   remove the implicit OpenRouter retry after subprocess provider failure.
+   Freeze the request and conditions before generation. Complete-source and
+   strict module controls are done; native flag OFF/ON alone is not a fair A/B.
    Keep NTB's removed-prototype diagnostic separate; acquire more qualified
    migration commits before statistical comparison. Preserve the pressure set.
 2. Complete gate calibration before using it as a quality filter: extend sparse
@@ -137,8 +175,9 @@ canonical artifact verification pass. Commands and results are in reports
 4. Separate production-derived candidate pools/obligations from evaluation
    oracles, then run new PPL/method experiments on the appropriate frozen
    calibration set. Respect commit-level separation and report all exclusions.
-5. Evaluate patch generation at equal budgets with pruner OFF/ON, then module
-   builds and applicable validation. PPL alone cannot establish patch correctness.
+5. Evaluate the frozen context-selection conditions at equal budgets, then
+   module builds and applicable validation. Report apply, compilation, link,
+   semantic review and runtime separately. PPL alone cannot establish patch correctness.
 
 Evolve/fitness experiments stay a separate workstream until this foundation is
 stable. No destructive reset of their checkout or historical worktrees is needed.
@@ -156,4 +195,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–13 describe the current contracts.
+status and reports 08–15 describe the current contracts.

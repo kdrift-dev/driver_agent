@@ -1,0 +1,175 @@
+{
+  "artifact_index": {
+    "path": "runs/xilinx_module_controls_artifact_index_20260914.json",
+    "sha256": "863aae14e1a72513436d7ca1c0e531d99fb42a77e537a9db04d876937354a389"
+  },
+  "audit": {
+    "checks": 231,
+    "command_records": 38,
+    "path": "runs/xilinx_module_controls_audit_20260914.json",
+    "sha256": "c432c9a4fb8973533da45bdafff927637d039cc2df78aff8226083ebca922469",
+    "snapshot_checks": 49,
+    "status": "PASS"
+  },
+  "case_id": "b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c",
+  "classification": "observed_module_compile_break",
+  "evaluation_only": true,
+  "execution_commit": "9e1f7bd4b99ed1f835c1ed1aa87139e3e40af28c",
+  "execution_source_files": 100,
+  "finished_at_utc": "2026-09-14T16:37:22.044054+00:00",
+  "generation_calls": 0,
+  "integrity_verified": true,
+  "kernel_builds": {
+    "new": {
+      "duration_seconds": 324.818,
+      "exported_symbols": 12767,
+      "exported_symbols_sha256": "b7dc9dd182a3ba28ccb90ceac47a9c297827ad13c23fcb2457873caa2e5a0455",
+      "vmlinux_object_sha256": "29f07dd4f9413e2e998a5520ea7cf52ad70c8e6e0538bdbde66c341032b4a5fc"
+    },
+    "old": {
+      "duration_seconds": 323.911,
+      "exported_symbols": 12767,
+      "exported_symbols_sha256": "b7dc9dd182a3ba28ccb90ceac47a9c297827ad13c23fcb2457873caa2e5a0455",
+      "vmlinux_object_sha256": "b7a03e46a9d688b38fecefc6b61dae585a84bd39b557fed7e7187e87ca85ebe0"
+    }
+  },
+  "kernel_config_sha256": {
+    "new": "9d5c6c0402272fdad72fcf37e6bcd5c6fdcff63c49563e825ce968701f94ead2",
+    "old": "9d5c6c0402272fdad72fcf37e6bcd5c6fdcff63c49563e825ce968701f94ead2"
+  },
+  "local_artifact_directory": "runs/xilinx_module_controls_v1_20260914",
+  "local_copy_exclusions": [
+    "worktrees/",
+    "kernels/old/vmlinux",
+    "kernels/old/vmlinux.o",
+    "kernels/new/vmlinux",
+    "kernels/new/vmlinux.o"
+  ],
+  "module_target": "drivers/crypto/xilinx/xilinx-trng.ko",
+  "new_commit": "b2c15db74a379a50d723002799c3db0c6781c75a",
+  "old_commit": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+  "phases": {
+    "new_on_new": {
+      "compiler_seen": true,
+      "diagnostics": [],
+      "duration_seconds": 2.722,
+      "log": {
+        "path": "runs/xilinx_module_controls_v1_20260914/logs/026_new_on_new.log",
+        "sha256": "04c70a592d2bbabc54ff69e24c9920e0cff771e6b602a5812acb4d1d8e33a508"
+      },
+      "modpost": {
+        "commands": [
+          "./scripts/mod/modpost -M     -E     -o Module.symvers -T modules.order vmlinux.o"
+        ],
+        "seen": true,
+        "strict": true
+      },
+      "module_artifact": {
+        "bytes": 23176,
+        "sha256": "95ada500f723bf8f73da2a1e12941510d54fe1b8d68656950ca0029786a4c8c9",
+        "snapshot": "/home/arina/work/driver_agent_xilinx_pilot/runs/xilinx_module_controls_v1_20260914/new_on_new/drivers/crypto/xilinx/xilinx-trng.ko"
+      },
+      "passed": true,
+      "returncode": 0,
+      "source_sha256": "fcb03701415615e66ae387398d5b342ecbd6fb46e57da498edb623f428681859",
+      "source_verified": true,
+      "stable_kernel_inputs": true
+    },
+    "old_on_new": {
+      "compiler_seen": true,
+      "diagnostics": [
+        "drivers/crypto/xilinx/xilinx-trng.c:201:37: error: passing argument 1 of \u2018crypto_drbg_ctr_df\u2019 from incompatible pointer type [-Wincompatible-pointer-types]",
+        "./include/crypto/df_sp80090a.h:21:43: note: expected \u2018struct aes_enckey *\u2019 but argument is of type \u2018struct crypto_aes_ctx *\u2019"
+      ],
+      "duration_seconds": 1.819,
+      "log": {
+        "path": "runs/xilinx_module_controls_v1_20260914/logs/030_old_on_new.log",
+        "sha256": "d62e94c162d5dddb114d5940d432b0e0faef4885e1918715602865252810b212"
+      },
+      "modpost": {
+        "commands": [],
+        "seen": false,
+        "strict": false
+      },
+      "module_artifact": null,
+      "passed": false,
+      "returncode": 2,
+      "source_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+      "source_verified": true,
+      "stable_kernel_inputs": true
+    },
+    "old_on_old": {
+      "compiler_seen": true,
+      "diagnostics": [],
+      "duration_seconds": 2.671,
+      "log": {
+        "path": "runs/xilinx_module_controls_v1_20260914/logs/017_old_on_old.log",
+        "sha256": "9662b88bacf21ef0fc16334ba475c679525fc7ae730fc25b7f7499fc2dfce9ac"
+      },
+      "modpost": {
+        "commands": [
+          "./scripts/mod/modpost -M     -E     -o Module.symvers -T modules.order vmlinux.o"
+        ],
+        "seen": true,
+        "strict": true
+      },
+      "module_artifact": {
+        "bytes": 23176,
+        "sha256": "93abc25def68d2a6f0bbeed06798ab1409dce367beb94206397e3b3a34a1336d",
+        "snapshot": "/home/arina/work/driver_agent_xilinx_pilot/runs/xilinx_module_controls_v1_20260914/old_on_old/drivers/crypto/xilinx/xilinx-trng.ko"
+      },
+      "passed": true,
+      "returncode": 0,
+      "source_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+      "source_verified": true,
+      "stable_kernel_inputs": true
+    },
+    "restored_new_on_new": {
+      "compiler_seen": true,
+      "diagnostics": [],
+      "duration_seconds": 2.671,
+      "log": {
+        "path": "runs/xilinx_module_controls_v1_20260914/logs/031_restored_new_on_new.log",
+        "sha256": "f36bb167b0f57a3613a44b61fd4c5f798f50faf274662c3550ab21bbe892c593"
+      },
+      "modpost": {
+        "commands": [
+          "./scripts/mod/modpost -M     -E     -o Module.symvers -T modules.order vmlinux.o"
+        ],
+        "seen": true,
+        "strict": true
+      },
+      "module_artifact": {
+        "bytes": 23176,
+        "sha256": "95ada500f723bf8f73da2a1e12941510d54fe1b8d68656950ca0029786a4c8c9",
+        "snapshot": "/home/arina/work/driver_agent_xilinx_pilot/runs/xilinx_module_controls_v1_20260914/restored_new_on_new/drivers/crypto/xilinx/xilinx-trng.ko"
+      },
+      "passed": true,
+      "returncode": 0,
+      "source_sha256": "fcb03701415615e66ae387398d5b342ecbd6fb46e57da498edb623f428681859",
+      "source_verified": true,
+      "stable_kernel_inputs": true
+    }
+  },
+  "preservation": {
+    "path": "runs/xilinx_preservation_20260914.json",
+    "sha256": "120757e7f8b551927e089fce5441bc7b0d6a5fd99a001502404bc344ddc4613e"
+  },
+  "protocol": "xilinx_strict_module_controls_v1",
+  "protocol_document": "docs-impl/14_xilinx_module_controls.md",
+  "retro_artifact_directory": "/home/arina/work/driver_agent_xilinx_pilot/runs/xilinx_module_controls_v1_20260914",
+  "runtime_tests": 0,
+  "schema_version": 1,
+  "scope": "strict single-module compile/link and exported-symbol resolution controls; no CRC versioning or runtime evidence",
+  "source": "drivers/crypto/xilinx/xilinx-trng.c",
+  "source_digest": "b43c360904dac994d9cbcf3130985f0c32be3cc442de5787749678aea32bd8fc",
+  "source_hashes": {
+    "new": "fcb03701415615e66ae387398d5b342ecbd6fb46e57da498edb623f428681859",
+    "old": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f"
+  },
+  "started_at_utc": "2026-09-14T16:25:47.550616+00:00",
+  "summary": {
+    "path": "runs/xilinx_module_controls_v1_20260914/summary.json",
+    "sha256": "2265585ca909a2513b52a1b04aa7134e207a511a42d5fa5059d772244aee5eb8"
+  }
+}

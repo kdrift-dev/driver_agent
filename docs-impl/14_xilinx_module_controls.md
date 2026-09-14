@@ -74,6 +74,65 @@ failures without replacing the earlier file-census measurements.
 
 ## Execution and results
 
-Pending at protocol freeze. Append the canonical command, execution identity,
-outcomes and artifact hashes after completion; do not rewrite the above rules
-to accommodate an observed build failure.
+Completed on retro, 2026-09-14 16:25:47–16:37:22 UTC, at execution commit
+`9e1f7bd4b99ed1f835c1ed1aa87139e3e40af28c` (initial runner `4c71c45`).
+Source identity is
+`b43c360904dac994d9cbcf3130985f0c32be3cc442de5787749678aea32bd8fc`.
+
+```bash
+DRIVER_AGENT_ROOT=/home/arina/work/driver_agent_xilinx_pilot \
+  /home/arina/bin/driver-agent-shell python3 tools/run_xilinx_module_controls.py \
+  --repo /home/arina/repos/linux \
+  --old-source /home/arina/work/driver_agent_ctx/runs/mined/cases/b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c/old_module_sources/drivers/crypto/xilinx/xilinx-trng.c \
+  --out-dir /home/arina/work/driver_agent_xilinx_pilot/runs/xilinx_module_controls_v1_20260914 \
+  --jobs 8 --timeout-sec 3600
+```
+
+| Phase | Result | Module build seconds |
+|---|---|---:|
+| Old on old | Fresh `.ko`, strict modpost and final LD pass | 2.671 |
+| New on new | Fresh `.ko`, strict modpost and final LD pass | 2.722 |
+| Old on new | Compiler API type error; no `.ko` | 1.819 |
+| Restored new on new | Fresh `.ko`, strict modpost and final LD pass | 2.671 |
+
+The old-on-new diagnostic is at `xilinx-trng.c:201`: argument 1 to
+`crypto_drbg_ctr_df` is `struct crypto_aes_ctx *`, while the new public header
+requires `struct aes_enckey *`. It fails before modpost; this is a controlled
+**module compilation break**, not an observed link-time failure.
+
+Both fresh kernel builds pass (323.911 and 324.818 seconds). Their resolved
+configurations are byte-identical, SHA-256
+`9d5c6c0402272fdad72fcf37e6bcd5c6fdcff63c49563e825ce968701f94ead2`.
+The old/new `vmlinux.o` hashes differ and stay fixed through their module
+phases. Each kernel exports 12,767 symbols. The symbol-table hashes match,
+which is expected with unchanged export names and CRC versioning disabled;
+the actual modpost input is the independently built, revision-specific object.
+
+Each positive `.ko` is 23,176 bytes and imports 26 symbols, including
+`crypto_drbg_ctr_df`. All imports resolve to the corresponding kernel exports.
+The new and restored-new modules are byte-identical. Both kernel worktrees
+finish with clean tracked source, the kernel store remains at `248951dd`, and
+the original evolve diff and ctx checkout are preserved.
+
+Two synthetic module-oracle contract groups pass locally and on retro. An
+independent retrospective audit passes all 231 checks, covering 49 artifact
+snapshots, 38 command records, all 100 execution-source files, compiler/modpost/
+LD commands, imports, stable inputs and restoration. It does not call the
+runner's classification function. Its hashes anchor current log bytes; this
+is an artifact audit, not an independent replay of historical unlink actions.
+
+The [result catalog](../datasets/xilinx_module_controls_v1.json) pins all phase
+hashes and commands. Summary SHA-256:
+`2265585ca909a2513b52a1b04aa7134e207a511a42d5fa5059d772244aee5eb8`.
+Audit `runs/xilinx_module_controls_audit_20260914.json` SHA-256:
+`c432c9a4fb8973533da45bdafff927637d039cc2df78aff8226083ebca922469`.
+The 139-file non-worktree artifact index is
+`runs/xilinx_module_controls_artifact_index_20260914.json`, SHA-256
+`863aae14e1a72513436d7ca1c0e531d99fb42a77e537a9db04d876937354a389`.
+The local copy contains all logs, configs, symbol tables and modules; the four
+large kernel binary snapshots and both full build worktrees remain on retro.
+
+This qualifies the one-file Xilinx case for controlled build validation of a
+future generated patch. The [generation preparation](15_xilinx_generation_protocol.md)
+found separate prompt-budget and request-audit gaps; generation conditions
+remain **NOT_FROZEN**. No model requests, PPL scoring or runtime tests were run.

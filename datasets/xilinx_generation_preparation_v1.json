@@ -1,0 +1,99 @@
+{
+  "artifact_directory": "runs/xilinx_generation_dryrun_20260914",
+  "artifacts": {
+    "artifact_index.json": {
+      "path": "runs/xilinx_generation_dryrun_20260914/artifact_index.json",
+      "sha256": "d9155ece71c195106aedfd501f956b1bb9ce5ccd7471b30880956a02600547d7"
+    },
+    "prompt_diagnostics.json": {
+      "path": "runs/xilinx_generation_dryrun_20260914/prompt_diagnostics.json",
+      "sha256": "e8d6be9b896653075a5ed1c830dc75c5f7a83dcfd2806bbaa989196eaf69c90a"
+    },
+    "qwen_token_diagnostics.json": {
+      "path": "runs/xilinx_generation_dryrun_20260914/qwen_token_diagnostics.json",
+      "sha256": "c49e14f70b565fba686d0a831d8a66ce6e43da9405326d4665046390a2ffec96"
+    }
+  },
+  "blockers_before_generation": [
+    "Native flag selects old-source blocks, not optional kernel-evidence blocks.",
+    "OFF/ON differ in source truncation, upstream scope expansion and budget accounting.",
+    "All six optional focused blocks have zero obligation overlap in this case.",
+    "Need common renderer and generation-model token counting including message framing.",
+    "Need saved requested/returned model, full response, usage, finish reason and actual attempt count.",
+    "OpenRouter subprocess provider errors can fall back to another in-process request even with max_retries=0."
+  ],
+  "candidate_model": "openrouter/anthropic/claude-sonnet-4.6",
+  "case_id": "b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c",
+  "common_configured_budget_chars": 180000,
+  "diagnostic_tokenizer_revision": "8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301",
+  "evaluation_only": true,
+  "execution_commit": "22b060467a97561e6e439cb48f35b87a93180f5b",
+  "generation_calls": 0,
+  "input_audit": {
+    "path": "runs/xilinx_generation_input_audit_20260914.json",
+    "scope": "Git excerpt/source provenance and artifact hashes; not proof against semantic leakage",
+    "sha256": "a8436ffce54b4cec932c6f2a6b9356fa63ffd65967668e568b403eb924bb0894",
+    "status": "PASS_WITH_OBSERVATIONS"
+  },
+  "model_status": "candidate from tracked defaults; availability and immutable identity not verified",
+  "new_commit": "b2c15db74a379a50d723002799c3db0c6781c75a",
+  "next_protocol": "docs-impl/15_xilinx_generation_protocol.md",
+  "old_commit": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+  "old_source_lines": 430,
+  "old_source_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+  "prompt_rows": [
+    {
+      "contains_truncation_marker": true,
+      "input_sha256": "e02112c9e0bfacc19394932b10d07e57afefc3eb6ed7101b0c065fa5f9f0fbf8",
+      "name": "focused_off_180000",
+      "policy_on": false,
+      "prompt_chars": 26063,
+      "prompt_sha256": "16d846e4a799bf4c57fba5a446944aef1c7ec2177f0b293c2eef3135db643665",
+      "qwen_user_prompt_tokens_diagnostic": 8201,
+      "source_count": 5,
+      "source_mode": "focused"
+    },
+    {
+      "contains_truncation_marker": false,
+      "input_sha256": "25c8d322cc8b2cbb1a64001ab0acf807ebc357c6a164e3f452a6c229f118e0a9",
+      "name": "focused_on_180000",
+      "policy_on": true,
+      "prompt_chars": 38514,
+      "prompt_sha256": "90da2c3ab5ed1e8ddf7fa2bfd39d5610d4060ef8b450f93810801f23dddf4c1d",
+      "qwen_user_prompt_tokens_diagnostic": 12025,
+      "source_count": 10,
+      "source_mode": "focused"
+    },
+    {
+      "contains_truncation_marker": true,
+      "input_sha256": "ef7586b46d405461cf80a8be77a35b4a8c9151abbb09802397f05a69aad51dd7",
+      "name": "full_module_off_180000",
+      "policy_on": false,
+      "prompt_chars": 16466,
+      "prompt_sha256": "06f62a9c30658f76bce8fa6fb3fe22689a482a0ed6c52e534eb2042670de1670",
+      "qwen_user_prompt_tokens_diagnostic": 4320,
+      "source_count": 1,
+      "source_mode": "full_module"
+    },
+    {
+      "contains_truncation_marker": false,
+      "input_sha256": "6db71a9954e3be785b14de43f713037412b2538ea99a7c247202e2c4d6e09145",
+      "name": "full_module_on_180000",
+      "policy_on": true,
+      "prompt_chars": 34885,
+      "prompt_sha256": "ea7bb1810b6d428a4ffb9550dd703d03cdaff7df60eeb7b7cc78f78bf4181d5e",
+      "qwen_user_prompt_tokens_diagnostic": 11278,
+      "source_count": 1,
+      "source_mode": "full_module"
+    }
+  ],
+  "protocol": "xilinx_generation_preparation_v1",
+  "retro_artifact_directory": "/home/arina/work/driver_agent_build_eligibility/runs/xilinx_generation_dryrun_20260914",
+  "schema_version": 1,
+  "scope": "one-case production prompt and input provenance diagnostics; no method-quality comparison",
+  "source_file": "drivers/crypto/xilinx/xilinx-trng.c",
+  "source_file_count": 1,
+  "status": "NOT_FROZEN",
+  "token_count_scope": "pinned Qwen tokenizer user-prompt diagnostic only; excludes system message/chat framing; not generation-provider input tokens",
+  "validation_stages": "SKIPPED"
+}

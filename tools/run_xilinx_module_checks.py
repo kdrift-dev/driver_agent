@@ -12,7 +12,7 @@ def main():
                 "make -f scripts/Makefile.modpost\n", valid + valid.replace(" -M", " -w -M")):
         assert not inspect_modpost(bad)["strict"], bad
     print("PASS modpost requires matching kernel object and rejects relaxed invocations")
-    phase = {"passed": True, "stable_inputs": True, "infrastructure_marker": False,
+    phase = {"passed": True, "stable_inputs": True, "source_verified": True, "infrastructure_marker": False,
              "compiler_seen": True, "compiler_diagnostic": False,
              "command": {"returncode": 0, "timed_out": False, "error": None}}
     baseline = {"phases": {name: copy.deepcopy(phase) for name in PHASES}}
@@ -25,7 +25,7 @@ def main():
         row = copy.deepcopy(broken)
         row["phases"][control]["passed"] = False
         assert classify(row) == "control_failure", control
-    for key, value in (("stable_inputs", False), ("infrastructure_marker", True)):
+    for key, value in (("stable_inputs", False), ("source_verified", False), ("infrastructure_marker", True)):
         row = copy.deepcopy(broken)
         row["phases"]["old_on_new"][key] = value
         assert classify(row) == "infrastructure_failure", key

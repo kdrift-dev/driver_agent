@@ -32,7 +32,7 @@ REQUIRED = {"MODULES": "y", "COMPILE_TEST": "y",
 DISABLED = set(DISABLE_CONFIG) | {"LOCALVERSION_AUTO", "TRIM_UNUSED_KSYMS", "MODVERSIONS",
     "MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS", "SECTION_MISMATCH_WARN_ONLY"}
 # Deliberately pin build flags; inherited flags may silently weaken the oracle.
-UNSAFE_ENV = ("MAKEFLAGS", "MFLAGS", "KBUILD_MODPOST_WARN", "KBUILD_NSDEPS",
+UNSAFE_ENV = ("MAKEFLAGS", "MFLAGS", "KBUILD_MODPOST_WARN", "KBUILD_MODPOST_NOFINAL", "KBUILD_NSDEPS",
               "KBUILD_EXTRA_SYMBOLS", "KBUILD_EXTMOD", "KBUILD_OUTPUT", "KCFLAGS",
               "CFLAGS_MODULE", "KCPPFLAGS", "LLVM", "CROSS_COMPILE")
 
@@ -105,7 +105,7 @@ def inspect_modpost(text):
         and not re.search(r"(?:^|\s)-(?:w|n|N)(?:\s|$)", line) for line in lines)}
 
 
-def phase(commands, tree, name, dest, prep, jobs):
+def phase(commands, tree, name, dest, prep, jobs, expected_source_hash):
     dest.mkdir(parents=True, exist_ok=False)
     paths = [STEM + suffix for suffix in (".o", ".ko", ".mod", ".mod.c", ".mod.o")]
     paths += [str(Path(p).with_name("." + Path(p).name + ".cmd")) for p in list(paths)]
@@ -121,6 +121,7 @@ def phase(commands, tree, name, dest, prep, jobs):
     before = {p: sha((tree / p).read_bytes()) for p in (".config", "vmlinux.o", "vmlinux.symvers")}
     expected = {".config": prep["config"]["sha256"], **{
         p: prep["artifacts"][p]["sha256"] for p in ("vmlinux.o", "vmlinux.symvers")}}
+    source_before = sha((tree / SOURCE).read_bytes())
     record = commands.run(make(jobs, STEM + ".ko"), tree, name)
     log = commands.text(record)
     after = {p: sha((tree / p).read_bytes()) for p in before}
@@ -129,6 +130,8 @@ def phase(commands, tree, name, dest, prep, jobs):
     modpost = inspect_modpost(log)
     value = {"phase": name, "command": record, "removed_artifacts": removed,
         "source_sha256": sha((tree / SOURCE).read_bytes()), "artifacts": artifacts,
+        "source_before_sha256": source_before, "expected_source_sha256": expected_source_hash,
+        "source_verified": source_before == sha((tree / SOURCE).read_bytes()) == expected_source_hash,
         "stable_inputs_before": before, "stable_inputs_after": after,
         "stable_inputs": before == after == expected,
         "compiler_seen": compiler_command_seen(log, SOURCE), "modpost": modpost,
@@ -136,7 +139,7 @@ def phase(commands, tree, name, dest, prep, jobs):
         "infrastructure_marker": bool(INFRA.search(log)),
         "missing_symbol_warning": bool(re.search(r"WARNING: (?:vmlinux.o|.*Module.symvers) is missing", log)),
         "artifact_is_elf": ko.is_file() and elf_object(ko.read_bytes())}
-    value["passed"] = bool(commands.ok(record) and value["stable_inputs"]
+    value["passed"] = bool(commands.ok(record) and value["stable_inputs"] and value["source_verified"]
         and value["compiler_seen"] and modpost["strict"] and value["artifact_is_elf"]
         and not value["infrastructure_marker"] and not value["missing_symbol_warning"])
     if ko.is_file():
@@ -153,7 +156,7 @@ def classify(row):
     if row.get("exception") or set(phases) != set(PHASES):
         return "infrastructure_failure"
     if any(p["command"].get("timed_out") or p["command"].get("error")
-           or p["infrastructure_marker"] or not p["stable_inputs"] for p in phases.values()):
+           or p["infrastructure_marker"] or not p["stable_inputs"] or not p["source_verified"] for p in phases.values()):
         return "infrastructure_failure"
     if not all(phases[n]["passed"] for n in ("old_on_old", "new_on_new", "restored_new_on_new")):
         return "control_failure"
@@ -209,15 +212,15 @@ def main():
             trees[version] = tree
             prep = prepare(commands, tree, args.out_dir / "kernels" / version, args.jobs)
             row["preparations"][version] = prep
-            row["phases"][control] = phase(commands, tree, control, args.out_dir / control, prep, args.jobs)
+            row["phases"][control] = phase(commands, tree, control, args.out_dir / control, prep, args.jobs, row["source_hashes"][version])
             dump(args.out_dir / "progress.json", row)
         tree = trees["new"]
         try:
             (tree / SOURCE).write_bytes(old)
-            row["phases"]["old_on_new"] = phase(commands, tree, "old_on_new", args.out_dir / "old_on_new", prep, args.jobs)
+            row["phases"]["old_on_new"] = phase(commands, tree, "old_on_new", args.out_dir / "old_on_new", prep, args.jobs, sha(old))
         finally:
             (tree / SOURCE).write_bytes(new)
-        row["phases"]["restored_new_on_new"] = phase(commands, tree, "restored_new_on_new", args.out_dir / "restored_new_on_new", prep, args.jobs)
+        row["phases"]["restored_new_on_new"] = phase(commands, tree, "restored_new_on_new", args.out_dir / "restored_new_on_new", prep, args.jobs, sha(new))
         row["kernel_store_head_after"] = commands.git(args.repo, "rev-parse", "HEAD").decode().strip()
         row["restored_worktrees"] = {v: not commands.git(t, "status", "--porcelain", "--untracked-files=no").strip() for v, t in trees.items()}
         row["source_input_unchanged"] = args.old_source.read_bytes() == old

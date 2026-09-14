@@ -101,6 +101,12 @@
             name = "C_INCLUDE_PATH";
             prefix = "${pkgs.elfutils.dev}/include";
           }
+          # GCC plugins are host C++ code and need the development headers of
+          # GCC's arithmetic libraries even when the runtime libraries exist.
+          {
+            name = "CPLUS_INCLUDE_PATH";
+            prefix = "${pkgs.gmp.dev}/include:${pkgs.mpfr.dev}/include:${pkgs.libmpc.dev}/include";
+          }
           {
             name = "LIBRARY_PATH";
             prefix = "${pkgs.elfutils.out}/lib";

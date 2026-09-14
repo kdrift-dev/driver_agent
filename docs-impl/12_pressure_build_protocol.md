@@ -97,3 +97,14 @@ Build worktrees and full logs remain under the new run directory. A committed
 summary will pin their identities and point to the full artifacts on retro.
 The original pressure manifests, historical pre-registration, source review,
 and earlier experiment outputs remain immutable.
+
+## Environment correction before completed measurements
+
+The initial attempt at code `d02ed15` failed during `modules_prepare` in both
+pristine Hyper-V controls: GCC plugin host compilation could not find `gmp.h`.
+The run was interrupted and retained. It contains no completed four-condition
+measurement. The Nix shell already included GMP/MPFR/MPC runtime packages;
+their development include directories are now exposed through
+`CPLUS_INCLUDE_PATH` for the host C++ compiler. Kernel configuration and driver
+source are not changed by this correction. A fresh census directory records
+the corrected environment and code identity.

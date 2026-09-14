@@ -97,6 +97,13 @@ without verified provider/model/framing binding. See the
 [paired protocol](docs-impl/16_paired_context_protocol.md) and
 [current results](docs-impl/17_paired_context_results.md).
 
+A separate opt-in `tools/run_paired_character_pilot.py` supports at most two
+real requests under the frozen character cap. Its default only prepares files;
+`--execute` is required for generation. This diagnostic preserves the strict
+token-admission refusal and reports actual usage afterward. See its
+[protocol](docs-impl/18_paired_character_pilot_protocol.md) and
+[observed format/patch failures](docs-impl/19_paired_character_pilot_results.md).
+
 ## LLM Configuration
 
 Supported providers include:

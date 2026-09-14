@@ -1,13 +1,11 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/paired-context-budget`: shared context
-preparation and provider-attempt accounting at `446e42c`. It follows
-`codex/xilinx-module-pilot` (strict module runner `9e1f7bd`, report `921b9af`,
-with generation preparation measured at `22b0604`),
-`codex/pressure-build-eligibility` (runner `d02ed15`, corrected Nix environment
-`c69f0b3`, report `22b0604`), `codex/gate-v2-pressure`
-(`431c7a1`, report `e63f482`) and `codex/experiment-foundation`
-(`12940c0`, report `0c7e6be`).
+The current package is on `codex/paired-character-pilot`: bounded diagnostic
+and strict patch validator `e13e895`. It follows `codex/paired-context-budget`
+(`446e42c`, report `c452c18`), `codex/xilinx-module-pilot` (`9e1f7bd`, report
+`921b9af`), the build-eligibility package (`d02ed15`, Nix `c69f0b3`, report
+`22b0604`), gate v2 (`431c7a1`, report `e63f482`) and foundation (`12940c0`,
+report `0c7e6be`).
 Historical run artifacts and the frozen pre-registration are unchanged.
 
 ## Current conclusion
@@ -75,8 +73,8 @@ produce different first-fit/ranked sets under the same cap. Both retain the
 changed API block. Independent replay passes 1731 checks and reproduces 3986
 complete-message counts/selection variants. The Qwen-framed diagnostic counts
 are 9033/8966 under a 9153-token cap; they are not Claude input-token counts.
-Generation admission remains **PROVIDER_COUNTER_BINDING_REQUIRED**: no model
-calls or generated patches exist. See [protocol](16_paired_context_protocol.md)
+Strict token-budget admission remains **PROVIDER_COUNTER_BINDING_REQUIRED**.
+The subsequent character-budget diagnostic is reported separately below. See [protocol](16_paired_context_protocol.md)
 and [results](17_paired_context_results.md).
 
 ## First package
@@ -183,17 +181,35 @@ canonical artifact verification pass. Commands and results are in reports
   This package uses no model inference, kernel rebuilds or runtime tests.
   See the [catalog](../datasets/paired_context_preparation_v1.json).
 
+## Sixth package
+
+- Two real Sonnet 4.6 requests completed with Anthropic-only routing, zero
+  retries, unchanged character-arm messages and a common 26,532-character cap.
+  Actual input usage was 11,639/11,475 tokens; total reported cost USD 0.094692.
+- Both outputs were rejected for prose/fenced JSON. Separate post-hoc validation
+  of the unmodified embedded diffs also rejected both: hunk coordinates 56/57
+  do not match the exact source context starting at 60. No repairs, further
+  generation, compiler/link steps or runtime tests followed these failures.
+- All 13 new offline check groups pass locally and on retro. The independent
+  generation audit verifies the freeze, two invocations and original inputs.
+  This establishes an executed diagnostic, not a method advantage or successful
+  patch count. The strict token-budget flags remain false.
+- Current checkout: `/home/arina/work/driver_agent_character_pilot`.
+  See [protocol](18_paired_character_pilot_protocol.md),
+  [results](19_paired_character_pilot_results.md) and
+  [catalog](../datasets/paired_character_pilot_v1.json).
+
 ## Next TODO, in order
 
-1. Bind the paired harness to a verified generation provider/model and its
-   complete-message input counter. Freeze exact requests, the common token cap
-   and output limit before a bounded Xilinx generation run, then apply strict
-   module validation. The shared renderer, whole-block policies and per-attempt
-   request/response accounting are implemented; hidden retries are removed.
-   Current character/Qwen counters refuse generation because provider framing
-   is unverified. Complete-source and strict module controls are done.
-   Keep NTB's removed-prototype diagnostic separate; acquire more qualified
-   migration commits before statistical comparison. Preserve the pressure set.
+1. Fix the next generation protocol's output contract on unrelated fixtures:
+   provider-enforced structured JSON and deterministic exact diff construction
+   from validated edits. Freeze both conditions before another bounded run and
+   preserve the current format/coordinate failures. Then use strict module
+   validation on admitted patches. For a confirmatory token-budget comparison,
+   a verified provider/model counter remains required; OpenRouter exposes no
+   documented pre-generation token counter. Character caps and post-hoc usage
+   must not be relabeled as equal model-token budgets. Acquire more qualified
+   migration commits before statistical comparison; preserve the pressure set.
 2. Complete gate calibration before using it as a quality filter: extend sparse
    occurrence review and unsupported scope/preprocessing handling, distinguish
    extraction misses from unnecessary requirements, and retain explicit unknowns.
@@ -225,4 +241,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–17 describe the current contracts.
+status and reports 08–19 describe the current contracts.

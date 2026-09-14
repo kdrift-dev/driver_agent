@@ -1,0 +1,215 @@
+{
+  "actual_token_budget_comparison": false,
+  "artifact_index": {
+    "path": "runs/paired_character_generation_v1_20260914/artifact_index.json",
+    "sha256": "ffd19c49601ce5025fcf020d2f63a7dd717e9a08ee011ef98904168c0d66eac3"
+  },
+  "checkout_preservation": {
+    "path": "runs/paired_character_checkout_preservation_20260914.json",
+    "sha256": "34bca430f85d0189692e7d9b59fb737d51d75153208f58cd9e3100daaeb98ed9",
+    "status": "PASS"
+  },
+  "checks": {
+    "logs": [
+      {
+        "path": "runs/paired_character_checks_20260914/pilot.log",
+        "sha256": "bedce1b4d3a621325e1e2991f40f9471ef776fcb5e2edf906eabea276a27c993"
+      },
+      {
+        "path": "runs/paired_character_checks_20260914/validator.log",
+        "sha256": "8824d30f03d9515a08c04da021019ff0a734c7ac23b417d8cdbd69fc4992056e"
+      }
+    ],
+    "pilot_groups": 9,
+    "validator_groups": 4
+  },
+  "common_character_cap": 26532,
+  "conditions": {
+    "first_fit": {
+      "explicit_client_attempts": 1,
+      "explicit_client_attempts_exact": true,
+      "finish_reason": "stop",
+      "input_characters": 26316,
+      "native_finish_reason": "end_turn",
+      "post_hoc_forensic_validation": {
+        "apply": {
+          "patch_sha256": "37a6717120f18893a1f4229438e0241a5e1545e26b6f68c7c2ed1974accafd0c",
+          "reason": "hunk bytes do not match the exact old source at declared position",
+          "repairs": 0,
+          "status": "rejected"
+        },
+        "artifact_index": {
+          "path": "runs/paired_character_forensic_validation_20260914/first_fit/artifact_index.json",
+          "sha256": "e547716fcd25c6d3dd67c5608f3e54557b04b4c5ab98f1abc0b296daaf796eff"
+        },
+        "classification": "patch_rejected",
+        "compile": {
+          "status": "not_run"
+        },
+        "integrity_verified": true,
+        "link": {
+          "status": "not_run"
+        },
+        "summary": {
+          "path": "runs/paired_character_forensic_validation_20260914/first_fit/summary.json",
+          "sha256": "6905e09a0a92508a40f75c4ad1a63cf334e6d61aa64593d3cce4e335ae3b4aeb"
+        }
+      },
+      "rejection_reasons": [
+        "Expecting value: line 1 column 1 (char 0)"
+      ],
+      "request_sha256": "55a68a3a9a77412a9f7dea27208e5a0c037f6b25818b7b93daea0afa74a8d8c5",
+      "request_status": "succeeded",
+      "response_truncated": false,
+      "returned_model": "anthropic/claude-sonnet-4.6",
+      "returned_provider": "Anthropic",
+      "strict_candidate_admission": "rejected",
+      "usage": {
+        "completion_tokens": 943,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.049062,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.014145,
+          "upstream_inference_cost": 0.049062,
+          "upstream_inference_prompt_cost": 0.034917
+        },
+        "is_byok": false,
+        "prompt_tokens": 11639,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 12582
+      }
+    },
+    "obligation_ranked": {
+      "explicit_client_attempts": 1,
+      "explicit_client_attempts_exact": true,
+      "finish_reason": "stop",
+      "input_characters": 25936,
+      "native_finish_reason": "end_turn",
+      "post_hoc_forensic_validation": {
+        "apply": {
+          "patch_sha256": "52623c3f55bba80fc4b39b0f17e9e0682d329fe593105ab60396e4dec7ba3cb8",
+          "reason": "hunk bytes do not match the exact old source at declared position",
+          "repairs": 0,
+          "status": "rejected"
+        },
+        "artifact_index": {
+          "path": "runs/paired_character_forensic_validation_20260914/obligation_ranked/artifact_index.json",
+          "sha256": "77b6eee71d1fb9ff28f5549f68e512eef9ecbc5d72ad34d34a3b31366a018000"
+        },
+        "classification": "patch_rejected",
+        "compile": {
+          "status": "not_run"
+        },
+        "integrity_verified": true,
+        "link": {
+          "status": "not_run"
+        },
+        "summary": {
+          "path": "runs/paired_character_forensic_validation_20260914/obligation_ranked/summary.json",
+          "sha256": "641ae8ddcb71f84aba8dc24cb66c2a350148d9ab68023db7307a57a5b02e5943"
+        }
+      },
+      "rejection_reasons": [
+        "Expecting value: line 1 column 1 (char 0)"
+      ],
+      "request_sha256": "d843411c683b4c7ebc0d0a30fae8d8b08dcfd37fdadf5c02152ff9957ca363d6",
+      "request_status": "succeeded",
+      "response_truncated": false,
+      "returned_model": "anthropic/claude-sonnet-4.6",
+      "returned_provider": "Anthropic",
+      "strict_candidate_admission": "rejected",
+      "usage": {
+        "completion_tokens": 747,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.04563,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.011205,
+          "upstream_inference_cost": 0.04563,
+          "upstream_inference_prompt_cost": 0.034425
+        },
+        "is_byok": false,
+        "prompt_tokens": 11475,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 12222
+      }
+    }
+  },
+  "execution_commit": "e13e895a75ee68aa97b085e90b3d8cd654a54dae",
+  "execution_source_digest": "e0f09748b71f4660ac63f15bb4d0f388030f415c7c10026f11f75b4e41125afb",
+  "execution_source_files": 110,
+  "explicit_client_attempts": 2,
+  "explicit_client_attempts_exact": true,
+  "freeze": {
+    "path": "runs/paired_character_generation_v1_20260914/freeze/manifest.json",
+    "sha256": "099238897a1824617f3ee5b14f011aa7e3715a7531b18a0fc0aa593b6218bd0c"
+  },
+  "generation_directory": "runs/paired_character_generation_v1_20260914",
+  "generation_invocations": 2,
+  "independent_audit_checks": 806,
+  "independent_forensic_audit": {
+    "checks": 271,
+    "path": "runs/paired_character_independent_audit_20260914/forensic_apply_audit.json",
+    "retro_path": "runs/paired_character_independent_forensic_apply_audit_20260914.json",
+    "sha256": "6c6f4469e6ab731d4111b8c3410e764500b47f11aefba6aad8031f1a1766f00b",
+    "status": "PASS"
+  },
+  "independent_generation_audit": {
+    "checks": 535,
+    "path": "runs/paired_character_independent_audit_20260914/generation_audit.json",
+    "retro_path": "runs/paired_character_independent_generation_audit_20260914.json",
+    "sha256": "06cbd061e7d5c3b5427a3cc553a0c51f2e2c2f78551cde0e4a16df1e1c41371a",
+    "status": "PASS"
+  },
+  "kbuild_target": "xilinx-trng.ko",
+  "max_output_tokens": 4096,
+  "module_path": "drivers/crypto/xilinx",
+  "new_compile_or_link_commands": 0,
+  "new_ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+  "old_ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+  "pool_sha256": "9f8ca2561631976c2bceba810cfed803ef338e12dfc82818a5f273d9b5ee7558",
+  "post_hoc_extraction": {
+    "path": "runs/paired_character_forensic_inputs_20260914/extraction.json",
+    "sha256": "0433e37424cd046864876250f7dd7e37d6091844cc2e4e854adec76559b86ef2"
+  },
+  "protocol": "paired_character_generation_diagnostic_v1",
+  "provider_api_review": {
+    "path": "runs/paired_provider_preflight_20260914/api_capability_review.json",
+    "sha256": "c331d25dbda0032f4579ebf404777f1e2ca76f8993ba5ac88fcac2cb68dfa2e7"
+  },
+  "provider_internal_retries": "not independently observed",
+  "provider_preflight": {
+    "path": "runs/paired_provider_preflight_20260914/preflight.json",
+    "sha256": "61641a7c6de340230343e097e092de3f96310d46f04fc46af3fe18f83cae1fec"
+  },
+  "repairs": 0,
+  "report": "docs-impl/19_paired_character_pilot_results.md",
+  "retro_checkout": "/home/arina/work/driver_agent_character_pilot",
+  "runtime_tests": 0,
+  "schema_version": 1,
+  "scope": "one-case exploratory character-budget diagnostic; strict token-budget admission remains false",
+  "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+  "strict_generation_ready": false,
+  "summary": {
+    "path": "runs/paired_character_generation_v1_20260914/summary.json",
+    "sha256": "1b69200d8a5f53ba21dadc5882746e605f195b41671b8810facb808c10d73750"
+  },
+  "total_reported_cost_usd": "0.094692"
+}

@@ -132,6 +132,37 @@ def build_gate_checks(root):
     print("PASS separate compile/link evidence, strict modpost, config/source drift, timeout and infrastructure gates")
 
 
+def kernel_release_checks(root):
+    tree = root / "kernel_release"
+    header = tree / "include/generated/utsrelease.h"
+    release = tree / "include/config/kernel.release"
+    header.parent.mkdir(parents=True)
+    release.parent.mkdir(parents=True)
+    frozen = "6.19.0-rc5+"
+    header.write_text(f'#define UTS_RELEASE "{frozen}"\n')
+    release.write_text(frozen + "\n")
+    assert validator.frozen_kernel_release(tree) == frozen
+    for goal in (validator.STEM + ".o", validator.STEM + ".ko"):
+        command = validator.generated_make(8, goal, validator.frozen_kernel_release(tree))
+        assert command == validator.make(8, "KERNELRELEASE=" + frozen, goal)
+        assert command.count("KERNELRELEASE=" + frozen) == 1
+        assert command[-1] == goal and "KBUILD_MODPOST_WARN=" in command
+    for malformed in ("6.19.0-rc5\n", frozen, frozen + "\nextra\n"):
+        release.write_text(malformed)
+        reject(validator.frozen_kernel_release, tree)
+    release.write_text(frozen + "\n")
+    header.write_text(f'#define UTS_RELEASE "{frozen}"\n/* extra metadata */\n')
+    reject(validator.frozen_kernel_release, tree)
+    header.write_text(f'#define UTS_RELEASE "{frozen}"\n')
+    release.unlink()
+    release.symlink_to(header)
+    reject(validator.frozen_kernel_release, tree)
+    for malformed in (None, "", frozen + "\n", "$(shell false)", "a" * 65):
+        reject(validator.generated_make, 8, validator.STEM + ".o", malformed)
+    reject(validator.generated_make, 8, "vmlinux", frozen)
+    print("PASS frozen kernel release agreement, mismatch refusal and exact compile/link pins")
+
+
 def tracked_checks(root):
     tree = root / "git_fixture"
     tree.mkdir()
@@ -161,8 +192,9 @@ def main():
         root = Path(directory)
         inventory_checks(root)
         build_gate_checks(root)
+        kernel_release_checks(root)
         tracked_checks(root)
-    print("PASS 4 offline groups; zero builds and zero model calls")
+    print("PASS 5 offline groups; zero builds and zero model calls")
 
 
 if __name__ == "__main__":

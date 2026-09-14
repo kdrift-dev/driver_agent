@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HUNK = re.compile(rb"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[^\r\n]*\n?$")
 STABLE = (".config", "vmlinux", "vmlinux.o", "vmlinux.symvers",
           ".vmlinux.o.cmd", ".vmlinux.symvers.cmd", "include/generated/utsrelease.h")
+KERNEL_RELEASE = re.compile(r"[0-9][0-9A-Za-z._+-]{0,63}\Z")
 
 
 class PatchRejected(ValueError):
@@ -218,6 +219,27 @@ def stable_hashes(tree):
     return {name: file_hash(tree / name) for name in STABLE}
 
 
+def frozen_kernel_release(tree):
+    """Read matching release files after the caller verifies frozen UTS bytes."""
+    paths = [tree / name for name in ("include/generated/utsrelease.h", "include/config/kernel.release")]
+    if any(path.is_symlink() or not path.is_file() for path in paths):
+        raise ValueError("frozen kernel release inputs must be ordinary files")
+    header, release = (path.read_bytes() for path in paths)
+    match = re.fullmatch(rb'#define UTS_RELEASE "([0-9][0-9A-Za-z._+-]{0,63})"\n', header)
+    if not match or release != match[1] + b"\n":
+        raise ValueError("frozen utsrelease.h and kernel.release disagree or are malformed")
+    return match[1].decode("ascii")
+
+
+def generated_make(jobs, goal, release):
+    """Preserve the donor release when building a private copy without Git."""
+    if not isinstance(release, str) or not KERNEL_RELEASE.fullmatch(release):
+        raise ValueError("invalid frozen KERNELRELEASE")
+    if goal not in (STEM + ".o", STEM + ".ko"):
+        raise ValueError("generated build goal must be the frozen module target")
+    return make(jobs, "KERNELRELEASE=" + release, goal)
+
+
 def stage_build_result(commands, record, tree, stage, expected, patched_hash):
     text = commands.text(record)
     artifact = tree / (STEM + (".o" if stage == "compile" else ".ko"))
@@ -345,15 +367,20 @@ def main():
             if stable_hashes(tree) != expected or file_hash(tree / SOURCE) != catalog["source_hashes"]["new"]:
                 raise ValueError("private copy differs from frozen NEW config/kernel/source hashes")
             row["stable_inputs_expected"] = expected
+            release = frozen_kernel_release(tree)
+            row["kernel_release_pin"] = {
+                "value": release, "source": "frozen include/generated/utsrelease.h",
+                "kernel_release_sha256": file_hash(tree / "include/config/kernel.release"),
+                "reason": "preserve the frozen release after removing private-copy Git metadata"}
             row["removed_artifacts"] = remove_module_outputs(tree)
             (tree / SOURCE).write_bytes(patched)
-            record = commands.run(make(args.jobs, STEM + ".o"), tree, "generated_compile")
+            record = commands.run(generated_make(args.jobs, STEM + ".o", release), tree, "generated_compile")
             row["compile"] = stage_build_result(commands, record, tree, "compile", expected, sha(patched))
             if (tree / (STEM + ".o")).is_file():
                 row["compile"]["artifact"] = snapshot(tree, STEM + ".o", args.out_dir / "compile")
             dump(args.out_dir / "progress.json", row)
             if row["compile"]["status"] == "passed":
-                record = commands.run(make(args.jobs, STEM + ".ko"), tree, "generated_link")
+                record = commands.run(generated_make(args.jobs, STEM + ".ko", release), tree, "generated_link")
                 row["link"] = stage_build_result(commands, record, tree, "link", expected, sha(patched))
                 if (tree / (STEM + ".ko")).is_file():
                     row["link"]["artifact"] = snapshot(tree, STEM + ".ko", args.out_dir / "link")
@@ -362,6 +389,9 @@ def main():
                         ["readelf", "-p", ".modinfo", str(tree / (STEM + ".ko"))],
                         ["nm", "-u", str(tree / (STEM + ".ko"))])]
             row["stable_inputs_after"] = stable_hashes(tree)
+            row["kernel_release_preserved"] = frozen_kernel_release(tree) == release
+            if not row["kernel_release_preserved"]:
+                raise ValueError("build changed the pinned frozen kernel release")
             # All tracked source bytes other than the generated target must remain exact.
             changed = [name for name, digest in tracked.items() if name != SOURCE and (
                 sha(os.readlink(tree / name).encode()) if (tree / name).is_symlink() else file_hash(tree / name)) != digest]

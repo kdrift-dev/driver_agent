@@ -158,7 +158,8 @@ def validate_inputs(sources, requirements, candidates):
         raise ValueError("duplicate evidence ids")
 
 
-def prepare_pair(sources, requirements, candidates, *, counter, model, max_tokens, budget=None):
+def prepare_pair(sources, requirements, candidates, *, counter, model, max_tokens, budget=None,
+                 renderer=None, renderer_id=None):
     """Select both arms with full re-rendered counts and identical source bytes.
 
     The automatic cap reserves one quarter of the full pool's incremental
@@ -166,6 +167,10 @@ def prepare_pair(sources, requirements, candidates, *, counter, model, max_token
     reference patches are accepted by this API.
     """
     positive_integer(max_tokens, "max_tokens")
+    if (renderer is None) != (renderer_id is None) or (renderer is not None and (
+            not callable(renderer) or not isinstance(renderer_id, str) or not renderer_id)):
+        raise ValueError("custom renderer requires a callable and nonempty identity")
+    render = render_request if renderer is None else renderer
     if budget is not None:
         positive_integer(budget, "budget")
     validate_inputs(sources, requirements, candidates)
@@ -182,7 +187,7 @@ def prepare_pair(sources, requirements, candidates, *, counter, model, max_token
         # Render in the frozen pool order, never in ranking/selection order.
         key = tuple(sorted(selected))
         if key not in rendered:
-            payload, prompt, request = render_request(sources, requirements, [candidates[i] for i in key], model=model, max_tokens=max_tokens)
+            payload, prompt, request = render(sources, requirements, [candidates[i] for i in key], model=model, max_tokens=max_tokens)
             rendered[key] = (payload, prompt, request, checked_count(counter, request))
         return rendered[key]
 
@@ -246,6 +251,8 @@ def prepare_pair(sources, requirements, candidates, *, counter, model, max_token
         raise ValueError("counter identity changed during preparation")
     result["selection_pressure_eligible"] = mandatory <= budget < full and result["individually_feasible_count"] >= 2
     result["selected_sets_differ"] = result["conditions"][POLICIES[0]]["selected_ids"] != result["conditions"][POLICIES[1]]["selected_ids"]
+    if renderer_id is not None:
+        result["renderer_id"] = renderer_id
     return result
 
 

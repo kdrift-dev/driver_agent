@@ -53,7 +53,7 @@ calibration if u < 5000; reserved otherwise
 ```
 
 The fixed seed is `0`. All commits represented in the historical 200-case PPL
-manifest override this rule to calibration. The upcoming 24-case manual review
+manifest override this rule to calibration. The completed 24-case source review
 is drawn inside those 200 cases, so its commits are covered by the same rule.
 Forcing a commit also forces every other pack from that commit to calibration.
 The full corpus contains 685 cases from 373 commits; the historical 200 span
@@ -89,15 +89,16 @@ existing output directory. Changing any census pack invalidates verification, in
 not selected by a particular manifest.
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv-ppl/bin/python \
+# On retro, inside /home/arina/bin/driver-agent-shell; use a fresh output path.
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$PPL_PY" \
   tools/build_context_pressure_set.py \
-  --dataset-dir runs/context_pressure_input_20260914 \
+  --dataset-dir /home/arina/work/driver_agent_ctx/runs/mined \
   --calibration-manifest runs/oacd_results/ppl_sample_manifest.json \
-  --out-dir runs/context_pressure_set_v1_20260914
+  --out-dir runs/context_pressure_set_v1_reproduction
 
 python3 tools/run_context_pressure_checks.py \
   --artifact-dir runs/context_pressure_set_v1_20260914 \
-  --dataset-dir runs/context_pressure_input_20260914
+  --dataset-dir /home/arina/work/driver_agent_ctx/runs/mined
 ```
 
 The dependency-free check runner uses temporary synthetic packs to test the
@@ -111,10 +112,10 @@ be fed to the legacy gold-eligible sample-manifest loader. A later experiment
 can use `load_pressure_cases(manifest_path, dataset_dir, budget=..., split=...)`
 from the builder to verify the entire census and load a particular selection.
 
-## Initial diagnostic census, before the canonical freeze
+## Canonical census on retro
 
-The local tokenizer-only census produced these counts without relaxing the
-eligibility conditions:
+The canonical tokenizer-only census at implementation commit `431c7a1`
+produced these counts without relaxing the eligibility conditions:
 
 | Whole-prompt budget | Eligible cases | Calibration | Reserved |
 |---|---:|---:|---:|
@@ -130,14 +131,28 @@ have overflow only from individually infeasible evidence blocks. Reasons can
 overlap. Eight eligible cases at 4096 have no gold items, recorded as diagnostics
 without filtering them out.
 
-These are **diagnostic counts**, stored in
-`runs/context_pressure_set_v1_20260914_diagnostic`. That run used the pinned
-snapshot with local `transformers=5.15.0`, `tokenizers=0.22.2`, and
-`huggingface_hub=1.28.0`; it preceded the final start/end code guard and is not a
-canonical frozen set. The final verifier deliberately refuses to treat it as
-canonical. The planned canonical run uses the established runtime on `retro`
-after code is committed and stable. Its tokenizer identity and resulting
-manifests must be checked before adopting these diagnostic counts as final.
+At 4096, calibration spans 29 commits and reserved spans 10; the commit sets
+are disjoint across all budgets. The canonical run used the pinned snapshot
+with `transformers=4.57.1`, `tokenizers=0.22.1`, and
+`huggingface_hub=0.35.3`. Tokenizer file digest:
+`07849fe009ec921e884799588c5ebd6c581116c1d3ae0e7a8b2a6acc70302c9f`.
+Initial/final executable code identity agrees, and verification passes against
+both the original retro corpus and its local copy. No model weights were loaded.
+
+The immutable artifacts are in `runs/context_pressure_set_v1_20260914/` locally
+and in `/home/arina/work/driver_agent_gate_v2/` on retro. The committed
+[catalog](../datasets/context_pressure_v1.json) pins all six selections, their
+case hashes, split/tokenizer identities, and all artifact SHA-256 values.
+It is an index, not a replacement for the verified pressure manifests.
+Full-pool content digest:
+`8a5fe9cc2de8fad46ecbd8734418a8c90dd0595b217f1043ce461871b648f30f`.
+`integrity.json` file SHA-256:
+`43b1f61284ef53b3436e8242134bb54f9fcb46ac1cce2539a1fffb301ce3dcbe`.
+
+The earlier local run in `runs/context_pressure_set_v1_20260914_diagnostic`
+has the same counts but remains diagnostic: it used different package versions
+and preceded the final code-integrity guard. It is preserved, not promoted to
+the canonical set.
 
 ## Limits before patch evaluation
 

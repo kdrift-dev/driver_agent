@@ -1,0 +1,564 @@
+{
+  "schema_version": 1,
+  "protocol": "context_pressure_v1_catalog",
+  "evaluation_only": true,
+  "description": "Committed index of the immutable context_pressure_v1 census; use the original verified manifests with load_pressure_cases, not this catalog or the legacy sample loader.",
+  "artifact_directory": "runs/context_pressure_set_v1_20260914",
+  "retro_artifact_directory": "/home/arina/work/driver_agent_gate_v2/runs/context_pressure_set_v1_20260914",
+  "retro_dataset_directory": "/home/arina/work/driver_agent_ctx/runs/mined",
+  "implementation_commit": "431c7a194f8ddb55d2cde9284c7dbea855432dc4",
+  "source_digest": "6b50447fac8807f5b71c3f6fe4ced45227f733ff0ed3a3848e74e5d3f450b29a",
+  "code_integrity": "verified_initial_and_final",
+  "task_scope": "unverified_mined_migration",
+  "candidate_pool": "evaluation_mined_casepacks_not_production_retrieval",
+  "required_before_patch_quality_evaluation": [
+    "map case sources to a concrete Kbuild module target and its dependencies",
+    "verify required repair using an old-driver-on-new-kernel baseline build"
+  ],
+  "eligibility_uses": "existing source/evidence token counts and reference target length only; no outcomes or gold-presence filtering",
+  "config": {
+    "arm": "full",
+    "budgets": [
+      1024,
+      2048,
+      4096
+    ],
+    "calibration_basis_points": 5000,
+    "prompt_template_sha256": "a9581376d583b6532ed1586bb448ad152b035a341f6572cd94083d3710b6c794",
+    "require_competing_feasible_union": true,
+    "seed": 0,
+    "source": "full_old_source",
+    "token_count_kind": "model_tokens",
+    "window_tokens": 8192
+  },
+  "tokenizer": {
+    "class": "Qwen2TokenizerFast",
+    "files_digest": "07849fe009ec921e884799588c5ebd6c581116c1d3ae0e7a8b2a6acc70302c9f",
+    "files_sha256": {
+      "config.json": "e6bf24d1cf58278dcb4ded7e885b71cb1c56299b34c8046b1b64395d17b1891f",
+      "merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "tokenizer_config.json": "283ec39d07ebfd1904aa2dee3c7d73524ed96c489fdb3915629900d3ab3ac319",
+      "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    "is_fast": true,
+    "model": "Qwen/Qwen2.5-Coder-0.5B",
+    "model_inference_calls": 0,
+    "model_max_length": 32768,
+    "model_weights_loaded": false,
+    "packages": {
+      "huggingface_hub": "0.35.3",
+      "tokenizers": "0.22.1",
+      "transformers": "4.57.1"
+    },
+    "requested_revision": "8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301",
+    "resolved_snapshot_revision": "8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301",
+    "settings": {
+      "add_special_tokens": false,
+      "chat_template_applied": false,
+      "local_files_only": true,
+      "padding": false,
+      "truncation": false
+    }
+  },
+  "pool_cases": 685,
+  "pool_commits": 373,
+  "pool_content_digest": "8a5fe9cc2de8fad46ecbd8734418a8c90dd0595b217f1043ce461871b648f30f",
+  "inventory_digest": "c927c218c1924ee73a4b98fb30ecb4a59633ad836537ddd58087050b8c376d29",
+  "split_digest": "94eae3ee3a94efb4102efde6a513a1839b5df10428ccab44fbed49c424961169",
+  "split_recipe": "sha256(context-pressure-v1:seed:commit) first64bits mod10000 < calibration_basis_points; forced commits override",
+  "split_descriptions": {
+    "calibration": "calibration; includes all commits represented in previously inspected manifests",
+    "reserved": "reserved for future patch evaluation; previously mined; no new scoring during set construction"
+  },
+  "forced_origins": [
+    {
+      "name": "ppl_sample_manifest.json",
+      "sha256": "21dd28a584763c20cd4173c230fde385dc4e91106cfcbb8dd043dc978b53607c",
+      "n_cases": 200,
+      "n_commits": 110
+    }
+  ],
+  "n_forced_calibration_commits": 110,
+  "n_forced_calibration_cases": 315,
+  "files_sha256": {
+    "calibration_1024.json": "444129bbe1db30f6007806c56f4ece8ccdd4606dd22fc16b0f208d6a22d58950",
+    "calibration_2048.json": "9623508d5b82e8f618cb3788958fc31ed0356d1f5cae6e428e7850a0968af0b8",
+    "calibration_4096.json": "94d6c809aa65120e6e3b8b59486889be4021064ecea0971ff7e6c2d86a6c81ff",
+    "census.json": "91566b21f59ac74b081564c2b40acb8f699368b4a29ef8aec4a14b4e43a04616",
+    "inventory.json": "d12e42ca59c068fefb9fb471140fc775bb3ff5864a596f9a6754481c13bc2bb1",
+    "reserved_1024.json": "fbe3f11714b917b33a85133a74d41a3e8c507af067ac843ad103c4486ca3e6a4",
+    "reserved_2048.json": "94643de375c9c04099df53cbe3f595804e084b0a40e9fd4462ff07517688e577",
+    "reserved_4096.json": "ab21a8ce8fa3fac193de3ea0d11f7038ddf68a72dc68000bcb866867b49e9388",
+    "split.json": "c0ff2cbdc23e8d17c5d7cd5a47a55c0de2980a13386d65428a199262b00ec048",
+    "integrity.json": "43b1f61284ef53b3436e8242134bb54f9fcb46ac1cce2539a1fffb301ce3dcbe"
+  },
+  "summary_by_budget": {
+    "1024": {
+      "eligible_calibration": 5,
+      "eligible_cases": 7,
+      "eligible_reserved": 2,
+      "exclusion_counts_nonexclusive": {
+        "fewer_than_two_candidate_blocks": 158,
+        "fewer_than_two_individually_feasible_blocks": 157,
+        "full_evidence_prompt_fits_budget": 8,
+        "mandatory_source_prompt_exceeds_budget": 659,
+        "no_competing_feasible_evidence": 8,
+        "overflow_only_from_infeasible_blocks": 11
+      },
+      "total_calibration": 499,
+      "total_cases": 685,
+      "total_reserved": 186
+    },
+    "2048": {
+      "eligible_calibration": 12,
+      "eligible_cases": 18,
+      "eligible_reserved": 6,
+      "eligible_zero_gold_diagnostic_only": 2,
+      "exclusion_counts_nonexclusive": {
+        "fewer_than_two_candidate_blocks": 158,
+        "fewer_than_two_individually_feasible_blocks": 125,
+        "full_evidence_prompt_fits_budget": 35,
+        "mandatory_source_prompt_exceeds_budget": 621,
+        "no_competing_feasible_evidence": 35,
+        "overflow_only_from_infeasible_blocks": 11
+      },
+      "total_calibration": 499,
+      "total_cases": 685,
+      "total_reserved": 186
+    },
+    "4096": {
+      "eligible_calibration": 37,
+      "eligible_cases": 48,
+      "eligible_reserved": 11,
+      "eligible_zero_gold_diagnostic_only": 8,
+      "exclusion_counts_nonexclusive": {
+        "budget_plus_reference_target_exceeds_window": 2,
+        "fewer_than_two_candidate_blocks": 158,
+        "fewer_than_two_individually_feasible_blocks": 42,
+        "full_evidence_prompt_fits_budget": 109,
+        "mandatory_source_prompt_exceeds_budget": 518,
+        "no_competing_feasible_evidence": 109,
+        "overflow_only_from_infeasible_blocks": 10
+      },
+      "total_calibration": 499,
+      "total_cases": 685,
+      "total_reserved": 186
+    }
+  },
+  "selections": {
+    "calibration_1024.json": {
+      "split": "calibration",
+      "budget": 1024,
+      "n_selected": 5,
+      "n_commits": 5,
+      "cases": [
+        {
+          "case_id": "1314027632ae__drivers_gpu_drm_i915_display_intel_parent_c",
+          "commit": "1314027632ae2d98ec7ba250495d1a6084caafc6",
+          "case_content_sha256": "ecf56eff417d85c61a661a7d945cfb5bac4c3dca3fa9a985649bfaf6d22c7a43"
+        },
+        {
+          "case_id": "63c7f93b6033__drivers_gpu_drm_i915_i915_panic_c",
+          "commit": "63c7f93b6033800e9bc4eca02949dc9d12553138",
+          "case_content_sha256": "c4fd46044d18056dc3190e5fa62606e6bf1b260f0cf08215d03d21f07ad83efc"
+        },
+        {
+          "case_id": "a41e0ab394e4__drivers_firmware_efi_libstub_efi_stub_entry_c",
+          "commit": "a41e0ab394e42c7c09ddd8155d2cc3ca17bdce55",
+          "case_content_sha256": "9e6b8968706604531ada6143ab452d73e69769b3940ed84b8b36bc483c3788c2"
+        },
+        {
+          "case_id": "ba8af8e1f1de__drivers_acpi_apei_ghes_helpers_c",
+          "commit": "ba8af8e1f1de32f14c98bd4a7da8b270284ffce3",
+          "case_content_sha256": "8cb786e0bc640171266e1554583d364a92e991da095aa212c848fa5eda8b148d"
+        },
+        {
+          "case_id": "bc62f5b308cb__drivers_dax_hmem_device_c",
+          "commit": "bc62f5b308cbdedf29132fe96e9d591e526527e1",
+          "case_content_sha256": "d835226a0ba84ef669752b996dffa13701613aabc55fd62a3ff19c6ec4ddce8f"
+        }
+      ]
+    },
+    "calibration_2048.json": {
+      "split": "calibration",
+      "budget": 2048,
+      "n_selected": 12,
+      "n_commits": 9,
+      "cases": [
+        {
+          "case_id": "54bdafd77808__drivers_firmware_sysfb_c",
+          "commit": "54bdafd7780850803385d6faf33034a0fa7cd4cc",
+          "case_content_sha256": "4b523e39db45d04e9b02ee29e1f590a9930f152444fd4c28dd93b316c157c9a7"
+        },
+        {
+          "case_id": "54bdafd77808__drivers_firmware_sysfb_simplefb_c",
+          "commit": "54bdafd7780850803385d6faf33034a0fa7cd4cc",
+          "case_content_sha256": "8ded4e43c06fbae9760ad260380840776bc070893dc4ade5a8dadc10e8d76653"
+        },
+        {
+          "case_id": "5bad00377ec8__drivers_gpu_drm_i915_display_intel_initial_plane_c",
+          "commit": "5bad00377ec844d93947fd4c081abd2000a63dfc",
+          "case_content_sha256": "427dafce643581888240eb406ab208f056e65d9dac871611a3ab5f8bd5e9f3dd"
+        },
+        {
+          "case_id": "5bad00377ec8__drivers_gpu_drm_xe_display_xe_initial_plane_c",
+          "commit": "5bad00377ec844d93947fd4c081abd2000a63dfc",
+          "case_content_sha256": "a8cf48780e79fe66ee690e481a7d0c75afce520fff61c7b0683c33c80878a872"
+        },
+        {
+          "case_id": "82e12800f563__sound_soc_sdca_sdca_jack_c",
+          "commit": "82e12800f563baf663277ef0017f40a335b8e84c",
+          "case_content_sha256": "0f279d08b7e5646f2a437b66a5da149010e0a9b90c6da59eed95a9bc7ffea1aa"
+        },
+        {
+          "case_id": "a8258ffed2ef__drivers_iommu_iommu_debug_pagealloc_c",
+          "commit": "a8258ffed2efdf533bdc756141eeb7bc5301ad4f",
+          "case_content_sha256": "923fecf37ba4a33f77eb3cee95e3b3e2b2ca5626f84fbb2a5f459a2190c72bd5"
+        },
+        {
+          "case_id": "adf7968e52e8__drivers_gpu_drm_i915_display_intel_initial_plane_c",
+          "commit": "adf7968e52e8d9f1b76ecc46ac5720c0e61c9d51",
+          "case_content_sha256": "fc556f1433776542233672821a583adb0149e757c46702d642b9324ddc03aaf7"
+        },
+        {
+          "case_id": "c5a8f13f1e47__drivers_firmware_efi_libstub_screen_info_c",
+          "commit": "c5a8f13f1e476c90f4bc184a58751d3e7ff88f2b",
+          "case_content_sha256": "5df98cf6fe0fa296f06bb5235a50297c52cc99d9d9f659dcb57d9d059433abed"
+        },
+        {
+          "case_id": "d6c862572b69__drivers_gpu_drm_i915_display_intel_parent_c",
+          "commit": "d6c862572b69fd92f1793738e2e8d7d326ba0740",
+          "case_content_sha256": "8df181c443f31f1fc69957448be4c2bb5f99533a9296343cf6b89e7d11442823"
+        },
+        {
+          "case_id": "d6c862572b69__drivers_gpu_drm_xe_display_xe_stolen_c",
+          "commit": "d6c862572b69fd92f1793738e2e8d7d326ba0740",
+          "case_content_sha256": "ebacbab5db8ae5db0bcddffc192aa8535f77d45ed97f20a14740c33be7c6e109"
+        },
+        {
+          "case_id": "e9f6870bb753__drivers_firmware_xilinx_zynqmp_crypto_c",
+          "commit": "e9f6870bb753b11b325f7d7839b4be6956d448d9",
+          "case_content_sha256": "762069c14be8856bb657fd6281bbdea6c86b283bf0f62abef61a6cb276fd4ba9"
+        },
+        {
+          "case_id": "ede54383e646__drivers_hv_hv_proc_c",
+          "commit": "ede54383e646821b499873c1caf2dd97551da8eb",
+          "case_content_sha256": "d13ef3b848a4ad43d33490855ed2a9ba9c133b3f85134e1a1a4225d44ef6202e"
+        }
+      ]
+    },
+    "calibration_4096.json": {
+      "split": "calibration",
+      "budget": 4096,
+      "n_selected": 37,
+      "n_commits": 29,
+      "cases": [
+        {
+          "case_id": "0ac6f4056c4a__drivers_infiniband_core_ib_core_uverbs_c",
+          "commit": "0ac6f4056c4a257f4b230b910e3e6fee6c6fc9b9",
+          "case_content_sha256": "020ff906ae8773b0902cc46f875e5b70b8247110b36aae6c8f9938a79e7c007e"
+        },
+        {
+          "case_id": "156442eb6e44__drivers_mfd_rk8xx_i2c_c",
+          "commit": "156442eb6e44d545f09559bd70c5b31fba39eb01",
+          "case_content_sha256": "e431c0a927d5fd7a9bde685279ab4b140e5efdb5d9b61c63976363d6c15950a0"
+        },
+        {
+          "case_id": "29fdc6e98d3c__drivers_gpu_drm_xe_display_xe_display_c",
+          "commit": "29fdc6e98d3c3657c8b4874ab3bfc75f9df59bf4",
+          "case_content_sha256": "ee4dbfc7224b5debc8f9bcc7e7659f0c97655c725c742cae37ccdb89395365ca"
+        },
+        {
+          "case_id": "377563ce0653__drivers_base_revocable_c",
+          "commit": "377563ce0653031de8d530e8b2f590d13349e29c",
+          "case_content_sha256": "f5e248ad52fbfc6878131733f285cac7683640883c3bffbc2b60170439838481"
+        },
+        {
+          "case_id": "377563ce0653__drivers_base_revocable_test_c",
+          "commit": "377563ce0653031de8d530e8b2f590d13349e29c",
+          "case_content_sha256": "8c6fa24cf84a990b75782675a75a7d89da57df8abee62f1eab752f4fd0c7d9da"
+        },
+        {
+          "case_id": "3a17ba6557e2__drivers_mfd_sec_common_c",
+          "commit": "3a17ba6557e28d5d99b7e3cad31f22ad28a36cc2",
+          "case_content_sha256": "e7336d6d12f657d2a1279220b64cde97b43982f0c85de9220a217838e188accb"
+        },
+        {
+          "case_id": "3f25ff740950__drivers_net_phy_phy_caps_c",
+          "commit": "3f25ff740950b8e850a8b6e637c48f1d23ecf388",
+          "case_content_sha256": "52e8fbdd3c358d8304f8dff74e468e7f5fff09cd624e1e76792d02ce7d8ad902"
+        },
+        {
+          "case_id": "42d1c54d6248__drivers_infiniband_hw_bng_re_bng_res_c",
+          "commit": "42d1c54d624886ae46dbab89ed6b2088434ca088",
+          "case_content_sha256": "76c8a35882acbd833b7119fa800d4a46c3efa3586caa5e4b5e87646bf67886c3"
+        },
+        {
+          "case_id": "42d1c54d6248__drivers_net_ethernet_broadcom_bnge_bnge_auxr_c",
+          "commit": "42d1c54d624886ae46dbab89ed6b2088434ca088",
+          "case_content_sha256": "419d440d1bf3292de761194399fa277e3238bf410eb2bbf4841767e354f9f17e"
+        },
+        {
+          "case_id": "439cf01b2e00__drivers_watchdog_watchdog_core_c",
+          "commit": "439cf01b2e0030eed6020a03a7df4a528f8db7ba",
+          "case_content_sha256": "e078433a830db946355c5247c574d2780ac21570fd5eadb6441fa326195e967e"
+        },
+        {
+          "case_id": "589e934d2735__drivers_net_phy_phy_caps_c",
+          "commit": "589e934d2735b55fbe68517128668df7af3ac4ae",
+          "case_content_sha256": "3a1c39124503882ff3a80c9c047187984eae0fa0d93e417bdfc31f5426aadd32"
+        },
+        {
+          "case_id": "63c7f93b6033__drivers_gpu_drm_xe_display_xe_display_c",
+          "commit": "63c7f93b6033800e9bc4eca02949dc9d12553138",
+          "case_content_sha256": "22f842419ff3a65c4dd368dfffec0f37af40069fc529f2239f0c88538fc9ffbe"
+        },
+        {
+          "case_id": "69050f8d6d07__drivers_accel_habanalabs_common_context_c",
+          "commit": "69050f8d6d075dc01af7a5f2f550a8067510366f",
+          "case_content_sha256": "8c1017b4ec02009d6e742e1fa34f572b2aa294f8399edb793390959bf6979df7"
+        },
+        {
+          "case_id": "69050f8d6d07__drivers_fpga_dfl_afu_dma_region_c",
+          "commit": "69050f8d6d075dc01af7a5f2f550a8067510366f",
+          "case_content_sha256": "43128ddc634d2a712eed5517c3dc51243c9ed686631c19cae7638ee1a17f2576"
+        },
+        {
+          "case_id": "6b67470dce11__drivers_firewire_core_iso_c",
+          "commit": "6b67470dce11cfaa09915cca8a5a807d3daf0b87",
+          "case_content_sha256": "94328c2a32da2611d681b622626c8256afa7247eea7ff0e4dd13f2559b801e88"
+        },
+        {
+          "case_id": "7a96ccc82c10__drivers_base_attribute_container_c",
+          "commit": "7a96ccc82c106b763dd561cb87f9c7261dff4f0d",
+          "case_content_sha256": "54de856d81beec88a5ad3720c4fe0cab362b046b41b9aa585c3d82e32286f6ac"
+        },
+        {
+          "case_id": "88b0e3584acb__drivers_mtd_nand_spi_esmt_c",
+          "commit": "88b0e3584acb905c41252b7917013ecf7c0518bc",
+          "case_content_sha256": "c66dff30d38054f9483edfde15089a41345a3256debc9583bb0a684bb165127e"
+        },
+        {
+          "case_id": "9bf71acd65bf__drivers_firewire_core_iso_c",
+          "commit": "9bf71acd65bf190a0ef1bc885a0a664f91beff03",
+          "case_content_sha256": "f51211d116ebbcf0e408a7dcd961831c17e7a9a4237896653beb076d9cb6c596"
+        },
+        {
+          "case_id": "9dacae143e6f__drivers_gpu_drm_i915_i915_initial_plane_c",
+          "commit": "9dacae143e6ff18e77fbad6f1413fb8f2f975407",
+          "case_content_sha256": "26a776a99267bd4c3e5b8768b2521b19e92f9935c406d3041ce3ef3d4ffc465a"
+        },
+        {
+          "case_id": "9dacae143e6f__drivers_gpu_drm_xe_display_xe_display_c",
+          "commit": "9dacae143e6ff18e77fbad6f1413fb8f2f975407",
+          "case_content_sha256": "51ff72047072d1f3ba86e93179f1aeb5b8e65898677153c1102faaa824d36958"
+        },
+        {
+          "case_id": "9e541b3cee70__drivers_pci_hotplug_pciehp_ctrl_c",
+          "commit": "9e541b3cee70a3bbe86b176c903c23b29fe033cd",
+          "case_content_sha256": "20e643471f91f8a7b855dda012bc112461eb7e29a92d698b7d2a0291c47fbf21"
+        },
+        {
+          "case_id": "9f10374bb024__drivers_net_can_dev_skb_c",
+          "commit": "9f10374bb024593a611e6845847f0444841a231b",
+          "case_content_sha256": "4a78a8803ffcf5d14f801fcf6f1aedb1c9f45c17b906d6c76b518c6db79eed63"
+        },
+        {
+          "case_id": "a01745ccf7c4__drivers_infiniband_hw_mana_device_c",
+          "commit": "a01745ccf7c41043c503546cae7ba7b0ff499d38",
+          "case_content_sha256": "531ea1c354e7da7c3cfc1847244ed89a71f9b378f840ac9d6aec858c18aaf0e2"
+        },
+        {
+          "case_id": "a01745ccf7c4__drivers_infiniband_hw_mana_mr_c",
+          "commit": "a01745ccf7c41043c503546cae7ba7b0ff499d38",
+          "case_content_sha256": "4c6bbdb323f88369d663bff78f343f2045cbbd6b64910fa219dc4474a3a3fcd6"
+        },
+        {
+          "case_id": "a13f152a6c09__drivers_gpu_drm_i915_i915_initial_plane_c",
+          "commit": "a13f152a6c09338a7f81efdd414425a9d8d50b16",
+          "case_content_sha256": "7041472bb1d3834a42ab65d3f3424bd47899f6121370627801ba2117f242d74e"
+        },
+        {
+          "case_id": "a97efa5ba594__drivers_irqchip_irq_gic_its_msi_parent_c",
+          "commit": "a97efa5ba594642b86fb6702f38ed0d18e3b0269",
+          "case_content_sha256": "68c1e05ff4fde3bd2ee6d76edbf81d9525c0fdd8e60d9a42311c283d0b5f11f3"
+        },
+        {
+          "case_id": "a97efa5ba594__drivers_pci_msi_irqdomain_c",
+          "commit": "a97efa5ba594642b86fb6702f38ed0d18e3b0269",
+          "case_content_sha256": "b291f35b564e0888164c2e411ca3d3ec4d76d6dd30b40ef22665e3f653411643"
+        },
+        {
+          "case_id": "adf7968e52e8__drivers_gpu_drm_i915_i915_initial_plane_c",
+          "commit": "adf7968e52e8d9f1b76ecc46ac5720c0e61c9d51",
+          "case_content_sha256": "71ee12de76ddfd0394538b3af0f0872419a273c06cd349d231e257e2a990e791"
+        },
+        {
+          "case_id": "b703b31ea8cd__drivers_dma_buf_dma_buf_mapping_c",
+          "commit": "b703b31ea8cd22c1915cfdd6d8e39bf39ec64c8b",
+          "case_content_sha256": "a8e0e08be5d314e2e852e992339eda1bb68f7e851dd56d7688e45fa498122431"
+        },
+        {
+          "case_id": "b703b31ea8cd__drivers_vfio_pci_vfio_pci_dmabuf_c",
+          "commit": "b703b31ea8cd22c1915cfdd6d8e39bf39ec64c8b",
+          "case_content_sha256": "3d75edcf7059f1a6020f7401d2f7aead1439ededdf806fb4bda562f1718be41d"
+        },
+        {
+          "case_id": "c0ba929cf7a9__drivers_mtd_nand_spi_esmt_c",
+          "commit": "c0ba929cf7a960c796cc9946b3f79d8405e9b805",
+          "case_content_sha256": "d20c8eca31c8bdb7b814aae2686b467101ec5b211c77d6b57b021d89fbd9d525"
+        },
+        {
+          "case_id": "c5a8f13f1e47__drivers_firmware_efi_efi_init_c",
+          "commit": "c5a8f13f1e476c90f4bc184a58751d3e7ff88f2b",
+          "case_content_sha256": "49c5b3c50361fbb6b364d7d20108fc3e6b7966975f72cfdf4230d61949106beb"
+        },
+        {
+          "case_id": "c5a8f13f1e47__drivers_firmware_efi_libstub_efi_stub_c",
+          "commit": "c5a8f13f1e476c90f4bc184a58751d3e7ff88f2b",
+          "case_content_sha256": "745793af3de0ff5fccaaa08a89b63c8dddaaae6e81903217eed4a87823e1fc97"
+        },
+        {
+          "case_id": "d4318c1a79ac__drivers_pci_pcie_bwctrl_c",
+          "commit": "d4318c1a79ac49f0726dd23a01d1961757b5f98d",
+          "case_content_sha256": "c53c337496bdbe190961f29909de7bc39ddb8a47976ea5d8d430729e9c98684f"
+        },
+        {
+          "case_id": "d6c862572b69__drivers_gpu_drm_xe_display_xe_display_c",
+          "commit": "d6c862572b69fd92f1793738e2e8d7d326ba0740",
+          "case_content_sha256": "fc8439fd74e0163099ffb5beeca29f0e06be854d526b52ee53d8fd07f4ab6387"
+        },
+        {
+          "case_id": "e9f6870bb753__drivers_firmware_xilinx_zynqmp_crypto_c",
+          "commit": "e9f6870bb753b11b325f7d7839b4be6956d448d9",
+          "case_content_sha256": "762069c14be8856bb657fd6281bbdea6c86b283bf0f62abef61a6cb276fd4ba9"
+        },
+        {
+          "case_id": "ea78ec982653__drivers_gpu_drm_panthor_panthor_gpu_c",
+          "commit": "ea78ec98265339997959eba3c9d764317614675a",
+          "case_content_sha256": "e726a2f9f94f9ddbdde5dcfcb2b0791f217c7fc3179137bb2e852fc3c044a609"
+        }
+      ]
+    },
+    "reserved_1024.json": {
+      "split": "reserved",
+      "budget": 1024,
+      "n_selected": 2,
+      "n_commits": 2,
+      "cases": [
+        {
+          "case_id": "465d78312619__drivers_firmware_xilinx_zynqmp_crypto_c",
+          "commit": "465d7831261965248a7a1484bd186066d29427f0",
+          "case_content_sha256": "c07f7289633749c7b1cc049a768e3c6d8d8f03aaac9d5ea737ac563b33bbcfdd"
+        },
+        {
+          "case_id": "f4b830a53719__drivers_leds_leds_expresswire_c",
+          "commit": "f4b830a5371914239756b0599e5dc9d4c328e387",
+          "case_content_sha256": "c7ea25ec132dff3e66fa64f2ea6e579333c1752b9532b178e22d2f0fd48ad16c"
+        }
+      ]
+    },
+    "reserved_2048.json": {
+      "split": "reserved",
+      "budget": 2048,
+      "n_selected": 6,
+      "n_commits": 5,
+      "cases": [
+        {
+          "case_id": "465d78312619__drivers_firmware_xilinx_zynqmp_crypto_c",
+          "commit": "465d7831261965248a7a1484bd186066d29427f0",
+          "case_content_sha256": "c07f7289633749c7b1cc049a768e3c6d8d8f03aaac9d5ea737ac563b33bbcfdd"
+        },
+        {
+          "case_id": "4d7dc4d1a62d__drivers_base_revocable_test_c",
+          "commit": "4d7dc4d1a62dbb22b1178dddeeb7a22d0272df77",
+          "case_content_sha256": "0bc434ae4384cd894767dddeeecc737b050b7416beb13f92cfda014c2a6ae932"
+        },
+        {
+          "case_id": "82eaf3459dbf__drivers_gpu_drm_i915_display_intel_initial_plane_c",
+          "commit": "82eaf3459dbf92ea78243150508740c007e0eea7",
+          "case_content_sha256": "aa1012e4f7c5367d1444dd5d7adb266ae251f93f2745785f8a08b7f49e995674"
+        },
+        {
+          "case_id": "82eaf3459dbf__drivers_gpu_drm_xe_display_xe_initial_plane_c",
+          "commit": "82eaf3459dbf92ea78243150508740c007e0eea7",
+          "case_content_sha256": "cd853a9a114f2434e5653fb0173d9e7ce21cb126be47fcef0edbae0647a99bf2"
+        },
+        {
+          "case_id": "ab4c3dcf9a71__drivers_dma_buf_dma_buf_sysfs_stats_c",
+          "commit": "ab4c3dcf9a71582503b4fb25aeab884c696cab25",
+          "case_content_sha256": "dafac2d2d7d294643ddf4b51c17fb50b30a9ba5d08a4fc9c26b331aac3b2a1d4"
+        },
+        {
+          "case_id": "ac6d088b3b20__drivers_video_logo_logo_c",
+          "commit": "ac6d088b3b20f9efb883e8302288276db3bdc2b8",
+          "case_content_sha256": "368d740acd01fe0892104749c7aed4ff7be1e63e06621ed4de763cd2cc155dd2"
+        }
+      ]
+    },
+    "reserved_4096.json": {
+      "split": "reserved",
+      "budget": 4096,
+      "n_selected": 11,
+      "n_commits": 10,
+      "cases": [
+        {
+          "case_id": "158ebb578cd5__drivers_hv_hv_proc_c",
+          "commit": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+          "case_content_sha256": "3789fc7a13b5db7c372c3589d0126ceed96e25159505e34227efff9064f00e17"
+        },
+        {
+          "case_id": "21bab791346e__drivers_base_revocable_c",
+          "commit": "21bab791346e5b7902a04709231c0642ff6d69bc",
+          "case_content_sha256": "84535679e0238e4e1b2800611e78c8273ccf5b123a2c3e1284b67da83c1d7522"
+        },
+        {
+          "case_id": "4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c",
+          "commit": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "case_content_sha256": "7c06a09e6d6c24463371c5bb215383f218871a79273a777a2d4e602913730bc6"
+        },
+        {
+          "case_id": "7bd27439a578__drivers_ntb_msi_c",
+          "commit": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+          "case_content_sha256": "8c5d7d3914b8740dc50cbfefa317b03bdc4eaf40152a6a96160952d24367327e"
+        },
+        {
+          "case_id": "96ea3a1e2d31__drivers_net_can_dev_skb_c",
+          "commit": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "case_content_sha256": "fc77d0b77d4fae96a39af2918a1fc823433c6fea2e1002aa55aaa5cf6009b7c8"
+        },
+        {
+          "case_id": "96ea3a1e2d31__drivers_net_can_vxcan_c",
+          "commit": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "case_content_sha256": "969188d4426bfbb8ef7ff3055a86234107a003642a6a51d67fd3bea1496a42e7"
+        },
+        {
+          "case_id": "b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c",
+          "commit": "b2c15db74a379a50d723002799c3db0c6781c75a",
+          "case_content_sha256": "b378d461e69de0dc9b34f2285b1ac3ad92efae400ecb62bf06867fc87bf010a3"
+        },
+        {
+          "case_id": "c789a7f40288__drivers_media_mc_mc_request_c",
+          "commit": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "case_content_sha256": "899ce93f22ff6b913065d8ece510caadb72987fee4472308e2eebdbb816f6b47"
+        },
+        {
+          "case_id": "cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c",
+          "commit": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "case_content_sha256": "cf8b3166e2c390ef3a7c984ecf0fbc444277ef21c1e19c7b809adb63cf96db76"
+        },
+        {
+          "case_id": "de9f0c2a1ce3__drivers_media_mc_mc_request_c",
+          "commit": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "case_content_sha256": "3a3c239f42fc68f23842d2888b55bcf3524b8d8747f60d00f178a4cf81c299fe"
+        },
+        {
+          "case_id": "e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c",
+          "commit": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "case_content_sha256": "855201b53980158359722f15e7e8b264aa5144b158c0a1f1d1488fe03db4c53c"
+        }
+      ]
+    }
+  }
+}

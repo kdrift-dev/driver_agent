@@ -1,10 +1,12 @@
-"""Compile strict, exact full-line edits against immutable old UTF-8 sources.
+"""Compile strict exact edits against immutable old UTF-8 sources.
 
 Only existing, safe repository-relative paths may change. Every old_text must
 have exactly one occurrence in the original file, even counting overlapping
 occurrences. Edits are simultaneous; one edit cannot create another's match.
 LF is the only line separator. Unterminated final lines are supported and
 represented with standard no-newline markers in the generated unified diff.
+The v1 entry point requires complete lines; the explicit v2 entry point permits
+exact substrings without changing, normalizing or inferring any supplied text.
 """
 from __future__ import annotations
 
@@ -93,6 +95,25 @@ def _diff(path, before, after):
 
 
 def compile_edits(sources, output):
+    """Compile v1 exact full-line edits, preserving the original contract.
+
+    Invalid inputs raise ValueError. Results and validation behavior are shared
+    with the substring compiler except for the v1 line-boundary requirements.
+    """
+    return _compile_edits(sources, output, whole_lines=True)
+
+
+def compile_substring_edits(sources, output):
+    """Compile v2 exact, unique, disjoint original substring replacements.
+
+    No whitespace, Unicode, indentation or newline normalization occurs. A
+    newline omitted from old_text remains in the untouched original suffix.
+    Empty old_text and no-op edits remain forbidden.
+    """
+    return _compile_edits(sources, output, whole_lines=False)
+
+
+def _compile_edits(sources, output, *, whole_lines):
     """Return deterministic patched sources, unified diff and provenance.
 
     Invalid inputs raise ValueError. No files are read or written and input
@@ -136,10 +157,10 @@ def compile_edits(sources, output):
         if content.find(old, start + 1) >= 0:
             raise ValueError("old_text is ambiguous in the original source")
         end = start + len(old)
-        if ((start and content[start - 1] != "\n")
+        if whole_lines and ((start and content[start - 1] != "\n")
                 or (end < len(content) and not old.endswith("\n"))):
             raise ValueError("old_text must cover complete original lines")
-        if end < len(content) and new and not new.endswith("\n"):
+        if whole_lines and end < len(content) and new and not new.endswith("\n"):
             raise ValueError("new_text must end with LF before unchanged following content")
         spans[path].append((start, end, old, new))
     old_sources = [{"path": path, "content": original[path]} for path in sorted(original)]

@@ -1,0 +1,1258 @@
+{
+  "schema_version": 1,
+  "protocol": "pressure_build_eligibility_v1",
+  "evaluation_only": true,
+  "manifest_sha256": "ab21a8ce8fa3fac193de3ea0d11f7038ddf68a72dc68000bcb866867b49e9388",
+  "manifest_path": "runs/context_pressure_set_v1_20260914/reserved_4096.json",
+  "source_trace_path": "runs/pressure_build_mapping_20260914/source_trace.json",
+  "source_trace_sha256": "53af987d36dbabf31d98b68ad5fae7458b7f0180298fb0d82404439006594107",
+  "architecture": "x86_64",
+  "scope": "packed_translation_unit_then_separate_owner_scope_validation",
+  "cases": [
+    {
+      "case_id": "158ebb578cd5__drivers_hv_hv_proc_c",
+      "old_commit": "cf82dd5ea95815e6c0612b61118d2358ef5c05b0",
+      "new_commit": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+      "source_file": "drivers/hv/hv_proc.c",
+      "object_target": "drivers/hv/hv_proc.o",
+      "owner_target": "drivers/hv/hv_proc.o",
+      "module_target": null,
+      "required_config": [
+        "HYPERV",
+        "MSHV_ROOT"
+      ],
+      "config_enable": [
+        "HYPERV",
+        "MSHV_ROOT"
+      ],
+      "config_disable": [
+        "HYPERV_VTL_MODE"
+      ],
+      "scope_notes": [
+        "hv_proc.o is built-in via subst m,y of MSHV_ROOT; it is not owned by mshv_root.ko.",
+        "Hypervisor-specific behavior is not exercised by compilation."
+      ],
+      "source_old_sha256": "2d1bdf6280f42e909c5c33d830ea96e87e4b7e6ff5cb18fe6da64e6a1687ca5c",
+      "source_new_sha256": "564c168decc1933863d731f637ac1c0b58a6a5eec423b8ed2e32cbd956aac0fd",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "cf82dd5ea95815e6c0612b61118d2358ef5c05b0",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "cf82dd5ea95815e6c0612b61118d2358ef5c05b0",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "cf82dd5ea95815e6c0612b61118d2358ef5c05b0",
+          "path": "drivers/hv/Kconfig",
+          "blob": "7937ac0cbd0ff8758ad897d7a038c78cba3f533e",
+          "sha256": "c27df09a575ee30c6d8b617c3d7d542eedc1be38c8e183fa5886a3c0aeae2190",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/c27df09a575ee30c6d8b617c3d7d542eedc1be38c8e183fa5886a3c0aeae2190"
+        },
+        {
+          "ref": "cf82dd5ea95815e6c0612b61118d2358ef5c05b0",
+          "path": "drivers/hv/Makefile",
+          "blob": "2593711c362833cb1a67584009fdc8f1d6cf86c7",
+          "sha256": "9d5da5693c343649bbdfee7a706bcd3af8e4ea8f7ab4a9cb5b2638da64f23d01",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9d5da5693c343649bbdfee7a706bcd3af8e4ea8f7ab4a9cb5b2638da64f23d01"
+        },
+        {
+          "ref": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+          "path": "drivers/hv/Kconfig",
+          "blob": "7937ac0cbd0ff8758ad897d7a038c78cba3f533e",
+          "sha256": "c27df09a575ee30c6d8b617c3d7d542eedc1be38c8e183fa5886a3c0aeae2190",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/c27df09a575ee30c6d8b617c3d7d542eedc1be38c8e183fa5886a3c0aeae2190"
+        },
+        {
+          "ref": "158ebb578cd5f7881fdc7c4ecebddcf9463f91fd",
+          "path": "drivers/hv/Makefile",
+          "blob": "2593711c362833cb1a67584009fdc8f1d6cf86c7",
+          "sha256": "9d5da5693c343649bbdfee7a706bcd3af8e4ea8f7ab4a9cb5b2638da64f23d01",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9d5da5693c343649bbdfee7a706bcd3af8e4ea8f7ab4a9cb5b2638da64f23d01"
+        }
+      ],
+      "case_content_sha256": "3789fc7a13b5db7c372c3589d0126ceed96e25159505e34227efff9064f00e17"
+    },
+    {
+      "case_id": "21bab791346e__drivers_base_revocable_c",
+      "old_commit": "7149ce34dd48886b3f69153c7f5533dd3fd5f47e",
+      "new_commit": "21bab791346e5b7902a04709231c0642ff6d69bc",
+      "source_file": "drivers/base/revocable.c",
+      "object_target": "drivers/base/revocable.o",
+      "owner_target": null,
+      "module_target": null,
+      "required_config": [],
+      "config_enable": [],
+      "config_disable": [],
+      "scope_notes": [
+        "Target C file and public revocable header are removed in the migration commit.",
+        "Parent Makefile does not select revocable.o; no comparable owning target exists."
+      ],
+      "source_old_sha256": "33284253045f7d34067f8973a81bf851b18614b085d53557b30c2ee86f9eb12a",
+      "source_new_sha256": null,
+      "source_new_exists": false,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "7149ce34dd48886b3f69153c7f5533dd3fd5f47e",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "7149ce34dd48886b3f69153c7f5533dd3fd5f47e",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "7149ce34dd48886b3f69153c7f5533dd3fd5f47e",
+          "path": "drivers/base/Kconfig",
+          "blob": "1786d87b29e227e2b6e8ecb4a0ece00be34f37fe",
+          "sha256": "a82ea296d0bbdacdacf619b86ba90c6202449bc80c47b2432e603ecf238d8b39",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/a82ea296d0bbdacdacf619b86ba90c6202449bc80c47b2432e603ecf238d8b39"
+        },
+        {
+          "ref": "7149ce34dd48886b3f69153c7f5533dd3fd5f47e",
+          "path": "drivers/base/Makefile",
+          "blob": "8074a10183dcb720a6b820b8476b230716b37f01",
+          "sha256": "5c94073d0e94c5a209e84d4f4b9b72d0d96b2206443751964276f1539df75864",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/5c94073d0e94c5a209e84d4f4b9b72d0d96b2206443751964276f1539df75864"
+        },
+        {
+          "ref": "21bab791346e5b7902a04709231c0642ff6d69bc",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "21bab791346e5b7902a04709231c0642ff6d69bc",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "21bab791346e5b7902a04709231c0642ff6d69bc",
+          "path": "drivers/base/Kconfig",
+          "blob": "1786d87b29e227e2b6e8ecb4a0ece00be34f37fe",
+          "sha256": "a82ea296d0bbdacdacf619b86ba90c6202449bc80c47b2432e603ecf238d8b39",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/a82ea296d0bbdacdacf619b86ba90c6202449bc80c47b2432e603ecf238d8b39"
+        },
+        {
+          "ref": "21bab791346e5b7902a04709231c0642ff6d69bc",
+          "path": "drivers/base/Makefile",
+          "blob": "8074a10183dcb720a6b820b8476b230716b37f01",
+          "sha256": "5c94073d0e94c5a209e84d4f4b9b72d0d96b2206443751964276f1539df75864",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/5c94073d0e94c5a209e84d4f4b9b72d0d96b2206443751964276f1539df75864"
+        }
+      ],
+      "case_content_sha256": "84535679e0238e4e1b2800611e78c8273ccf5b123a2c3e1284b67da83c1d7522",
+      "skip_reason": "target_removed; runtime must verify absence in target Git tree"
+    },
+    {
+      "case_id": "4bf783d8415c__drivers_soc_mediatek_mtk_cmdq_helper_c",
+      "old_commit": "c775b23b1f78626daca804bd26f1460368f20406",
+      "new_commit": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+      "source_file": "drivers/soc/mediatek/mtk-cmdq-helper.c",
+      "object_target": "drivers/soc/mediatek/mtk-cmdq-helper.o",
+      "owner_target": "drivers/soc/mediatek/mtk-cmdq-helper.o",
+      "module_target": "drivers/soc/mediatek/mtk-cmdq-helper.ko",
+      "required_config": [
+        "COMPILE_TEST",
+        "MTK_CMDQ"
+      ],
+      "config_enable": [
+        "MTK_CMDQ"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "MediaTek target is enabled on x86 through COMPILE_TEST.",
+        "The recipe does not exercise hardware or device-tree behavior."
+      ],
+      "source_old_sha256": "f21ab6f845bdbe393c0ad4c4181342340d084e2dc75acac6c8f80382209c3910",
+      "source_new_sha256": "4475ce399d3c300d358f205742d2d56c6052e475dea7888a68ce2bcb02af045b",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "c775b23b1f78626daca804bd26f1460368f20406",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "c775b23b1f78626daca804bd26f1460368f20406",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "c775b23b1f78626daca804bd26f1460368f20406",
+          "path": "drivers/soc/Kconfig",
+          "blob": "a2d65adffb8052c0ac5a6b60bf33fa9c644701bb",
+          "sha256": "b43445c57a7ceb30ca5940aa6eb50b44f6a9d6d88c17db77070b2dd7e4f1e8b3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/b43445c57a7ceb30ca5940aa6eb50b44f6a9d6d88c17db77070b2dd7e4f1e8b3"
+        },
+        {
+          "ref": "c775b23b1f78626daca804bd26f1460368f20406",
+          "path": "drivers/soc/Makefile",
+          "blob": "c9e689080ceb759384f690c2b65a82b3cb451c74",
+          "sha256": "50f47fc47271f27567a3e9ede5aba66e3c9033d84f24251de695ad28c39977c6",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/50f47fc47271f27567a3e9ede5aba66e3c9033d84f24251de695ad28c39977c6"
+        },
+        {
+          "ref": "c775b23b1f78626daca804bd26f1460368f20406",
+          "path": "drivers/soc/mediatek/Kconfig",
+          "blob": "d7293977f06e80c98b482a1398afb83b7de7c2c7",
+          "sha256": "7e85e245ec98934226170f7d151df13dc5a3fe49240b009ab20f02b0c2400dcc",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/7e85e245ec98934226170f7d151df13dc5a3fe49240b009ab20f02b0c2400dcc"
+        },
+        {
+          "ref": "c775b23b1f78626daca804bd26f1460368f20406",
+          "path": "drivers/soc/mediatek/Makefile",
+          "blob": "0665573e3c4b3bf96595b884b0620ffc411dc0eb",
+          "sha256": "a7a4e5f6da219caffbc95d549d83811473e2fb012f0ee3eb5219da95df1ee0ac",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/a7a4e5f6da219caffbc95d549d83811473e2fb012f0ee3eb5219da95df1ee0ac"
+        },
+        {
+          "ref": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "path": "drivers/soc/Kconfig",
+          "blob": "a2d65adffb8052c0ac5a6b60bf33fa9c644701bb",
+          "sha256": "b43445c57a7ceb30ca5940aa6eb50b44f6a9d6d88c17db77070b2dd7e4f1e8b3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/b43445c57a7ceb30ca5940aa6eb50b44f6a9d6d88c17db77070b2dd7e4f1e8b3"
+        },
+        {
+          "ref": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "path": "drivers/soc/Makefile",
+          "blob": "c9e689080ceb759384f690c2b65a82b3cb451c74",
+          "sha256": "50f47fc47271f27567a3e9ede5aba66e3c9033d84f24251de695ad28c39977c6",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/50f47fc47271f27567a3e9ede5aba66e3c9033d84f24251de695ad28c39977c6"
+        },
+        {
+          "ref": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "path": "drivers/soc/mediatek/Kconfig",
+          "blob": "d7293977f06e80c98b482a1398afb83b7de7c2c7",
+          "sha256": "7e85e245ec98934226170f7d151df13dc5a3fe49240b009ab20f02b0c2400dcc",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/7e85e245ec98934226170f7d151df13dc5a3fe49240b009ab20f02b0c2400dcc"
+        },
+        {
+          "ref": "4bf783d8415cc397334b375a05f0b2321fc6c319",
+          "path": "drivers/soc/mediatek/Makefile",
+          "blob": "0665573e3c4b3bf96595b884b0620ffc411dc0eb",
+          "sha256": "a7a4e5f6da219caffbc95d549d83811473e2fb012f0ee3eb5219da95df1ee0ac",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/a7a4e5f6da219caffbc95d549d83811473e2fb012f0ee3eb5219da95df1ee0ac"
+        }
+      ],
+      "case_content_sha256": "7c06a09e6d6c24463371c5bb215383f218871a79273a777a2d4e602913730bc6"
+    },
+    {
+      "case_id": "7bd27439a578__drivers_ntb_msi_c",
+      "old_commit": "b1f4077465b2110d8a486cd6f1aed0c2569c339a",
+      "new_commit": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+      "source_file": "drivers/ntb/msi.c",
+      "object_target": "drivers/ntb/msi.o",
+      "owner_target": "drivers/ntb/ntb.o",
+      "module_target": "drivers/ntb/ntb.ko",
+      "required_config": [
+        "PCI",
+        "PCI_MSI",
+        "NTB",
+        "NTB_MSI"
+      ],
+      "config_enable": [
+        "PCI",
+        "PCI_MSI",
+        "NTB",
+        "NTB_MSI"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "msi.o is a conditional constituent of ntb.o alongside core.o.",
+        "Only msi.c is packed; owner-level validation requires the complete old NTB source scope."
+      ],
+      "source_old_sha256": "a528dc4de9d479e5c5959837b8ab11e8b056f7b6571b8c6195bed1d05c7743a7",
+      "source_new_sha256": "f838c0256c010622efc483f5d3f2b861b768faee51980a71777c857ee5a30f51",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "b1f4077465b2110d8a486cd6f1aed0c2569c339a",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "b1f4077465b2110d8a486cd6f1aed0c2569c339a",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "b1f4077465b2110d8a486cd6f1aed0c2569c339a",
+          "path": "drivers/ntb/Kconfig",
+          "blob": "df16c755b4dafeb915d7c6ab4fb7535b5a38d83d",
+          "sha256": "85b0ad9e6de0ba78535979b6db9921154f9c4606ae804fa5384a2b6176218f95",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/85b0ad9e6de0ba78535979b6db9921154f9c4606ae804fa5384a2b6176218f95"
+        },
+        {
+          "ref": "b1f4077465b2110d8a486cd6f1aed0c2569c339a",
+          "path": "drivers/ntb/Makefile",
+          "blob": "3a6fa181ff9974c77e806fc9c9862e8e4e2be32e",
+          "sha256": "6805caadfab88c525205c7cf17e560a8ddbdd3869de41d397bb7ec7956e6819e",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6805caadfab88c525205c7cf17e560a8ddbdd3869de41d397bb7ec7956e6819e"
+        },
+        {
+          "ref": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+          "path": "drivers/ntb/Kconfig",
+          "blob": "df16c755b4dafeb915d7c6ab4fb7535b5a38d83d",
+          "sha256": "85b0ad9e6de0ba78535979b6db9921154f9c4606ae804fa5384a2b6176218f95",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/85b0ad9e6de0ba78535979b6db9921154f9c4606ae804fa5384a2b6176218f95"
+        },
+        {
+          "ref": "7bd27439a578bb7724a9f09f240337ab95d68d2b",
+          "path": "drivers/ntb/Makefile",
+          "blob": "3a6fa181ff9974c77e806fc9c9862e8e4e2be32e",
+          "sha256": "6805caadfab88c525205c7cf17e560a8ddbdd3869de41d397bb7ec7956e6819e",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6805caadfab88c525205c7cf17e560a8ddbdd3869de41d397bb7ec7956e6819e"
+        }
+      ],
+      "case_content_sha256": "8c5d7d3914b8740dc50cbfefa317b03bdc4eaf40152a6a96160952d24367327e"
+    },
+    {
+      "case_id": "96ea3a1e2d31__drivers_net_can_dev_skb_c",
+      "old_commit": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+      "new_commit": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+      "source_file": "drivers/net/can/dev/skb.c",
+      "object_target": "drivers/net/can/dev/skb.o",
+      "owner_target": "drivers/net/can/dev/can-dev.o",
+      "module_target": "drivers/net/can/dev/can-dev.ko",
+      "required_config": [
+        "NET",
+        "NETDEVICES",
+        "CAN",
+        "CAN_DEV"
+      ],
+      "config_enable": [
+        "CAN",
+        "CAN_DEV"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "skb.o is part of can-dev.o; additional objects are selected by CAN_NETLINK, CAN_CALC_BITTIMING and CAN_RX_OFFLOAD.",
+        "Only skb.c is transplanted for this file-level screen."
+      ],
+      "source_old_sha256": "6949be06deb88e96698cae9717604a87fd686cb3b5e0e973b705c385f4e46d96",
+      "source_new_sha256": "ee05e56d23b9408b90e120e5750e677c5d57854747262f19580e085d86abb03f",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/Kconfig",
+          "blob": "9c7953f8e63776c9a766290fe0441d3107079c93",
+          "sha256": "9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/Makefile",
+          "blob": "5b01215f68294e59807db44847a1b0c78fc533cf",
+          "sha256": "18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/can/Kconfig",
+          "blob": "e15e320db476362255ad6ad05f3e192e55cd4706",
+          "sha256": "909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/can/Makefile",
+          "blob": "d7bc10a6b8eae273aa203cf2bc1f8ea92d1187f5",
+          "sha256": "1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/can/dev/Makefile",
+          "blob": "633687d6b6c0c07ece0815337d667e70ab2239f2",
+          "sha256": "098db7072909bd6a256df129b5e44437b6a2516fcf70c8d445e6af1cba4da991",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/098db7072909bd6a256df129b5e44437b6a2516fcf70c8d445e6af1cba4da991"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "net/can/Kconfig",
+          "blob": "af64a6f764588cc63862ce285ee47f3245d72d5e",
+          "sha256": "cd01a8e7d59a007bbb6131970dcc7d5d467f7ed0c7c886139abc2451c1830f35",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cd01a8e7d59a007bbb6131970dcc7d5d467f7ed0c7c886139abc2451c1830f35"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/Kconfig",
+          "blob": "9c7953f8e63776c9a766290fe0441d3107079c93",
+          "sha256": "9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/Makefile",
+          "blob": "5b01215f68294e59807db44847a1b0c78fc533cf",
+          "sha256": "18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/can/Kconfig",
+          "blob": "e15e320db476362255ad6ad05f3e192e55cd4706",
+          "sha256": "909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/can/Makefile",
+          "blob": "d7bc10a6b8eae273aa203cf2bc1f8ea92d1187f5",
+          "sha256": "1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/can/dev/Makefile",
+          "blob": "633687d6b6c0c07ece0815337d667e70ab2239f2",
+          "sha256": "098db7072909bd6a256df129b5e44437b6a2516fcf70c8d445e6af1cba4da991",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/098db7072909bd6a256df129b5e44437b6a2516fcf70c8d445e6af1cba4da991"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "net/can/Kconfig",
+          "blob": "abbb4be7ad2152c66abd2e28dbbd5282ec45d065",
+          "sha256": "ea026b80e12fba5866efbc840c4dea07ac3572348d469a53e0a569d3629dcfe6",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/ea026b80e12fba5866efbc840c4dea07ac3572348d469a53e0a569d3629dcfe6"
+        }
+      ],
+      "case_content_sha256": "fc77d0b77d4fae96a39af2918a1fc823433c6fea2e1002aa55aaa5cf6009b7c8"
+    },
+    {
+      "case_id": "96ea3a1e2d31__drivers_net_can_vxcan_c",
+      "old_commit": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+      "new_commit": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+      "source_file": "drivers/net/can/vxcan.c",
+      "object_target": "drivers/net/can/vxcan.o",
+      "owner_target": "drivers/net/can/vxcan.o",
+      "module_target": "drivers/net/can/vxcan.ko",
+      "required_config": [
+        "NET",
+        "NETDEVICES",
+        "CAN",
+        "CAN_DEV",
+        "CAN_VXCAN"
+      ],
+      "config_enable": [
+        "CAN",
+        "CAN_DEV",
+        "CAN_VXCAN"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "The virtual CAN target has one C translation unit; it still depends on CAN/network kernel symbols."
+      ],
+      "source_old_sha256": "0d621c5a3413aa10926084014a5adda372d6c4e9120518b36378a5a1aaf3a8f9",
+      "source_new_sha256": "966a9caf35a4c56b9212df3fda466db7f165a79e957f52b5d2d49f90d8208f9c",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/Kconfig",
+          "blob": "9c7953f8e63776c9a766290fe0441d3107079c93",
+          "sha256": "9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/Makefile",
+          "blob": "5b01215f68294e59807db44847a1b0c78fc533cf",
+          "sha256": "18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/can/Kconfig",
+          "blob": "e15e320db476362255ad6ad05f3e192e55cd4706",
+          "sha256": "909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "drivers/net/can/Makefile",
+          "blob": "d7bc10a6b8eae273aa203cf2bc1f8ea92d1187f5",
+          "sha256": "1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807"
+        },
+        {
+          "ref": "d4fb6514ff8ed6912a71294e6b66a5d59ee88007",
+          "path": "net/can/Kconfig",
+          "blob": "af64a6f764588cc63862ce285ee47f3245d72d5e",
+          "sha256": "cd01a8e7d59a007bbb6131970dcc7d5d467f7ed0c7c886139abc2451c1830f35",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cd01a8e7d59a007bbb6131970dcc7d5d467f7ed0c7c886139abc2451c1830f35"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/Kconfig",
+          "blob": "9c7953f8e63776c9a766290fe0441d3107079c93",
+          "sha256": "9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9b0eac403c6c62e6f5b90a71314b18a6338b7cffe2e269f1cca837a1b1a2737a"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/Makefile",
+          "blob": "5b01215f68294e59807db44847a1b0c78fc533cf",
+          "sha256": "18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/18a2eaccc2b7d08552196077df7956963f6834f31298b3e0f35a18cad2731529"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/can/Kconfig",
+          "blob": "e15e320db476362255ad6ad05f3e192e55cd4706",
+          "sha256": "909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/909dcd07709f64d7a6b871eb0caf4724888634d0fe1069f49ed24149cbe4d0b9"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "drivers/net/can/Makefile",
+          "blob": "d7bc10a6b8eae273aa203cf2bc1f8ea92d1187f5",
+          "sha256": "1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/1585fec6a1b8188fa91b3ae58af44e4506dc4314b1bba529147b880632c31807"
+        },
+        {
+          "ref": "96ea3a1e2d317e7ecb6b65dc65c9dd917905a6a8",
+          "path": "net/can/Kconfig",
+          "blob": "abbb4be7ad2152c66abd2e28dbbd5282ec45d065",
+          "sha256": "ea026b80e12fba5866efbc840c4dea07ac3572348d469a53e0a569d3629dcfe6",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/ea026b80e12fba5866efbc840c4dea07ac3572348d469a53e0a569d3629dcfe6"
+        }
+      ],
+      "case_content_sha256": "969188d4426bfbb8ef7ff3055a86234107a003642a6a51d67fd3bea1496a42e7"
+    },
+    {
+      "case_id": "b2c15db74a37__drivers_crypto_xilinx_xilinx_trng_c",
+      "old_commit": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+      "new_commit": "b2c15db74a379a50d723002799c3db0c6781c75a",
+      "source_file": "drivers/crypto/xilinx/xilinx-trng.c",
+      "object_target": "drivers/crypto/xilinx/xilinx-trng.o",
+      "owner_target": "drivers/crypto/xilinx/xilinx-trng.o",
+      "module_target": "drivers/crypto/xilinx/xilinx-trng.ko",
+      "required_config": [
+        "CRYPTO",
+        "CRYPTO_HW",
+        "COMPILE_TEST",
+        "CRYPTO_DEV_XILINX_TRNG"
+      ],
+      "config_enable": [
+        "CRYPTO",
+        "CRYPTO_HW",
+        "CRYPTO_DEV_XILINX_TRNG"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "Xilinx target is supported for compile testing without ZYNQMP_FIRMWARE.",
+        "Kconfig selects CRYPTO_DF80090A, CRYPTO_RNG and HW_RANDOM; hardware behavior remains untested."
+      ],
+      "source_old_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+      "source_new_sha256": "fcb03701415615e66ae387398d5b342ecbd6fb46e57da498edb623f428681859",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+          "path": "drivers/crypto/Kconfig",
+          "blob": "8d3b5d2890f8b72e096efb30821883287f70aee9",
+          "sha256": "337044c8608188ab368b296d2dc6e92d23d52297b854aaec8a1e5d2605c9ccda",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/337044c8608188ab368b296d2dc6e92d23d52297b854aaec8a1e5d2605c9ccda"
+        },
+        {
+          "ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+          "path": "drivers/crypto/Makefile",
+          "blob": "322ae8854e3eaa2227ef70e0ef68fd252c5321fb",
+          "sha256": "f7a9a171f9b2db9a5aba3684b3ba872e73a13b410f565931e80ade44935da227",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/f7a9a171f9b2db9a5aba3684b3ba872e73a13b410f565931e80ade44935da227"
+        },
+        {
+          "ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+          "path": "drivers/crypto/xilinx/Makefile",
+          "blob": "9b51636ef75e510eb191dd358eb8dd821e86eeda",
+          "sha256": "7b9e92a49a4ac19bca9b0775389f678c8249b92356c5d8d476ed9ec5bc3e4981",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/7b9e92a49a4ac19bca9b0775389f678c8249b92356c5d8d476ed9ec5bc3e4981"
+        },
+        {
+          "ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+          "path": "drivers/crypto/Kconfig",
+          "blob": "8d3b5d2890f8b72e096efb30821883287f70aee9",
+          "sha256": "337044c8608188ab368b296d2dc6e92d23d52297b854aaec8a1e5d2605c9ccda",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/337044c8608188ab368b296d2dc6e92d23d52297b854aaec8a1e5d2605c9ccda"
+        },
+        {
+          "ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+          "path": "drivers/crypto/Makefile",
+          "blob": "322ae8854e3eaa2227ef70e0ef68fd252c5321fb",
+          "sha256": "f7a9a171f9b2db9a5aba3684b3ba872e73a13b410f565931e80ade44935da227",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/f7a9a171f9b2db9a5aba3684b3ba872e73a13b410f565931e80ade44935da227"
+        },
+        {
+          "ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+          "path": "drivers/crypto/xilinx/Makefile",
+          "blob": "9b51636ef75e510eb191dd358eb8dd821e86eeda",
+          "sha256": "7b9e92a49a4ac19bca9b0775389f678c8249b92356c5d8d476ed9ec5bc3e4981",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/7b9e92a49a4ac19bca9b0775389f678c8249b92356c5d8d476ed9ec5bc3e4981"
+        }
+      ],
+      "case_content_sha256": "b378d461e69de0dc9b34f2285b1ac3ad92efae400ecb62bf06867fc87bf010a3"
+    },
+    {
+      "case_id": "c789a7f40288__drivers_media_mc_mc_request_c",
+      "old_commit": "a519e21e32398459ba357e67b541402f7295ee1b",
+      "new_commit": "c789a7f40288c19004f786a6da67c3733d38c6af",
+      "source_file": "drivers/media/mc/mc-request.c",
+      "object_target": "drivers/media/mc/mc-request.o",
+      "owner_target": "drivers/media/mc/mc.o",
+      "module_target": "drivers/media/mc/mc.ko",
+      "required_config": [
+        "MEDIA_SUPPORT",
+        "MEDIA_CONTROLLER"
+      ],
+      "config_enable": [
+        "MEDIA_SUPPORT",
+        "MEDIA_CONTROLLER"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "Parent drivers/media/Makefile enters mc/ only with MEDIA_CONTROLLER=y.",
+        "mc-request.o shares mc.o with mc-device.o, mc-devnode.o, mc-entity.o and conditionally mc-dev-allocator.o."
+      ],
+      "source_old_sha256": "c0f27ed67d28e7d06abf1ee46d6079ec49e1c1cf7b2b56270a22afc46414594e",
+      "source_new_sha256": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "a519e21e32398459ba357e67b541402f7295ee1b",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "a519e21e32398459ba357e67b541402f7295ee1b",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "a519e21e32398459ba357e67b541402f7295ee1b",
+          "path": "drivers/media/Kconfig",
+          "blob": "6abc9302cd84d8563b7877d3d3da4b7e05a6b5d2",
+          "sha256": "8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8"
+        },
+        {
+          "ref": "a519e21e32398459ba357e67b541402f7295ee1b",
+          "path": "drivers/media/Makefile",
+          "blob": "20fac24e4f0f13134c12cd859141c8b0387030fa",
+          "sha256": "88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67"
+        },
+        {
+          "ref": "a519e21e32398459ba357e67b541402f7295ee1b",
+          "path": "drivers/media/mc/Kconfig",
+          "blob": "c82b07d2ef36fa89f50c1025a5da8c0fa43bef6d",
+          "sha256": "eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d"
+        },
+        {
+          "ref": "a519e21e32398459ba357e67b541402f7295ee1b",
+          "path": "drivers/media/mc/Makefile",
+          "blob": "2b7af42ba59c19670f51a5e726e707e638d3351a",
+          "sha256": "cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7"
+        },
+        {
+          "ref": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "path": "drivers/media/Kconfig",
+          "blob": "6abc9302cd84d8563b7877d3d3da4b7e05a6b5d2",
+          "sha256": "8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8"
+        },
+        {
+          "ref": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "path": "drivers/media/Makefile",
+          "blob": "20fac24e4f0f13134c12cd859141c8b0387030fa",
+          "sha256": "88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67"
+        },
+        {
+          "ref": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "path": "drivers/media/mc/Kconfig",
+          "blob": "c82b07d2ef36fa89f50c1025a5da8c0fa43bef6d",
+          "sha256": "eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d"
+        },
+        {
+          "ref": "c789a7f40288c19004f786a6da67c3733d38c6af",
+          "path": "drivers/media/mc/Makefile",
+          "blob": "2b7af42ba59c19670f51a5e726e707e638d3351a",
+          "sha256": "cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7"
+        }
+      ],
+      "case_content_sha256": "899ce93f22ff6b913065d8ece510caadb72987fee4472308e2eebdbb816f6b47"
+    },
+    {
+      "case_id": "cda83b099f11__drivers_gpu_drm_tests_drm_gem_shmem_test_c",
+      "old_commit": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+      "new_commit": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+      "source_file": "drivers/gpu/drm/tests/drm_gem_shmem_test.c",
+      "object_target": "drivers/gpu/drm/tests/drm_gem_shmem_test.o",
+      "owner_target": "drivers/gpu/drm/tests/drm_gem_shmem_test.o",
+      "module_target": "drivers/gpu/drm/tests/drm_gem_shmem_test.ko",
+      "required_config": [
+        "DRM",
+        "KUNIT",
+        "DRM_KUNIT_TEST",
+        "DRM_GEM_SHMEM_HELPER"
+      ],
+      "config_enable": [
+        "DRM",
+        "KUNIT",
+        "DRM_KUNIT_TEST"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "Test object is selected through DRM_KUNIT_TEST, which selects DRM_GEM_SHMEM_HELPER and DRM_KUNIT_TEST_HELPERS.",
+        "Compilation does not run the KUnit test or validate reservation-lock semantics."
+      ],
+      "source_old_sha256": "0761ed39825bcf940274bb5102e06b6185196a413949851e782e2226724b6b2f",
+      "source_new_sha256": "50f5b4cf7b2f23f5c8bc02b9c7639804ffa78ec6d2cd240583173d9b19dd74bc",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/gpu/Makefile",
+          "blob": "36a54d45663030c33405e297868a41c2d287c224",
+          "sha256": "5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/gpu/drm/Kconfig",
+          "blob": "a33b902515302f4ac20600a053693d5af7233386",
+          "sha256": "4a698d983e89164ca11f9a5e4b1fa82df19eb08fee8c5770bfc95444469de8ff",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/4a698d983e89164ca11f9a5e4b1fa82df19eb08fee8c5770bfc95444469de8ff"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/gpu/drm/Makefile",
+          "blob": "0e1c668b46d2119c166430ac99996bc155c026c5",
+          "sha256": "32fef219017f4c4ea8050b713428958504ea52f262e75867f47a8324100b96c9",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/32fef219017f4c4ea8050b713428958504ea52f262e75867f47a8324100b96c9"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/gpu/drm/tests/Makefile",
+          "blob": "87d5d5f9332acbf730bd28c1de049a6855167c9b",
+          "sha256": "6081c6f96aef56db3f054a76d65798f0c40ab06dea3dce9596549cbe7b628c86",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6081c6f96aef56db3f054a76d65798f0c40ab06dea3dce9596549cbe7b628c86"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "drivers/gpu/drm/Kconfig.debug",
+          "blob": "05dc43c0b8c5af4fe2a1a615e5c607d466758b30",
+          "sha256": "9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205"
+        },
+        {
+          "ref": "b47b9ecef309459278eb52f02b50eefdeaac4f6d",
+          "path": "lib/kunit/Kconfig",
+          "blob": "50ecf55d2b9c8a82f2aff7a0b4156bd6179b0a2f",
+          "sha256": "a8f8c473e57e66db971a4b45f53533d06ae231b5d81ff23be4eb98f46753e1ca",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/a8f8c473e57e66db971a4b45f53533d06ae231b5d81ff23be4eb98f46753e1ca"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/gpu/Makefile",
+          "blob": "36a54d45663030c33405e297868a41c2d287c224",
+          "sha256": "5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/gpu/drm/Kconfig",
+          "blob": "a33b902515302f4ac20600a053693d5af7233386",
+          "sha256": "4a698d983e89164ca11f9a5e4b1fa82df19eb08fee8c5770bfc95444469de8ff",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/4a698d983e89164ca11f9a5e4b1fa82df19eb08fee8c5770bfc95444469de8ff"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/gpu/drm/Makefile",
+          "blob": "0e1c668b46d2119c166430ac99996bc155c026c5",
+          "sha256": "32fef219017f4c4ea8050b713428958504ea52f262e75867f47a8324100b96c9",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/32fef219017f4c4ea8050b713428958504ea52f262e75867f47a8324100b96c9"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/gpu/drm/tests/Makefile",
+          "blob": "87d5d5f9332acbf730bd28c1de049a6855167c9b",
+          "sha256": "6081c6f96aef56db3f054a76d65798f0c40ab06dea3dce9596549cbe7b628c86",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6081c6f96aef56db3f054a76d65798f0c40ab06dea3dce9596549cbe7b628c86"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "drivers/gpu/drm/Kconfig.debug",
+          "blob": "05dc43c0b8c5af4fe2a1a615e5c607d466758b30",
+          "sha256": "9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205"
+        },
+        {
+          "ref": "cda83b099f117f2a28a77bf467af934cb39e49cf",
+          "path": "lib/kunit/Kconfig",
+          "blob": "50ecf55d2b9c8a82f2aff7a0b4156bd6179b0a2f",
+          "sha256": "a8f8c473e57e66db971a4b45f53533d06ae231b5d81ff23be4eb98f46753e1ca",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/a8f8c473e57e66db971a4b45f53533d06ae231b5d81ff23be4eb98f46753e1ca"
+        }
+      ],
+      "case_content_sha256": "cf8b3166e2c390ef3a7c984ecf0fbc444277ef21c1e19c7b809adb63cf96db76"
+    },
+    {
+      "case_id": "de9f0c2a1ce3__drivers_media_mc_mc_request_c",
+      "old_commit": "d14d93f940763655c23c9a0012648ec42a06f482",
+      "new_commit": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+      "source_file": "drivers/media/mc/mc-request.c",
+      "object_target": "drivers/media/mc/mc-request.o",
+      "owner_target": "drivers/media/mc/mc.o",
+      "module_target": "drivers/media/mc/mc.ko",
+      "required_config": [
+        "MEDIA_SUPPORT",
+        "MEDIA_CONTROLLER"
+      ],
+      "config_enable": [
+        "MEDIA_SUPPORT",
+        "MEDIA_CONTROLLER"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "Parent drivers/media/Makefile enters mc/ only with MEDIA_CONTROLLER=y.",
+        "This file shares the media-controller composite target; surrounding target sources are new during the file screen."
+      ],
+      "source_old_sha256": "7df85fc35225a0ba51ecacc34de8512b86af9ea9fc148a0498f98e0ec38356cf",
+      "source_new_sha256": "ef22f93eedf17a87f6f75ea3d9bd3981275e4fa3fe593db41a23f35169ef5ac5",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "d14d93f940763655c23c9a0012648ec42a06f482",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "d14d93f940763655c23c9a0012648ec42a06f482",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "d14d93f940763655c23c9a0012648ec42a06f482",
+          "path": "drivers/media/Kconfig",
+          "blob": "6abc9302cd84d8563b7877d3d3da4b7e05a6b5d2",
+          "sha256": "8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8"
+        },
+        {
+          "ref": "d14d93f940763655c23c9a0012648ec42a06f482",
+          "path": "drivers/media/Makefile",
+          "blob": "20fac24e4f0f13134c12cd859141c8b0387030fa",
+          "sha256": "88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67"
+        },
+        {
+          "ref": "d14d93f940763655c23c9a0012648ec42a06f482",
+          "path": "drivers/media/mc/Kconfig",
+          "blob": "c82b07d2ef36fa89f50c1025a5da8c0fa43bef6d",
+          "sha256": "eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d"
+        },
+        {
+          "ref": "d14d93f940763655c23c9a0012648ec42a06f482",
+          "path": "drivers/media/mc/Makefile",
+          "blob": "2b7af42ba59c19670f51a5e726e707e638d3351a",
+          "sha256": "cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7"
+        },
+        {
+          "ref": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "path": "drivers/media/Kconfig",
+          "blob": "6abc9302cd84d8563b7877d3d3da4b7e05a6b5d2",
+          "sha256": "8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/8fba3ca08c2d285f04dcbffb9617a1ef7b273904295b1dab02dba4754f7221c8"
+        },
+        {
+          "ref": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "path": "drivers/media/Makefile",
+          "blob": "20fac24e4f0f13134c12cd859141c8b0387030fa",
+          "sha256": "88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/88a13a9cdb0a7b382ddaa09ca707e9e674c7fe7f60d3d8d549eebae79b49bd67"
+        },
+        {
+          "ref": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "path": "drivers/media/mc/Kconfig",
+          "blob": "c82b07d2ef36fa89f50c1025a5da8c0fa43bef6d",
+          "sha256": "eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/eae9d7ca915b61dabeccbebffb28c708ff1deb0fb1dbb83514f0e94f85e0696d"
+        },
+        {
+          "ref": "de9f0c2a1ce3d97561d5cf4678b80e13943647fd",
+          "path": "drivers/media/mc/Makefile",
+          "blob": "2b7af42ba59c19670f51a5e726e707e638d3351a",
+          "sha256": "cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cc2747c7efa64e51bd6d406ea1d6b5bf594f7f64f48d087060a46281436c67d7"
+        }
+      ],
+      "case_content_sha256": "3a3c239f42fc68f23842d2888b55bcf3524b8d8747f60d00f178a4cf81c299fe"
+    },
+    {
+      "case_id": "e44f47a9bf51__drivers_gpu_drm_drm_pagemap_util_c",
+      "old_commit": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+      "new_commit": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+      "source_file": "drivers/gpu/drm/drm_pagemap_util.c",
+      "object_target": "drivers/gpu/drm/drm_pagemap_util.o",
+      "owner_target": "drivers/gpu/drm/drm_gpusvm_helper.o",
+      "module_target": "drivers/gpu/drm/drm_gpusvm_helper.ko",
+      "required_config": [
+        "DRM",
+        "DEVICE_PRIVATE",
+        "DRM_GPUSVM"
+      ],
+      "config_enable": [
+        "DRM",
+        "DEVICE_PRIVATE",
+        "DRM_XE"
+      ],
+      "config_disable": [],
+      "scope_notes": [
+        "DRM_GPUSVM is hidden; DRM_XE selects it when DEVICE_PRIVATE and not UML.",
+        "drm_gpusvm_helper.o contains drm_gpusvm.o, drm_pagemap.o and drm_pagemap_util.o; only the final C file is packed."
+      ],
+      "source_old_sha256": "1a8fb1049fe87d154743617a6fa0c8a3b67601617adb4658d97f5b723263c569",
+      "source_new_sha256": "2bc3970aa01560402bbf618227567dd62a03a41eeb437520de551461af725ad6",
+      "source_new_exists": true,
+      "kbuild_kconfig_evidence": [
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/gpu/Makefile",
+          "blob": "36a54d45663030c33405e297868a41c2d287c224",
+          "sha256": "5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/gpu/drm/Kconfig",
+          "blob": "7e6bc0b3a589ce8a5ffc9894f02e076a4bfbd5c2",
+          "sha256": "4ca4e3e289d378671f27cda303496bdebfc6e24af9e7399daa944de2ffef13d8",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/4ca4e3e289d378671f27cda303496bdebfc6e24af9e7399daa944de2ffef13d8"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/gpu/drm/Makefile",
+          "blob": "0deee72ef9358afa7f95b71dbf8c479f72df7f5b",
+          "sha256": "cdf7d1fd7bfde6cfc4bc9f12088cd8d24e41d392ec058bb8bfa285c12fdab131",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cdf7d1fd7bfde6cfc4bc9f12088cd8d24e41d392ec058bb8bfa285c12fdab131"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/gpu/drm/Kconfig.debug",
+          "blob": "05dc43c0b8c5af4fe2a1a615e5c607d466758b30",
+          "sha256": "9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "drivers/gpu/drm/xe/Kconfig",
+          "blob": "4b288eb3f5b0e5c0489f9e7301cad22459d8ef0a",
+          "sha256": "1c6012c99594d509aaa3605b5dd71c09f4544cbada15c4797186fe8578e7a957",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/1c6012c99594d509aaa3605b5dd71c09f4544cbada15c4797186fe8578e7a957"
+        },
+        {
+          "ref": "33ac8d150af6be100161ec11106a8dd3f1f5b9e0",
+          "path": "mm/Kconfig",
+          "blob": "bd0ea5454af820736b098fe42abe889abbc1244d",
+          "sha256": "d7316e2993459ff19c04b428198d4f5b8e7cff30ccde3c35ccf6e53839b05c81",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/d7316e2993459ff19c04b428198d4f5b8e7cff30ccde3c35ccf6e53839b05c81"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/Kconfig",
+          "blob": "c0f1fb893ec02a1afedec2e7273fa0edc20d6d1c",
+          "sha256": "290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/290c8eed040c269aa8af32f30225385e5d52e7b832ceacf72275cebae320cf77"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/Makefile",
+          "blob": "ccc05f1eae3eb5e3bcf216f30b3494108f4f3d75",
+          "sha256": "6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/6c6ec3005f80a16a6e4d610cbc5e03d39c3bf193fddc2be850a3d2a7e3abdbf3"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/gpu/Makefile",
+          "blob": "36a54d45663030c33405e297868a41c2d287c224",
+          "sha256": "5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/5dc7d3dd368c62d4a19980cdeeabb6d08242854dd312de9d1eaf68cd04f0468a"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/gpu/drm/Kconfig",
+          "blob": "7e6bc0b3a589ce8a5ffc9894f02e076a4bfbd5c2",
+          "sha256": "4ca4e3e289d378671f27cda303496bdebfc6e24af9e7399daa944de2ffef13d8",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/4ca4e3e289d378671f27cda303496bdebfc6e24af9e7399daa944de2ffef13d8"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/gpu/drm/Makefile",
+          "blob": "0deee72ef9358afa7f95b71dbf8c479f72df7f5b",
+          "sha256": "cdf7d1fd7bfde6cfc4bc9f12088cd8d24e41d392ec058bb8bfa285c12fdab131",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/cdf7d1fd7bfde6cfc4bc9f12088cd8d24e41d392ec058bb8bfa285c12fdab131"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/gpu/drm/Kconfig.debug",
+          "blob": "05dc43c0b8c5af4fe2a1a615e5c607d466758b30",
+          "sha256": "9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/9edb84bcfb4e1069c38ce9a56a4f5757bce04c90ee7d22f38c47a7e7925ec205"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "drivers/gpu/drm/xe/Kconfig",
+          "blob": "4b288eb3f5b0e5c0489f9e7301cad22459d8ef0a",
+          "sha256": "1c6012c99594d509aaa3605b5dd71c09f4544cbada15c4797186fe8578e7a957",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/1c6012c99594d509aaa3605b5dd71c09f4544cbada15c4797186fe8578e7a957"
+        },
+        {
+          "ref": "e44f47a9bf5104c9b9efcc8fc95a858c66f2d1e6",
+          "path": "mm/Kconfig",
+          "blob": "bd0ea5454af820736b098fe42abe889abbc1244d",
+          "sha256": "d7316e2993459ff19c04b428198d4f5b8e7cff30ccde3c35ccf6e53839b05c81",
+          "local_path": "runs/pressure_build_mapping_20260914/git_objects/d7316e2993459ff19c04b428198d4f5b8e7cff30ccde3c35ccf6e53839b05c81"
+        }
+      ],
+      "case_content_sha256": "855201b53980158359722f15e7e8b264aa5144b158c0a1f1d1488fe03db4c53c"
+    }
+  ]
+}

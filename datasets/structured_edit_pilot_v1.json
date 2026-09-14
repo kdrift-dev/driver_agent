@@ -1,0 +1,340 @@
+{
+  "actual_token_budget_comparison": false,
+  "artifact_index": {
+    "indexed_files": 30,
+    "path": "runs/structured_edit_generation_v1_20260914/artifact_index.json",
+    "sha256": "8e571fa77648700e313c523645a416c28982e9dfa7d5179d4fbe2ff1356184a9"
+  },
+  "auditor_scripts": [
+    {
+      "path": "runs/structured_edit_independent_audit_20260914/audit.py",
+      "sha256": "a74d6d5703b5e67b64ad4ce84f2cb5326e32255a144a67e7dd0ac6c1f05d9d5e"
+    },
+    {
+      "path": "runs/structured_edit_independent_audit_20260914/audit_no_build.py",
+      "sha256": "f1e6ce11943d74cb0cb7687b74f17821d9914336c9ec2f00ed363f840ed5ff27"
+    },
+    {
+      "path": "runs/structured_edit_independent_audit_20260914/audit_build.py",
+      "sha256": "de08c3693dfd271085f15a268da16098c0e41a0b05bbaed4b90a15f5a3eb7ef2"
+    }
+  ],
+  "build_preflight": {
+    "path": "runs/structured_edit_build_preflight_20260914/structured-build-preflight-summary.json",
+    "sha256": "201d243a2801b1fc6c93c31f6804283f098d8e0aeb15f715327889eede464e3f"
+  },
+  "checkout_preservation": {
+    "path": "runs/structured_edit_checkout_preservation_20260914.json",
+    "sha256": "181f073045a3e4e03812379abbb246dce8f65c02fcfb7d371c7a7259ba41703b",
+    "status": "PASS"
+  },
+  "checks": {
+    "exact_edits_groups": 4,
+    "logs": [
+      {
+        "path": "runs/structured_edit_checks_20260914/edits.log",
+        "sha256": "194e8b6ebf7119f2b6b98a627eb7a9a981efe7533ecfbed129f162a7d71f6531"
+      },
+      {
+        "path": "runs/structured_edit_checks_20260914/context.log",
+        "sha256": "4ff27a826a859ead64d710eab114bcd1142ae9969eeb60de2625c8203b025c35"
+      },
+      {
+        "path": "runs/structured_edit_checks_20260914/validator.log",
+        "sha256": "deed9ba43958c89bffc9ef6ce23653ddc4201decb6aa722d7ff4c19ac2f3259f"
+      },
+      {
+        "path": "runs/structured_edit_checks_20260914/pilot.log",
+        "sha256": "701c0a2294a58ad36b9d344b918e798c2d6b3acc8aec437359e980764ebfd940"
+      }
+    ],
+    "paired_context_groups": 3,
+    "structured_runner_groups": 5,
+    "total_groups": 17,
+    "validator_groups": 5
+  },
+  "common_character_cap": 27399,
+  "conditions": {
+    "first_fit": {
+      "actual_token_budget_comparison": false,
+      "apply": "not_run",
+      "candidate_admission": "rejected",
+      "canonical_request_sha256": "f9277e043ccbc8894392281b4fa3b13826e7f5d609054f6f1ca4ef3f8c4e2d8c",
+      "compile": "not_run",
+      "deterministic_diff": "not_created_rejected_edits",
+      "diagnostic_result": {
+        "path": "runs/structured_edit_generation_v1_20260914/generation/first_fit/diagnostic_result.json",
+        "sha256": "54cea498f19fdf5c97ddc2552ca4c3cbbb12b16f49cc3f2f3ca3691f3d515dbe"
+      },
+      "finish_reason": "stop",
+      "generation_ready": false,
+      "independent_edit_evidence": [
+        {
+          "end_char": 1983,
+          "ends_at_original_line_boundary": false,
+          "exact_original_matches": 1,
+          "following_character": "\n",
+          "new_text_sha256": "7937b50ca3e903c0f470640b4a070fba0d6e4e7e810c188120a15aea50116416",
+          "no_op": false,
+          "old_text_sha256": "8b597029738f751dd0099c68cfff77a8de44e2560e493e1a61aa09c6a8ef9794",
+          "ordinal": 0,
+          "path": "drivers/crypto/xilinx/xilinx-trng.c",
+          "preceding_character": "\n",
+          "replacement_has_required_final_lf": false,
+          "start_char": 1776,
+          "start_line": 59,
+          "starts_at_original_line_boundary": true
+        }
+      ],
+      "input_characters": 27183,
+      "link": "not_run",
+      "native_finish_reason": "end_turn",
+      "parse_status": "ok",
+      "raw_output": {
+        "path": "runs/structured_edit_generation_v1_20260914/generation/first_fit/raw_output.txt",
+        "sha256": "30cff4412e942dc540940cf9405969a6c52bfe29afc06dcca71610caf09c1d09"
+      },
+      "rejection_reasons": [
+        "invalid_structured_edits: old_text must cover complete original lines"
+      ],
+      "request_attempt_count": 1,
+      "request_attempt_count_bounds": {
+        "lower": 1,
+        "upper": 1
+      },
+      "request_attempt_count_exact": true,
+      "request_status": "succeeded",
+      "response_truncated": false,
+      "returned_model": "anthropic/claude-sonnet-4.6",
+      "returned_provider": "Anthropic",
+      "runtime": "not_run",
+      "selected_blocks": 18,
+      "stop_pair_for_auth_or_quota": false,
+      "strict_json_schema": "valid",
+      "submitted_edits": 1,
+      "usage": {
+        "completion_tokens": 526,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.04398,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.00789,
+          "upstream_inference_cost": 0.04398,
+          "upstream_inference_prompt_cost": 0.03609
+        },
+        "is_byok": false,
+        "prompt_tokens": 12030,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 12556
+      }
+    },
+    "obligation_ranked": {
+      "actual_token_budget_comparison": false,
+      "apply": "not_run",
+      "candidate_admission": "rejected",
+      "canonical_request_sha256": "5ff16f850e10320784e6a45190effb7761eec9eab4b4f6fc7439772d5bcd4efe",
+      "compile": "not_run",
+      "deterministic_diff": "not_created_rejected_edits",
+      "diagnostic_result": {
+        "path": "runs/structured_edit_generation_v1_20260914/generation/obligation_ranked/diagnostic_result.json",
+        "sha256": "034740d9702e820a4436009dd02a28e0939fa355264edbd6fc28039ca97b9353"
+      },
+      "finish_reason": "stop",
+      "generation_ready": false,
+      "independent_edit_evidence": [
+        {
+          "end_char": 1983,
+          "ends_at_original_line_boundary": false,
+          "exact_original_matches": 1,
+          "following_character": "\n",
+          "new_text_sha256": "7937b50ca3e903c0f470640b4a070fba0d6e4e7e810c188120a15aea50116416",
+          "no_op": false,
+          "old_text_sha256": "8b597029738f751dd0099c68cfff77a8de44e2560e493e1a61aa09c6a8ef9794",
+          "ordinal": 0,
+          "path": "drivers/crypto/xilinx/xilinx-trng.c",
+          "preceding_character": "\n",
+          "replacement_has_required_final_lf": false,
+          "start_char": 1776,
+          "start_line": 59,
+          "starts_at_original_line_boundary": true
+        },
+        {
+          "end_char": 9662,
+          "ends_at_original_line_boundary": false,
+          "exact_original_matches": 1,
+          "following_character": "\n",
+          "new_text_sha256": "ce11dcf12ba258ff8025d159606199de04b7b6ec0dea01902abe1e992828ec66",
+          "no_op": true,
+          "old_text_sha256": "ce11dcf12ba258ff8025d159606199de04b7b6ec0dea01902abe1e992828ec66",
+          "ordinal": 1,
+          "path": "drivers/crypto/xilinx/xilinx-trng.c",
+          "preceding_character": "\n",
+          "replacement_has_required_final_lf": false,
+          "start_char": 9588,
+          "start_line": 352,
+          "starts_at_original_line_boundary": true
+        }
+      ],
+      "input_characters": 26803,
+      "link": "not_run",
+      "native_finish_reason": "end_turn",
+      "parse_status": "ok",
+      "raw_output": {
+        "path": "runs/structured_edit_generation_v1_20260914/generation/obligation_ranked/raw_output.txt",
+        "sha256": "56f85781a2db49bd596478a7ef88a2edc7cbea5af3f1a2c20dc8432ce9dc863f"
+      },
+      "rejection_reasons": [
+        "invalid_structured_edits: old_text must cover complete original lines"
+      ],
+      "request_attempt_count": 1,
+      "request_attempt_count_bounds": {
+        "lower": 1,
+        "upper": 1
+      },
+      "request_attempt_count_exact": true,
+      "request_status": "succeeded",
+      "response_truncated": false,
+      "returned_model": "anthropic/claude-sonnet-4.6",
+      "returned_provider": "Anthropic",
+      "runtime": "not_run",
+      "selected_blocks": 20,
+      "stop_pair_for_auth_or_quota": false,
+      "strict_json_schema": "valid",
+      "submitted_edits": 2,
+      "usage": {
+        "completion_tokens": 669,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.045633,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.010035,
+          "upstream_inference_cost": 0.045633,
+          "upstream_inference_prompt_cost": 0.035598
+        },
+        "is_byok": false,
+        "prompt_tokens": 11866,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 12535
+      }
+    }
+  },
+  "counter": {
+    "count_scope": "canonical JSON object containing complete messages and submitted response_format",
+    "generation_binding": "unverified provider tokenization/framing; character diagnostic only",
+    "kind": "canonical_messages_and_schema_chars",
+    "unit": "characters"
+  },
+  "execution_commit": "6c9fac6a54da2a339922bdb5fb894334ffe7084e",
+  "execution_source_digest": "b5be89dbef71ee3b5ce41aca8e99576d052c6547fbd7106fca7f46282689a847",
+  "execution_source_files": 114,
+  "explicit_client_attempts": 2,
+  "explicit_client_attempts_exact": true,
+  "freeze": {
+    "path": "runs/structured_edit_generation_v1_20260914/freeze/manifest.json",
+    "sha256": "1c4a4547355155c0b148fb1cad91228e952770fce5ed7ba563c362606c2e1b12"
+  },
+  "generation_directory": "runs/structured_edit_generation_v1_20260914",
+  "generation_invocations": 2,
+  "independent_audit_checks": 971,
+  "independent_generation_audit": {
+    "checks": 596,
+    "path": "runs/structured_edit_independent_audit_20260914/remote_audit.json",
+    "sha256": "1aa0a4838515a8f83b49f7cbad05f734d7ffcfc27b6757bdf06b419c30ffd569",
+    "status": "PASS"
+  },
+  "independent_no_build_audit": {
+    "checks": 375,
+    "path": "runs/structured_edit_independent_audit_20260914/no_build_report_v2.json",
+    "sha256": "65fae4a14cc276c329080cd3728171640d42347290fab60ec4ce95464461ce98",
+    "status": "PASS"
+  },
+  "kbuild_target": "xilinx-trng.ko",
+  "kernel_release_probe": {
+    "path": "runs/structured_edit_build_preflight_20260914/structured-kernelrelease-summary.json",
+    "sha256": "74ef1c0b5494a66684e230fb4f9e70d2e505f9884e45affdcfd20847d6c1773f"
+  },
+  "launcher_update": {
+    "path": "runs/structured_edit_launcher_update_20260914.json",
+    "sha256": "ef84eefa186ba1f6afa71eb1a79c57e44df6b33a53a9f78d96e8fe3eb5cc1064",
+    "status": "PASS"
+  },
+  "max_output_tokens": 4096,
+  "module_path": "drivers/crypto/xilinx",
+  "new_compile_or_link_commands": 0,
+  "new_ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+  "next_contract_review": {
+    "path": "runs/structured_edit_independent_audit_20260914/next_contract_review.md",
+    "sha256": "e9f91fff306fe03ac992a9666663e755da21b3a5c68facb9b24ffe7fb5613632"
+  },
+  "old_ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+  "original_preparation": {
+    "path": "runs/paired_context_xilinx_chars_v1_20260914/artifact_index.json",
+    "sha256": "6a83a8933bbe06ef9f2fd08462f7d3d24bcd8fdd0df6db666382d315a7adc638"
+  },
+  "pool_sha256": "9f8ca2561631976c2bceba810cfed803ef338e12dfc82818a5f273d9b5ee7558",
+  "protocol": "paired_structured_edit_character_diagnostic_v1",
+  "protocol_document": {
+    "path": "docs-impl/20_structured_edit_pilot_protocol.md",
+    "sha256": "21d952b0c53a796ae209ba725dc3e6797802c913202dc0023749a0c55539bdf3"
+  },
+  "provider_internal_retries": "not independently observed",
+  "release_pin_generated_patch_build_tested": false,
+  "repairs": 0,
+  "report": "docs-impl/21_structured_edit_pilot_results.md",
+  "requirements_sha256": "ee6fab59db720a3c92b5c58f45953efe5693d05e99a4f6d9e8920fdea0febe75",
+  "retro_checkout": "/home/arina/work/driver_agent_structured_edits",
+  "runtime_tests": 0,
+  "schema_version": 1,
+  "scope": "one-case exploratory messages/schema character-budget diagnostic; both edit sets rejected",
+  "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+  "strict_generation_ready": false,
+  "summary": {
+    "path": "runs/structured_edit_generation_v1_20260914/summary.json",
+    "sha256": "b2607577b06edb0cb3dbc95f26ecfd9001738b8c78fbb8fe5ca89f7046eafbd4"
+  },
+  "superseded_audit_attempts": [
+    {
+      "reason": "Auditor wrongly assumed model edits would all be non-no-op; changed audit to verify expected rejection.",
+      "report": {
+        "path": "runs/structured_edit_independent_audit_20260914/local_audit.json",
+        "sha256": "07da18a68adb784d72db675df0075dbef7a4c9bfbc7a7600e155d61a8f55e4e6"
+      },
+      "script": {
+        "path": "runs/structured_edit_independent_audit_20260914/audit_initial.py",
+        "sha256": "d7fffeb28132eafdebce607c2cc6e160bf84793c54777b5343f4324fd0921893"
+      }
+    },
+    {
+      "correction_record": {
+        "path": "runs/structured_edit_independent_audit_20260914/no_build_audit_correction.json",
+        "sha256": "f81d0518844fc2c10495d89efb02b3514d03002611da3507dd06e20f7a737b23"
+      },
+      "reason": "Auditor must account for convenience parsed_output parse_status metadata; raw schema is unchanged.",
+      "report": {
+        "path": "runs/structured_edit_independent_audit_20260914/no_build_report.json",
+        "sha256": "978aaae0cc36ef71860c1e8c5cc41f99638fceb8f824bf9d12fbdd1f185b1d4f"
+      },
+      "script": {
+        "path": "runs/structured_edit_independent_audit_20260914/audit_no_build_v1.py",
+        "sha256": "c4695b8d5dafbddfc3ae9229343aa04fa5ec5d33eb46d56e7306498360170f33"
+      }
+    }
+  ],
+  "total_reported_cost_usd": "0.089613"
+}

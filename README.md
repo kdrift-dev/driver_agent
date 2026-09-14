@@ -104,6 +104,13 @@ token-admission refusal and reports actual usage afterward. See its
 [protocol](docs-impl/18_paired_character_pilot_protocol.md) and
 [observed format/patch failures](docs-impl/19_paired_character_pilot_results.md).
 
+The subsequent opt-in `tools/run_structured_edit_pilot.py` requests schema-bound
+JSON edits and constructs diffs from unique exact source spans. It also defaults
+to preparation only and limits `--execute` to two attempts. Its whole-line v1
+contract rejected both observed edit sets; no generated patch reached a build.
+See the [protocol](docs-impl/20_structured_edit_pilot_protocol.md) and
+[results](docs-impl/21_structured_edit_pilot_results.md).
+
 ## LLM Configuration
 
 Supported providers include:

@@ -1,7 +1,8 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/paired-character-pilot`: bounded diagnostic
-and strict patch validator `e13e895`. It follows `codex/paired-context-budget`
+The current package is on `codex/structured-edit-pilot`: structured generation,
+exact edit compiler and release-preserving validator `6c9fac6`. It follows
+`codex/paired-character-pilot` (`e13e895`, report `271eb2c`) and `codex/paired-context-budget`
 (`446e42c`, report `c452c18`), `codex/xilinx-module-pilot` (`9e1f7bd`, report
 `921b9af`), the build-eligibility package (`d02ed15`, Nix `c69f0b3`, report
 `22b0604`), gate v2 (`431c7a1`, report `e63f482`) and foundation (`12940c0`,
@@ -199,12 +200,32 @@ canonical artifact verification pass. Commands and results are in reports
   [results](19_paired_character_pilot_results.md) and
   [catalog](../datasets/paired_character_pilot_v1.json).
 
+## Seventh package
+
+- Structured JSON and an exact-edit compiler are implemented and frozen before
+  two real Sonnet calls. Both responses satisfy the JSON schema; both violate
+  the whole-line edit contract by omitting final LF. Ranked also emits a no-op.
+  Both stay rejected, with no generated diff, apply, compilation, link or runtime.
+- The common messages/schema character cap is 27,399; selected inputs are
+  27,183/26,803 characters and actual input usage is 12,030/11,866 tokens.
+  Total reported cost is USD 0.089613. The token-budget admission flags stay false.
+- All 17 focused offline check groups pass locally and on retro. Independent
+  generation audit passes 596 checks. Read-only preflight found and fixed the
+  private-copy kernel-release suffix issue; no real generated-patch build has
+  exercised that change yet. Previous runs and source boundaries are preserved.
+- Current checkout: `/home/arina/work/driver_agent_structured_edits`.
+  See [protocol](20_structured_edit_pilot_protocol.md),
+  [results](21_structured_edit_pilot_results.md) and
+  [catalog](../datasets/structured_edit_pilot_v1.json).
+
 ## Next TODO, in order
 
-1. Fix the next generation protocol's output contract on unrelated fixtures:
-   provider-enforced structured JSON and deterministic exact diff construction
-   from validated edits. Freeze both conditions before another bounded run and
-   preserve the current format/coordinate failures. Then use strict module
+1. Freeze and test a separate exact-substring edit contract on unrelated
+   fixtures, retaining unique original matches, disjoint spans, deterministic
+   diffs and explicit no-op rejection. Structured JSON now works, but the v1
+   whole-line requirement rejected both model outputs for omitted final LF;
+   ranked also emitted a no-op. Preserve these failures and freeze both
+   conditions before another bounded run. Then use strict module
    validation on admitted patches. For a confirmatory token-budget comparison,
    a verified provider/model counter remains required; OpenRouter exposes no
    documented pre-generation token counter. Character caps and post-hoc usage
@@ -241,4 +262,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–19 describe the current contracts.
+status and reports 08–21 describe the current contracts.

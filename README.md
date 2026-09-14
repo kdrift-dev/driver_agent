@@ -44,7 +44,7 @@ old_ref       = v6.19
 new_ref       = v7.0
 ```
 
-This is stricter than directory-only cases. A directory may build multiple `.ko` modules, so using only `module_path` can mix sibling drivers and inflate source scope. In Kbuild-target mode, Driver-Agent resolves the target's owning source files from the old tree Makefile/Kbuild and loads only those source files plus local headers.
+This is stricter than directory-only cases. A directory may build multiple `.ko` modules, so using only `module_path` can mix sibling drivers and inflate source scope. In Kbuild-target mode, Driver-Agent resolves the target's owning source files from the old tree Makefile/Kbuild and follows their literal relative quoted includes to load local headers. It does not recursively collect headers from sibling drivers. Unresolved local includes remain explicit scope risks; the strict evidence-pool adapter rejects them.
 
 If a directory contains exactly one relevant target, directory mode is still supported.
 
@@ -78,6 +78,11 @@ python pregen_driver_agent.py \
 ```
 
 Use `--dry-run` to persist prompts/inputs/artifacts without calling an LLM or generating a patch.
+
+For extraction without builds, use `tools/extract_kernel_evidence.py`. It runs
+only the four production extraction stages and guards source access and process
+execution. The ordinary CLI's `--dry-run` can still enter validation when a
+candidate exists. See the [NTB preparation protocol](docs-impl/27_ntb_preparation_protocol.md).
 
 For offline paired kernel-evidence selection, reuse a production extraction:
 
@@ -120,6 +125,13 @@ under that explicitly post-hoc policy. See the
 [v2 protocol](docs-impl/22_exact_substring_pilot_protocol.md),
 [post-hoc policy](docs-impl/23_identity_edit_forensic_protocol.md) and
 [combined results](docs-impl/24_substring_and_identity_results.md).
+
+The explicit `identity_substrings_v3` contract now retains and validates every
+submitted operation, including identities. Identity-only output has its own
+status and produces no patch or build candidate. This production policy uses
+generic checks and does not change earlier results. Its runner still requires
+the existing preparation anchor; fresh cases need qualification and their own
+frozen input protocol. See the [v3 contract](docs-impl/25_identity_edit_contract.md).
 
 ## LLM Configuration
 

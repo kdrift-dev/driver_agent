@@ -95,6 +95,38 @@ def run_checks():
     check("known narrative metadata never reaches candidates or signals", "SENTINEL_CASE_HINT" not in json.dumps({k: stripped[k] for k in ("candidates", "obligation_signal")}))
     check("ignored narrative cannot change selection units", stripped["candidates"] == pool["candidates"])
 
+    # Mirror the production loader's inventory: source_files_old includes local
+    # headers, while Kbuild source_files contains only translation units.
+    with_header = deepcopy(docs)
+    local_header = "drivers/demo/local.h"
+    module = with_header["module_source.json"]
+    module["source_files_old"].append(local_header)
+    module["headers_old"] = [local_header]
+    module["kbuild_target_resolution"]["headers"] = [local_header]
+    module["kbuild_target_resolution"]["files"].append(local_header)
+    header_sources = {**sources, local_header: "#define LOCAL_CONSTANT 1\n"}
+    local_pool = build_kernel_evidence_pool(documents=with_header, old_sources=header_sources)
+    check("production local-header inventory admitted", local_pool["candidates"] == pool["candidates"])
+    for label in ("header missing from loaded files", "header also classified as source", "duplicate loaded path", "duplicate resolved header", "unresolved header closure"):
+        bad = deepcopy(with_header)
+        module = bad["module_source.json"]
+        if label == "header missing from loaded files":
+            module["source_files_old"].remove(local_header)
+        elif label == "header also classified as source":
+            module["kbuild_target_resolution"]["source_files"].append(local_header)
+        elif label == "duplicate loaded path":
+            module["source_files_old"].append(local_header)
+        elif label == "duplicate resolved header":
+            module["kbuild_target_resolution"]["headers"].append(local_header)
+        else:
+            module["kbuild_target_resolution"]["warnings"] = ["unresolved local include"]
+        try:
+            build_kernel_evidence_pool(documents=bad, old_sources=header_sources)
+        except EvidenceBoundaryError:
+            passed.append(label + " rejected")
+        else:
+            raise AssertionError(label)
+
     def reject(name, mutate):
         data = deepcopy(docs)
         mutate(data)

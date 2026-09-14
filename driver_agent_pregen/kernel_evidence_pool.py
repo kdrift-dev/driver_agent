@@ -246,7 +246,17 @@ def build_kernel_evidence_pool(
     refs = {side: module.get(side + "_ref") for side in ("old", "new")}
     if any(not isinstance(ref, str) or not re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs.values()):
         raise EvidenceBoundaryError("pool requires full immutable Git commit IDs")
-    paths = sorted(set(_path(path) for key in ("source_files_old", "headers_old") for path in _list(module.get(key, []), key)))
+    inventories = {}
+    for key in ("source_files_old", "headers_old"):
+        entries = [_path(path) for path in _list(module.get(key, []), key)]
+        if len(entries) != len(set(entries)):
+            raise EvidenceBoundaryError("duplicate old source inventory path")
+        inventories[key] = set(entries)
+    # Production source_files_old contains every loaded file, including headers;
+    # Kbuild resolution.source_files contains only its owning translation units.
+    if not inventories["headers_old"] <= inventories["source_files_old"]:
+        raise EvidenceBoundaryError("old headers must belong to the loaded source inventory")
+    paths = sorted(inventories["source_files_old"])
     if not paths or any(not path.startswith(module_path + "/") for path in paths):
         raise EvidenceBoundaryError("old source paths leave target module boundary")
     resolution = module.get("kbuild_target_resolution", {})
@@ -258,10 +268,13 @@ def build_kernel_evidence_pool(
             raise EvidenceBoundaryError("Kbuild resolution target differs from module source")
         if resolution.get("kbuild_target") != module.get("kbuild_target"):
             raise EvidenceBoundaryError("Kbuild target differs from module source")
-        for key, source_key in (("source_files", "source_files_old"), ("headers", "headers_old"), ("files", None)):
-            resolved = {_path(path) for path in _list(resolution.get(key, []), "Kbuild " + key)}
-            expected = set(module.get(source_key, [])) if source_key else set(paths)
-            if resolved != expected:
+        expected_inventories = {
+            "source_files": set(paths) - inventories["headers_old"],
+            "headers": inventories["headers_old"], "files": set(paths),
+        }
+        for key, expected in expected_inventories.items():
+            entries = [_path(path) for path in _list(resolution.get(key, []), "Kbuild " + key)]
+            if len(entries) != len(set(entries)) or set(entries) != expected:
                 raise EvidenceBoundaryError("Kbuild resolution and old source inventory differ")
         if resolution.get("warnings"):
             raise EvidenceBoundaryError("unresolved Kbuild ownership is unsupported")

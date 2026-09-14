@@ -50,6 +50,13 @@ Evaluation-only artifacts must not appear in `llm_calls/*/input.json`.
 
 Analysis stages may read the full old target module source.
 
+In Kbuild-target mode, source loading follows the owning translation units and
+their literal relative quoted-header includes within the module boundary.
+Recursive collection of unrelated sibling-driver headers is excluded. Missing,
+unsupported or out-of-scope local includes remain explicit risks; the strict
+kernel-evidence pool refuses unresolved ownership. This resolver does not infer
+arbitrary compiler include directories or macro include operands.
+
 Patch generation should be reported by source mode:
 
 - `focused`: default paper-facing mode; edit-scope function slices plus read-only direct caller/callback/resource context.

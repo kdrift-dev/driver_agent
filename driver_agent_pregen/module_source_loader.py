@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
 import shutil
 
 from .repo_utils import RepositoryAccessor
-from .kbuild_target import KbuildTargetResolution, resolve_kbuild_target
+from .kbuild_target import KbuildTargetResolution, relative_include_path, resolve_kbuild_target, source_includes
 from .utils import ensure_dir, write_json, write_text
 
 
@@ -60,7 +59,8 @@ def run_module_source_loader(
             side="old",
             module_path=module_path,
             kbuild_target=kbuild_target,
-            include_all_headers=True,
+            include_all_headers=False,
+            include_local_headers=True,
         )
         if not target_resolution.source_files:
             raise ValueError(
@@ -141,19 +141,13 @@ def _local_include_scope_risks(files: list[str], source_texts: dict[str, str]) -
     """
 
     file_set = set(files)
-    basenames = {Path(f).name: f for f in files}
     risks: list[dict] = []
     for rel, text in sorted(source_texts.items()):
-        cur_dir = Path(rel).parent
-        for idx, line in enumerate(text.splitlines(), start=1):
-            m = re.match(r'\s*#\s*include\s+"([^"]+)"', line)
-            if not m:
+        for idx, kind, inc in source_includes(text):
+            if kind == "angle":
                 continue
-            inc = m.group(1)
-            direct = (cur_dir / inc).as_posix()
-            if direct in file_set:
-                continue
-            if inc in basenames:
+            direct = relative_include_path(rel, inc) if kind == "quoted" else None
+            if direct is not None and direct in file_set:
                 continue
             risks.append(
                 {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
+import posixpath
 import re
 
 from .repo_utils import RepositoryAccessor
@@ -9,6 +10,93 @@ from .repo_utils import RepositoryAccessor
 
 SOURCE_SUFFIXES = (".c", ".rs", ".S", ".s")
 HEADER_SUFFIXES = {".h", ".hpp", ".hh"}
+
+
+def source_includes(text: str) -> list[tuple[int, str, str]]:
+    """Return literal include directives without mistaking comments for inputs.
+
+    The kind is quoted, angle, or unsupported (for example a macro operand).
+    Line numbers refer to the first original line of a continued directive.
+    """
+    logical_lines: list[str] = []
+    original_lines: list[int] = []
+    logical, first_line = "", 1
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if not logical:
+            first_line = lineno
+        if line.endswith("\\"):
+            logical += line[:-1]
+            continue
+        logical_lines.append(logical + line)
+        original_lines.append(first_line)
+        logical = ""
+    if logical:
+        logical_lines.append(logical)
+        original_lines.append(first_line)
+    tokens = re.compile(r'/\*[\s\S]*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+    uncommented = tokens.sub(
+        lambda match: re.sub(r"[^\n]", " ", match.group())
+        if match.group().startswith(("/*", "//")) else match.group(),
+        "\n".join(logical_lines),
+    )
+    result: list[tuple[int, str, str]] = []
+    for first_line, line in zip(original_lines, uncommented.splitlines()):
+        match = re.match(r"\s*#\s*include\b\s*(.*?)\s*$", line)
+        if not match:
+            continue
+        operand = match.group(1)
+        if re.fullmatch(r'"[^"\n]+"', operand):
+            result.append((first_line, "quoted", operand[1:-1]))
+        elif re.fullmatch(r"<[^>\n]+>", operand):
+            result.append((first_line, "angle", operand[1:-1]))
+        else:
+            result.append((first_line, "unsupported", operand))
+    return result
+
+
+def relative_include_path(including_file: str, include: str) -> str | None:
+    """Resolve only the compiler's direct relative quoted-include candidate."""
+    if not include or include.startswith("/") or "\\" in include or "\x00" in include:
+        return None
+    return posixpath.normpath(posixpath.join(posixpath.dirname(including_file), include))
+
+
+def _local_header_closure(
+    accessor: RepositoryAccessor, side: str, module_path: str, source_files: list[str]
+) -> tuple[list[str], list[str]]:
+    """Read only headers explicitly reachable from owned source includes.
+
+    This deliberately does not infer ccflags include directories or inspect
+    unrelated driver headers. Unresolvable local scope is reported as a warning
+    so strict consumers cannot silently call it complete.
+    """
+    prefix = module_path.rstrip("/") + "/"
+    pending = list(dict.fromkeys(source_files))
+    seen = set(pending)
+    headers: list[str] = []
+    warnings: list[str] = []
+    for rel in pending:
+        for line, kind, include in source_includes(accessor.read_file(side, rel)):
+            if kind == "angle":
+                continue  # Kernel/public includes stay on the kernel-evidence side.
+            candidate = relative_include_path(rel, include) if kind == "quoted" else None
+            reason = None
+            if kind == "unsupported":
+                reason = "unsupported include operand"
+            elif candidate is None or not candidate.startswith(prefix):
+                reason = "quoted include escapes module scope"
+            elif Path(candidate).suffix.lower() not in HEADER_SUFFIXES:
+                reason = "quoted include is not a supported header"
+            elif not accessor.path_exists(side, candidate):
+                reason = "quoted header is not found relative to its including file"
+            if reason:
+                warnings.append(f"{rel}:{line}: {reason}: {include}")
+                continue
+            if candidate not in seen:
+                seen.add(candidate)
+                headers.append(candidate)
+                pending.append(candidate)
+    return headers, warnings
 
 
 @dataclass
@@ -97,6 +185,7 @@ def resolve_kbuild_target(
     module_path: str,
     kbuild_target: str,
     include_all_headers: bool = True,
+    include_local_headers: bool = False,
 ) -> KbuildTargetResolution:
     """Resolve a Kbuild module target to its owning old/new source files.
 
@@ -110,7 +199,14 @@ def resolve_kbuild_target(
     If a target has no composite object list, it resolves to <target>.c when
     that file exists. The caller can still use directory mode by omitting
     --kbuild-target.
+
+    include_all_headers preserves the historical directory-wide header mode.
+    Strict production extraction instead explicitly sets it to False and sets
+    include_local_headers=True to follow only owned sources' local includes.
     """
+
+    if include_all_headers and include_local_headers:
+        raise ValueError("include_all_headers and include_local_headers are mutually exclusive")
 
     normalized = _normalize_target(kbuild_target)
     stem = normalized[:-2]
@@ -136,6 +232,17 @@ def resolve_kbuild_target(
         warnings.append(f"{normalized} was not found in obj-* targets in {makefile_path}")
 
     object_files = composite_objs or [normalized]
+    if include_local_headers:
+        include_flag = re.compile(
+            r"(?:-I|-iquote|-isystem|-idirafter|"
+            r"-iprefix|-iwithprefix(?:before)?|-isysroot|--sysroot|"
+            r"-include|-imacros)"
+        )
+        if any(include_flag.search(line.split("#", 1)[0]) for line in lines):
+            warnings.append(
+                f"unsupported custom include flags in {makefile_path}; "
+                "local header scope does not infer compiler include search paths or forced includes"
+            )
     source_files: list[str] = []
     unresolved: list[str] = []
     for obj in object_files:
@@ -157,6 +264,9 @@ def resolve_kbuild_target(
             for f in accessor.list_module_files(side, module_path, extensions=HEADER_SUFFIXES)
             if f.startswith(module_path.rstrip("/") + "/")
         ]
+    elif include_local_headers:
+        headers, include_warnings = _local_header_closure(accessor, side, module_path, source_files)
+        warnings.extend(include_warnings)
 
     files: list[str] = []
     seen: set[str] = set()

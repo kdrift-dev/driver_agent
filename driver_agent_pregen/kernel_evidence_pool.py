@@ -39,6 +39,7 @@ _DIFF_ITEM_KEYS = {
     "definition_diff", "change_type_guess", "commits", "migration_signal", "kernel_side_helper_signal",
     "replacement_candidates", "kernel_side_helper_diff_paths", "direct_include_requirements",
     "semantic_table_hit_rows", "confidence", "open_questions",
+    "old_definition_location", "new_definition_location",
 }
 _REPLACEMENT_KEYS = {"symbol", "score", "evidence", "paths", "new_location", "new_definition_excerpt", "return_type_guess"}
 
@@ -338,8 +339,24 @@ def build_kernel_evidence_pool(
         # Bind symbol usage independently of scanner-provided snippets.
         if not any(re.search(r"(?<![A-Za-z_0-9])" + re.escape(symbol) + r"(?![A-Za-z_0-9])", old_sources[use["path"]]) for use in uses):
             raise EvidenceBoundaryError("symbol does not occur in old target source")
+        bindings = {side: locations[key][side] for side in ("old", "new")}
+        binding_keys = {side + "_definition_location" for side in ("old", "new")}
+        if set(item) & binding_keys:
+            if not binding_keys <= set(item):
+                raise EvidenceBoundaryError("both explicit excerpt locations are required")
+            for side in ("old", "new"):
+                selected = item[side + "_definition_location"]
+                if selected is None:
+                    if bindings[side] or item.get(side + "_definition", ""):
+                        raise EvidenceBoundaryError("missing explicit excerpt location")
+                    bindings[side] = []
+                else:
+                    chosen = _locations([selected])
+                    if chosen[0] not in bindings[side]:
+                        raise EvidenceBoundaryError("explicit excerpt location is absent from locator provenance")
+                    bindings[side] = chosen
         old, new = [
-            _excerpt_binding(item.get(side + "_definition", ""), locations[key][side], ref=refs[side], source_reader=source_reader)
+            _excerpt_binding(item.get(side + "_definition", ""), bindings[side], ref=refs[side], source_reader=source_reader)
             for side in ("old", "new")
         ]
         production_diff = _focused_diff(old, new, f"old:{symbol}", f"new:{symbol}")

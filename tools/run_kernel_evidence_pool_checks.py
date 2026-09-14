@@ -181,18 +181,71 @@ def run_checks():
         (repo / "include/linux").mkdir(parents=True)
         (repo / "drivers/demo/demo.c").write_text(sources["drivers/demo/demo.c"])
         header = repo / "include/linux/demo.h"
+        alias_header = repo / "include/linux/alias.h"
         header.write_text("int api_a(void);\n\nint api_b(void);\n")
+        alias_header.write_bytes(header.read_bytes())
         git("add", ".")
         git("commit", "-qm", "old")
         actual = deepcopy(docs)
         actual["module_source.json"]["old_ref"] = git("rev-parse", "HEAD")
         header.write_text("long api_a(void);\n\nint api_b(void);\n")
+        alias_header.write_bytes(header.read_bytes())
         git("add", ".")
         git("commit", "-qm", "new")
         actual["module_source.json"]["new_ref"] = git("rev-parse", "HEAD")
         verified = build_kernel_evidence_pool(documents=actual, old_sources=sources, source_reader=git_source_reader(repo))
         check("live Git provenance verification", verified["audit"]["source_verification"] == "git_blob_lines_verified")
         check("independent Git verification", verify_pool_against_git(verified, repo)["status"] == "PASS")
+
+        # Two real Git files deliberately have identical excerpt bytes. Legacy
+        # path inference must still refuse; only producer-recorded provenance
+        # can identify the file actually selected for an excerpt.
+        ambiguous = deepcopy(actual)
+        location_row = ambiguous["kernel_definition_locations.json"]["items"][0]
+        for side in ("old", "new"):
+            alias_location = deepcopy(location_row[side + "_locations"][0])
+            alias_location["path"] = "include/linux/alias.h"
+            location_row[side + "_locations"].append(alias_location)
+        def bind(data):
+            return build_kernel_evidence_pool(documents=data, old_sources=sources, source_reader=git_source_reader(repo))
+        try:
+            bind(ambiguous)
+        except EvidenceBoundaryError as exc:
+            check("legacy identical-excerpt ambiguity still refused", "unambiguously" in str(exc))
+        else:
+            raise AssertionError("legacy ambiguity unexpectedly admitted")
+        chosen = deepcopy(ambiguous)
+        row = chosen["kernel_definition_diffs.json"]["items"][0]
+        for side in ("old", "new"):
+            row[side + "_definition_location"] = deepcopy(location_row[side + "_locations"][1])
+        bound = bind(chosen)
+        api_a = next(item for item in bound["candidates"] if "api_a" in item["symbols"])
+        check("explicit producer location selects exact Git-bound file", all(
+            api_a["provenance"][side]["path"] == "include/linux/alias.h" for side in ("old", "new")))
+        check("explicit provenance independently verified", verify_pool_against_git(bound, repo)["status"] == "PASS")
+        for label in ("one missing binding", "null located excerpt", "foreign selected path", "unknown selected location", "wrong matched line", "extra selected metadata", "wrong excerpt bytes"):
+            bad_binding = deepcopy(chosen)
+            row = bad_binding["kernel_definition_diffs.json"]["items"][0]
+            if label == "one missing binding":
+                del row["new_definition_location"]
+            elif label == "null located excerpt":
+                row["old_definition_location"] = None
+            elif label == "foreign selected path":
+                row["old_definition_location"]["path"] = "drivers/other/foreign.c"
+            elif label == "unknown selected location":
+                row["old_definition_location"]["path"] = "include/linux/absent.h"
+            elif label == "wrong matched line":
+                row["old_definition_location"]["line"] = 2
+            elif label == "extra selected metadata":
+                row["old_definition_location"]["manual_hint"] = "forbidden"
+            else:
+                row["old_definition"] = "1: int api_a(int different);"
+            try:
+                bind(bad_binding)
+            except EvidenceBoundaryError:
+                passed.append(label + " refused")
+            else:
+                raise AssertionError(label)
         tampered = deepcopy(verified)
         tampered["candidates"][0]["text"] += "\nreplacement hint"
         try:

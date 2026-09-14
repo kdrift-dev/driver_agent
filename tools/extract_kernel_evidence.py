@@ -26,7 +26,7 @@ from driver_agent_pregen.repo_utils import RepositoryAccessor
 from driver_agent_pregen.symbol_scanner import run_symbol_scanner
 from ctxlab.provenance import code_identity
 
-PROTOCOL = "docs-impl/27_ntb_preparation_protocol.md"
+PROTOCOL = "docs-impl/28_explicit_excerpt_provenance.md"
 CODE_FILES = ["driver_agent_pregen/" + name + ".py" for name in (
     "__init__", "definition_locator", "kbuild_target", "kernel_diff_builder", "kernel_evidence_pool",
     "module_source_loader", "repo_utils", "symbol_scanner", "utils",
@@ -214,7 +214,7 @@ def run(args):
         if git(repo, "rev-parse", ref + "^{commit}").decode().strip() != ref:
             raise ValueError("declared ref is not an exact commit")
     out.mkdir(parents=True, exist_ok=False)
-    manifest = {"protocol": "kernel_evidence_extraction_v1", "started_at_utc": now(),
+    manifest = {"protocol": "kernel_evidence_extraction_v2", "started_at_utc": now(),
                 "code": code, "kernel_head": kernel_head,
                 "arguments": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
                 "settings": {"source_mode": "full_module", "affected_func_signal_mode": "kernel_only",

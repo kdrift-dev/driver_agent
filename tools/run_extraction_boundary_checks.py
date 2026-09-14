@@ -108,6 +108,14 @@ def checks():
         assert summary["status"] == "prepared", summary
         assert summary["candidate_count"] > 0 and summary["obligation_signal_count"] > 0
         assert summary["stages"] == ["module_source_loader", "symbol_scanner", "definition_locator", "kernel_diff_builder"]
+        definitions = json.loads((output / "extracted/kernel_definition_diffs.json").read_text())["items"]
+        locations = {(row["symbol"], row["kind"]): row for row in json.loads(
+            (output / "extracted/kernel_definition_locations.json").read_text())["items"]}
+        for row in definitions:
+            for side in ("old", "new"):
+                selected = row[side + "_definition_location"]
+                options = locations[(row["symbol"], row["kind"])][side + "_locations"]
+                assert selected in options if options else selected is None
         assert summary["model_call_count"] == summary["build_call_count"] == 0
         assert summary["blocked_operations"] == summary["forbidden_modules_loaded"] == []
         assert all(summary[name] for name in ("code_unchanged", "kernel_head_unchanged", "freeze_unchanged", "protocol_unchanged", "old_source_inventory_unchanged"))

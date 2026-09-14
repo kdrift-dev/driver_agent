@@ -1805,6 +1805,8 @@ def run_kernel_diff_builder(
             "used_by_driver": item.get("used_by_driver", []),
             "old_definition": old_def,
             "new_definition": new_def,
+            "old_definition_location": dict(old_loc) if old_loc else None,
+            "new_definition_location": dict(new_loc) if new_loc else None,
             "definition_changed": definition_changed,
             "definition_diff": truncate_text(diff_text, max_chars=12000),
             "change_type_guess": change_type,

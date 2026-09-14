@@ -116,3 +116,35 @@ ssh retro 'DRIVER_AGENT_ROOT=/home/arina/work/driver_agent_foundation \
 Use a fresh output directory for each experiment. Historical summaries and
 caches under the old checkout remain archived; this package does not overwrite
 them or launch a full kernel build.
+
+
+## Verified deployment and real HF smoke
+
+Code commit **`12940c01478335ef426eecec1755fdd7400d2222`** was transferred by
+Git bundle to the dedicated `codex/experiment-foundation` worktree. All
+45 comparison checks, six pruner groups and five provenance groups passed on
+retro as well as locally. A direct Nix devshell check locates zlib, libelf and
+OpenSSL with the corrected pkg-config path.
+
+The real HF smoke used one existing frozen case,
+`a41e0ab394e4__drivers_firmware_efi_libstub_efi_stub_entry_c`, chosen for small
+input size. Nine methods × budgets 32/2048 × full/skeleton produced **36 rows**:
+18 scored intact, 18 explicitly `insufficient_budget` without scoring.
+All three reference-edit oracle methods identify `HFTeacherForcedBackend` as
+their selection backend. Every stored prompt was independently recounted by
+the HF tokenizer; counts equal scorer counts, all source text is preserved,
+and no valid row reports truncation. Initial/final input, code and manifest
+integrity checks all pass. The copied pack hash matches the audited local pack.
+
+Model revision: `8123ea2e9354afb7ffcc6c8641d1b2f5ecf18301`.
+Executable source digest:
+`6c88abdb3d0c8771505561af40df104a545c67222ca5970b221b12d04acb7369`.
+HF did not expose a tokenizer commit in its loaded metadata; that field is
+explicitly null. A future confirmatory run must pin tokenizer revision too.
+
+Artifacts on retro: `runs/foundation_hf_smoke/` in the new checkout.
+Local copy: `runs/foundation_hf_smoke_retro/` (rows, summary, aggregates,
+initial/final metadata and cache). The smoke validates execution only; one
+size-selected case provides no method-quality estimate. The launcher defaults
+to the new checkout; the old context checkout and dirty evolve diff remain
+unchanged.

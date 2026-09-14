@@ -111,6 +111,16 @@ contract rejected both observed edit sets; no generated patch reached a build.
 See the [protocol](docs-impl/20_structured_edit_pilot_protocol.md) and
 [results](docs-impl/21_structured_edit_pilot_results.md).
 
+The same runner accepts `--edit-contract exact_substrings_v2` for unique exact
+substring edits; v1 remains the default. Both observed v2 outputs contain a
+no-op and remain rejected. A separate evaluation-only helper,
+`tools/prepare_identity_edit_forensics.py`, preserves and interprets their entire
+raw edit lists with identity operations allowed. Two strict module builds pass
+under that explicitly post-hoc policy. See the
+[v2 protocol](docs-impl/22_exact_substring_pilot_protocol.md),
+[post-hoc policy](docs-impl/23_identity_edit_forensic_protocol.md) and
+[combined results](docs-impl/24_substring_and_identity_results.md).
+
 ## LLM Configuration
 
 Supported providers include:

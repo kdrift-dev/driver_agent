@@ -1,0 +1,487 @@
+{
+  "actual_token_budget_comparison": false,
+  "artifact_index": {
+    "indexed_files": 30,
+    "path": "runs/substring_edit_generation_v2_20260914/artifact_index.json",
+    "sha256": "32bb2f2ab1495d45b05e81ea1bb4f409a22afefb60135135ce7a0fd926f92cb7"
+  },
+  "auditor_scripts": [
+    {
+      "path": "runs/substring_edit_independent_audit_20260914/audit.py",
+      "sha256": "bfc17135abc3244e3d200416a946dd1d26de8bb3cf2ba8ef483f512e65006de7"
+    },
+    {
+      "path": "runs/substring_edit_independent_audit_20260914/identity_forensic_audit.py",
+      "sha256": "26806e3880fe12d411f51554580389e665c909f916efb3b52c312117b8c70c78"
+    },
+    {
+      "path": "runs/substring_edit_independent_audit_20260914/audit_forensic_build.py",
+      "sha256": "156a3dc6698cd3992a6a7268c550a254ece34bac798653287bd544ae8103c3fd"
+    },
+    {
+      "path": "runs/substring_edit_independent_audit_20260914/audit_helpers.py",
+      "sha256": "ba165ccbb974eebf5713069a5238bf19bc52baeffd5266a8ed52369eb8eabb23"
+    }
+  ],
+  "canonical_compile_or_link_commands": 0,
+  "canonical_repairs": 0,
+  "checkout_preservation_after_builds": {
+    "path": "runs/substring_edit_final_preservation_20260914.json",
+    "sha256": "fce1c6edc11a673425a01e70e81caaf3691e37efc0ebf3a8e2ff2b6f97b987e2",
+    "status": "PASS"
+  },
+  "checkout_preservation_before_posthoc": {
+    "path": "runs/substring_edit_checkout_preservation_20260914.json",
+    "sha256": "ba60050037ba4128f68e0ebb12dfa62dfd2eb62dbf6c145150396f78c00ef150",
+    "status": "PASS"
+  },
+  "checks": {
+    "groups": {
+      "context": 3,
+      "edits_v1": 4,
+      "pilot_v1": 5,
+      "pilot_v2": 6,
+      "substrings_v2": 4,
+      "validator": 5
+    },
+    "initial_setup_failure": {
+      "path": "runs/substring_edit_checks_20260914/pilot_v1.log",
+      "reason": "Copied preparation files were one directory too high; corrected layout with all12file bytes unchanged before any real request.",
+      "sha256": "8231fcb431636ca372b2bdf82b66c888d76d9fff5e2ad5df22dbe53b90736a5e"
+    },
+    "passing_logs": [
+      {
+        "path": "runs/substring_edit_checks_20260914/edits_v1.log",
+        "sha256": "194e8b6ebf7119f2b6b98a627eb7a9a981efe7533ecfbed129f162a7d71f6531"
+      },
+      {
+        "path": "runs/substring_edit_checks_20260914/substrings_v2.log",
+        "sha256": "47ec9e576acbcf30416558523d4448f8ed25e67043661deaf67d36eb49eaed8f"
+      },
+      {
+        "path": "runs/substring_edit_checks_20260914/context.log",
+        "sha256": "4ff27a826a859ead64d710eab114bcd1142ae9969eeb60de2625c8203b025c35"
+      },
+      {
+        "path": "runs/substring_edit_checks_20260914/validator.log",
+        "sha256": "deed9ba43958c89bffc9ef6ce23653ddc4201decb6aa722d7ff4c19ac2f3259f"
+      },
+      {
+        "path": "runs/substring_edit_checks_20260914/pilot_v1.recheck.log",
+        "sha256": "701c0a2294a58ad36b9d344b918e798c2d6b3acc8aec437359e980764ebfd940"
+      },
+      {
+        "path": "runs/substring_edit_checks_20260914/pilot_v2.log",
+        "sha256": "0591cf57daa8729ae4af55e2a72b5df21487151997bfed54b4d5731dcf197d6c"
+      }
+    ],
+    "total_groups": 27
+  },
+  "common_character_cap": 27598,
+  "conditions": {
+    "first_fit": {
+      "actual_token_budget_comparison": false,
+      "apply": "not_run",
+      "candidate_admission": "rejected",
+      "canonical_request_sha256": "6128241a10e681c2c8fd3325686f24b6137aab75a6f722b9aaf357105bb6498f",
+      "compile": "not_run",
+      "diagnostic_result": {
+        "path": "runs/substring_edit_generation_v2_20260914/generation/first_fit/diagnostic_result.json",
+        "sha256": "aad095e7cef83e641c3b3088b4e37a9d9c0faaad1a497468c4054056893cd9c2"
+      },
+      "diff": "not_created_rejected_edits",
+      "finish_reason": "stop",
+      "generation_ready": false,
+      "identity_edits": 1,
+      "input_characters": 27382,
+      "link": "not_run",
+      "native_finish_reason": "end_turn",
+      "parse_status": "ok",
+      "raw_output": {
+        "path": "runs/substring_edit_generation_v2_20260914/generation/first_fit/raw_output.txt",
+        "sha256": "a5dfffe02cc039c7af74873ea1def0dcfbbd59df6d6333206a3b29a6f1844349"
+      },
+      "rejection_reasons": [
+        "invalid_structured_edits: no-op edit is forbidden"
+      ],
+      "request_attempt_count": 1,
+      "request_attempt_count_bounds": {
+        "lower": 1,
+        "upper": 1
+      },
+      "request_attempt_count_exact": true,
+      "request_status": "succeeded",
+      "response_truncated": false,
+      "returned_model": "anthropic/claude-sonnet-4.6",
+      "returned_provider": "Anthropic",
+      "runtime": "not_run",
+      "selected_blocks": 18,
+      "stop_pair_for_auth_or_quota": false,
+      "strict_json_schema": "valid",
+      "submitted_edits": 2,
+      "usage": {
+        "completion_tokens": 595,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.045162,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.008925,
+          "upstream_inference_cost": 0.045162,
+          "upstream_inference_prompt_cost": 0.036237
+        },
+        "is_byok": false,
+        "prompt_tokens": 12079,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 12674
+      }
+    },
+    "obligation_ranked": {
+      "actual_token_budget_comparison": false,
+      "apply": "not_run",
+      "candidate_admission": "rejected",
+      "canonical_request_sha256": "9ecd33cf142576bc5256e27f6a9e34bce294751b7e25868764ee0e8bc54b3a18",
+      "compile": "not_run",
+      "diagnostic_result": {
+        "path": "runs/substring_edit_generation_v2_20260914/generation/obligation_ranked/diagnostic_result.json",
+        "sha256": "ef8b933bbb5746e535277dbe686edf4d8043ad5d8de25d5b8c1f4a5e0b38c52c"
+      },
+      "diff": "not_created_rejected_edits",
+      "finish_reason": "stop",
+      "generation_ready": false,
+      "identity_edits": 1,
+      "input_characters": 27002,
+      "link": "not_run",
+      "native_finish_reason": "end_turn",
+      "parse_status": "ok",
+      "raw_output": {
+        "path": "runs/substring_edit_generation_v2_20260914/generation/obligation_ranked/raw_output.txt",
+        "sha256": "902ba79bf12e2ec467b1bab4f8c8dd319005dff60bc3c332f2b1f781c6ddfd65"
+      },
+      "rejection_reasons": [
+        "invalid_structured_edits: no-op edit is forbidden"
+      ],
+      "request_attempt_count": 1,
+      "request_attempt_count_bounds": {
+        "lower": 1,
+        "upper": 1
+      },
+      "request_attempt_count_exact": true,
+      "request_status": "succeeded",
+      "response_truncated": false,
+      "returned_model": "anthropic/claude-sonnet-4.6",
+      "returned_provider": "Anthropic",
+      "runtime": "not_run",
+      "selected_blocks": 20,
+      "stop_pair_for_auth_or_quota": false,
+      "strict_json_schema": "valid",
+      "submitted_edits": 2,
+      "usage": {
+        "completion_tokens": 659,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.04563,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.009885,
+          "upstream_inference_cost": 0.04563,
+          "upstream_inference_prompt_cost": 0.035745
+        },
+        "is_byok": false,
+        "prompt_tokens": 11915,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 12574
+      }
+    }
+  },
+  "counter": {
+    "count_scope": "canonical JSON object containing complete messages and submitted response_format",
+    "generation_binding": "unverified provider tokenization/framing; character diagnostic only",
+    "kind": "canonical_messages_and_schema_chars",
+    "unit": "characters"
+  },
+  "edit_contract": "exact_substrings_v2",
+  "execution_commit": "0e5ed41062c4973a5f0106a6c0d0dd667b5dde29",
+  "execution_source_digest": "d6de24d703b9af7f484d1832a94e5aa119280853084abae2b4875c1d73ff1a8d",
+  "execution_source_files": 116,
+  "explicit_client_attempts": 2,
+  "explicit_client_attempts_exact": true,
+  "freeze": {
+    "path": "runs/substring_edit_generation_v2_20260914/freeze/manifest.json",
+    "sha256": "f857319b43d210ce3c39f29b02f2a434c59cfb4c8bdb4fd1d8d2264d4decfb42"
+  },
+  "generation_directory": "runs/substring_edit_generation_v2_20260914",
+  "generation_invocations": 2,
+  "independent_canonical_no_build_audit": {
+    "checks": 343,
+    "path": "runs/substring_edit_independent_audit_20260914/canonical_no_build_report.json",
+    "sha256": "b9ecd4161d0e7900953999399f0935ed17d2c40d0b6ad70dd66fcedc5b2d0ff9",
+    "status": "PASS"
+  },
+  "independent_generation_audit": {
+    "checks": 599,
+    "path": "runs/substring_edit_independent_audit_20260914/remote_audit.json",
+    "sha256": "c5d5f70b8a39e3d93329d41145c2adf0004af223c523d6e1f64404f081ef6a3c",
+    "status": "PASS"
+  },
+  "independent_preflight": {
+    "checks": 172,
+    "path": "runs/substring_edit_independent_audit_20260914/preflight_report.json",
+    "sha256": "0a8e3c0990e7d932a33a80fb88941e34af769def3e6b5932f5bf13875abfa5d5",
+    "status": "PASS"
+  },
+  "kbuild_target": "xilinx-trng.ko",
+  "launcher_update": {
+    "path": "runs/substring_edit_launcher_update_20260914.json",
+    "sha256": "d49536ddec6d25fc9a5f14317042b64216be3540fdaebab146d1bf3d918303dd",
+    "status": "PASS"
+  },
+  "max_output_tokens": 4096,
+  "module_path": "drivers/crypto/xilinx",
+  "new_ref": "b2c15db74a379a50d723002799c3db0c6781c75a",
+  "old_ref": "9b95f3a4c9b8baf9fc4c2b8776f8285c05e594f5",
+  "pool_sha256": "9f8ca2561631976c2bceba810cfed803ef338e12dfc82818a5f273d9b5ee7558",
+  "post_hoc_identity_evaluation": {
+    "artifact_index": {
+      "indexed_files": 43,
+      "path": "runs/identity_edit_forensics_v1_20260914/artifact_index.json",
+      "sha256": "8540e7cb95e77f396e9c4a5cfa6294f644664f2f972489a73bba0bbf83c1906e"
+    },
+    "audit_correction_record": {
+      "path": "runs/substring_edit_independent_audit_20260914/forensic_build_audit_correction.json",
+      "sha256": "bc3e05c2b8300f6278cae86d4ed361227d03f87ff856d560e8b4d58397f08bcc"
+    },
+    "conditions": {
+      "first_fit": {
+        "apply": {
+          "fuzz": 0,
+          "hunks": 1,
+          "offsets": 0,
+          "old_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+          "patch_sha256": "207ba83d65f137a43158af130c8fb146edc2843208e643e427385ff7621b2abd",
+          "patched_sha256": "5a83805f34ef2e0a8aca18178f8142445ee376fdf5c450066a737beed19290c1",
+          "repairs": 0,
+          "status": "passed"
+        },
+        "canonical_admission": "rejected",
+        "changed_edits": 1,
+        "classification": "module_build_passed",
+        "compile": {
+          "artifact": {
+            "bytes": 22112,
+            "path": "runs/identity_edit_validation_v1_20260914/first_fit/compile/drivers/crypto/xilinx/xilinx-trng.o",
+            "sha256": "b038c4121efbcf3e1e3a9c88ecc0627eda40497a259cc83f4142b28c55560814"
+          },
+          "seconds": 6.131,
+          "status": "passed"
+        },
+        "donor_unchanged": true,
+        "identity_edits": 1,
+        "integrity_verified": true,
+        "interpretation": {
+          "path": "runs/identity_edit_forensics_v1_20260914/conditions/first_fit/interpretation.json",
+          "sha256": "5cbee9da61b29949c044d059df9d9f9240282a10ede6234cde196eb087849e7b"
+        },
+        "kernel_release_pin": {
+          "kernel_release_sha256": "38310dc6d6e4f2b75bcfcdf0bc58d980e4767f3f8de11bcbe32df262e644d57e",
+          "reason": "preserve the frozen release after removing private-copy Git metadata",
+          "source": "frozen include/generated/utsrelease.h",
+          "value": "6.19.0-rc5+"
+        },
+        "kernel_release_preserved": true,
+        "link": {
+          "artifact": {
+            "bytes": 23176,
+            "path": "runs/identity_edit_validation_v1_20260914/first_fit/link/drivers/crypto/xilinx/xilinx-trng.ko",
+            "sha256": "95ada500f723bf8f73da2a1e12941510d54fe1b8d68656950ca0029786a4c8c9"
+          },
+          "seconds": 2.27,
+          "status": "passed",
+          "strict_modpost": {
+            "commands": [
+              "./scripts/mod/modpost -M     -E     -o Module.symvers -T modules.order vmlinux.o"
+            ],
+            "seen": true,
+            "strict": true
+          }
+        },
+        "materialized_diff": {
+          "path": "runs/identity_edit_forensics_v1_20260914/conditions/first_fit/generated.diff",
+          "sha256": "207ba83d65f137a43158af130c8fb146edc2843208e643e427385ff7621b2abd"
+        },
+        "materialized_source_payload_sha256": "db56785c12d3816884d51c2f607e6061aaf11e6ece224eaa6c925f0338ab1bdf",
+        "other_source_changes": [],
+        "private_kernel_location": "/home/arina/work/driver_agent_substring_edits/runs/identity_edit_validation_v1_20260914/first_fit/kernel",
+        "runtime": "not_run",
+        "submitted_edits": 2,
+        "symbol_crc_versioning": "disabled_in_frozen_config",
+        "validation_artifact_index": {
+          "indexed_files": 51,
+          "path": "runs/identity_edit_validation_v1_20260914/first_fit/artifact_index.json",
+          "sha256": "7ac32fc6dac2ed2f0d76508b8c2ddf477b3fa8a47111b58f6a92349bacde69e6"
+        },
+        "validation_summary": {
+          "path": "runs/identity_edit_validation_v1_20260914/first_fit/summary.json",
+          "sha256": "ace75fc2d4ccec36536e7275bf86e3ad669605924f2a18c699166ab478fc2dde"
+        }
+      },
+      "obligation_ranked": {
+        "apply": {
+          "fuzz": 0,
+          "hunks": 1,
+          "offsets": 0,
+          "old_sha256": "088cbd398390ad9651d4066d50bf9f413e5ea6991ca49cc7a9b03a89c8863e5f",
+          "patch_sha256": "207ba83d65f137a43158af130c8fb146edc2843208e643e427385ff7621b2abd",
+          "patched_sha256": "5a83805f34ef2e0a8aca18178f8142445ee376fdf5c450066a737beed19290c1",
+          "repairs": 0,
+          "status": "passed"
+        },
+        "canonical_admission": "rejected",
+        "changed_edits": 1,
+        "classification": "module_build_passed",
+        "compile": {
+          "artifact": {
+            "bytes": 22112,
+            "path": "runs/identity_edit_validation_v1_20260914/obligation_ranked/compile/drivers/crypto/xilinx/xilinx-trng.o",
+            "sha256": "b038c4121efbcf3e1e3a9c88ecc0627eda40497a259cc83f4142b28c55560814"
+          },
+          "seconds": 5.332,
+          "status": "passed"
+        },
+        "donor_unchanged": true,
+        "identity_edits": 1,
+        "integrity_verified": true,
+        "interpretation": {
+          "path": "runs/identity_edit_forensics_v1_20260914/conditions/obligation_ranked/interpretation.json",
+          "sha256": "0b70024b4219ba1b9874a0cb4324670695ce045a199d6610e3791dbf5d66b00f"
+        },
+        "kernel_release_pin": {
+          "kernel_release_sha256": "38310dc6d6e4f2b75bcfcdf0bc58d980e4767f3f8de11bcbe32df262e644d57e",
+          "reason": "preserve the frozen release after removing private-copy Git metadata",
+          "source": "frozen include/generated/utsrelease.h",
+          "value": "6.19.0-rc5+"
+        },
+        "kernel_release_preserved": true,
+        "link": {
+          "artifact": {
+            "bytes": 23176,
+            "path": "runs/identity_edit_validation_v1_20260914/obligation_ranked/link/drivers/crypto/xilinx/xilinx-trng.ko",
+            "sha256": "95ada500f723bf8f73da2a1e12941510d54fe1b8d68656950ca0029786a4c8c9"
+          },
+          "seconds": 2.321,
+          "status": "passed",
+          "strict_modpost": {
+            "commands": [
+              "./scripts/mod/modpost -M     -E     -o Module.symvers -T modules.order vmlinux.o"
+            ],
+            "seen": true,
+            "strict": true
+          }
+        },
+        "materialized_diff": {
+          "path": "runs/identity_edit_forensics_v1_20260914/conditions/obligation_ranked/generated.diff",
+          "sha256": "207ba83d65f137a43158af130c8fb146edc2843208e643e427385ff7621b2abd"
+        },
+        "materialized_source_payload_sha256": "db56785c12d3816884d51c2f607e6061aaf11e6ece224eaa6c925f0338ab1bdf",
+        "other_source_changes": [],
+        "private_kernel_location": "/home/arina/work/driver_agent_substring_edits/runs/identity_edit_validation_v1_20260914/obligation_ranked/kernel",
+        "runtime": "not_run",
+        "submitted_edits": 2,
+        "symbol_crc_versioning": "disabled_in_frozen_config",
+        "validation_artifact_index": {
+          "indexed_files": 51,
+          "path": "runs/identity_edit_validation_v1_20260914/obligation_ranked/artifact_index.json",
+          "sha256": "fc331d49fba9074a920c10a4c0982135823c76dfe7a3943f01b4093f9f0f3685"
+        },
+        "validation_summary": {
+          "path": "runs/identity_edit_validation_v1_20260914/obligation_ranked/summary.json",
+          "sha256": "ad8b37aa249e318ea8ad67f87744b5cc90872ae8c14d1e4722226b0e2e6e7af1"
+        }
+      }
+    },
+    "execution_commit": "de8ef8f987eae2c982776e338666a3646d0e9873",
+    "execution_source_digest": "72f6e1bdea4eb6ad1a09db7a50ac0a7be44f74d02cf4a3f6561e0da6184fe6c4",
+    "execution_source_files": 118,
+    "freeze": {
+      "path": "runs/identity_edit_forensics_v1_20260914/freeze/manifest.json",
+      "sha256": "c8f8f1144189f54d985fcd83bae680d558f9f03c5c87f659654e7ece5f8376db"
+    },
+    "identical_patch_and_module_in_both_arms": true,
+    "independent_build_audit": {
+      "checks": 996,
+      "path": "runs/substring_edit_independent_audit_20260914/forensic_build_report_v2.json",
+      "sha256": "664748cc87dafff3d6350e6784d4ce9d6a4f78c574630ec87c0e822585d0f45b",
+      "status": "PASS"
+    },
+    "independent_materialization_audit": {
+      "checks": 791,
+      "path": "runs/substring_edit_independent_audit_20260914/identity_forensic_remote_audit.json",
+      "sha256": "5a567a04b3dc7aa22f2e740eb10236eec288e9d5f93b4edc705d1a1e4833525f",
+      "status": "PASS"
+    },
+    "initial_build_audit_report": {
+      "path": "runs/substring_edit_independent_audit_20260914/forensic_build_report.json",
+      "reason": "Auditor counted make --version as a build command; version-probe filtering corrected without rerunning builds.",
+      "sha256": "186b5a1239be9f45f410eb1a96c749880518488b5e2736ed3bfc84cb8a6073c2",
+      "status": "FAIL"
+    },
+    "materialization_directory": "runs/identity_edit_forensics_v1_20260914",
+    "materialized_source_equal_frozen_new_source": false,
+    "module_binaries_equal_frozen_positive_control": true,
+    "module_link_stages": 2,
+    "new_full_kernel_builds": 0,
+    "new_model_calls": 0,
+    "offline_checks": {
+      "groups": 4,
+      "log": {
+        "path": "runs/substring_edit_checks_20260914/identity_forensic.log",
+        "sha256": "2d6ba0d11d18b36e04a403e62b1314ff05655257698c1f11dff76f25cb5f43b7"
+      }
+    },
+    "policy_selected_after_observing_outputs": true,
+    "production_admission_unchanged": true,
+    "protocol_document": {
+      "path": "docs-impl/23_identity_edit_forensic_protocol.md",
+      "sha256": "4543c0033a051588653a904bf1a6933aa8847e47961af8064d69b2acc19051ae"
+    },
+    "runtime_tests": 0,
+    "scope": "post-hoc relaxation allowing identity operations; canonical v2 remains rejected",
+    "summary": {
+      "path": "runs/identity_edit_forensics_v1_20260914/summary.json",
+      "sha256": "ca18beca5d7cef92f949fbe6d9ec6dc8771c98eda9bfde7f7beacda37946631a"
+    },
+    "target_compile_stages": 2
+  },
+  "protocol": "paired_substring_edit_character_diagnostic_v2",
+  "protocol_document": {
+    "path": "docs-impl/22_exact_substring_pilot_protocol.md",
+    "sha256": "2221fa4713cb560f57e34593dc87876c37388421c1f9eb5219691a3a2547a6e1"
+  },
+  "provider_internal_retries": "not independently observed",
+  "report": "docs-impl/24_substring_and_identity_results.md",
+  "requirements_sha256": "ee6fab59db720a3c92b5c58f45953efe5693d05e99a4f6d9e8920fdea0febe75",
+  "retro_checkout": "/home/arina/work/driver_agent_substring_edits",
+  "runtime_tests": 0,
+  "schema_version": 1,
+  "source_sha256": "baf2437b224e7fe5a0f8fb1472f87519b2e9751d19561f184818b0c761616367",
+  "strict_generation_ready": false,
+  "summary": {
+    "path": "runs/substring_edit_generation_v2_20260914/summary.json",
+    "sha256": "cab913feb987f1806d90dac68cf7a9d0ad614909141de65d2250c001493d2949"
+  },
+  "total_reported_cost_usd": "0.090792"
+}

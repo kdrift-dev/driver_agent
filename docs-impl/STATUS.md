@@ -1,7 +1,8 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/structured-edit-pilot`: structured generation,
-exact edit compiler and release-preserving validator `6c9fac6`. It follows
+The current package is on `codex/exact-substring-pilot`: exact-substring v2
+generation `0e5ed41` and a separate post-hoc identity evaluator `de8ef8f`.
+It follows `codex/structured-edit-pilot` (`6c9fac6`, report `5f4ef23`),
 `codex/paired-character-pilot` (`e13e895`, report `271eb2c`) and `codex/paired-context-budget`
 (`446e42c`, report `c452c18`), `codex/xilinx-module-pilot` (`9e1f7bd`, report
 `921b9af`), the build-eligibility package (`d02ed15`, Nix `c69f0b3`, report
@@ -211,22 +212,42 @@ canonical artifact verification pass. Commands and results are in reports
   Total reported cost is USD 0.089613. The token-budget admission flags stay false.
 - All 17 focused offline check groups pass locally and on retro. Independent
   generation audit passes 596 checks. Read-only preflight found and fixed the
-  private-copy kernel-release suffix issue; no real generated-patch build has
-  exercised that change yet. Previous runs and source boundaries are preserved.
+  private-copy kernel-release suffix issue; no real generated-patch build
+  exercised that change in this package. Previous runs and source boundaries are preserved.
 - Current checkout: `/home/arina/work/driver_agent_structured_edits`.
   See [protocol](20_structured_edit_pilot_protocol.md),
   [results](21_structured_edit_pilot_results.md) and
   [catalog](../datasets/structured_edit_pilot_v1.json).
 
+## Eighth package
+
+- Exact-substring v2 preserves source bytes outside unique original spans and
+  keeps v1 unchanged. Both fresh model responses contain the same substantive
+  type change plus a no-op; canonical v2 rejects both. The common cap is 27,598
+  characters, input usage 12,079/11,915 tokens and total reported cost USD 0.090792.
+- A separately frozen post-hoc policy executes each entire original edit list,
+  including identity operations. Both private validations pass exact apply,
+  fresh compilation and strict module linking. The two `.ko` files are identical,
+  23,176 bytes each; donor, kernel/config and release remain unchanged. Physical
+  runtime and symbol CRC versioning are untested. No additional model calls occur.
+- All 31 focused check groups pass across the two code packages. Independent
+  audits bind original responses, unchanged canonical failures and literal
+  post-hoc reconstruction. This does not establish a selection advantage or
+  equal model-token budgets. See [results](24_substring_and_identity_results.md),
+  [v2 protocol](22_exact_substring_pilot_protocol.md),
+  [post-hoc protocol](23_identity_edit_forensic_protocol.md) and
+  [catalog](../datasets/substring_edit_pilot_v2.json).
+- Current checkout: `/home/arina/work/driver_agent_substring_edits`.
+
 ## Next TODO, in order
 
-1. Freeze and test a separate exact-substring edit contract on unrelated
-   fixtures, retaining unique original matches, disjoint spans, deterministic
-   diffs and explicit no-op rejection. Structured JSON now works, but the v1
-   whole-line requirement rejected both model outputs for omitted final LF;
-   ranked also emitted a no-op. Preserve these failures and freeze both
-   conditions before another bounded run. Then use strict module
-   validation on admitted patches. For a confirmatory token-budget comparison,
+1. Choose and freeze an explicit identity-operation policy for fresh cases,
+   preserving exact unique/disjoint original spans and complete-list audits.
+   V2 now passes the JSON/substrings requirements but rejects no-ops; separate
+   post-hoc interpretation builds the identical proposed patch successfully in
+   both copies. Keep these canonical failures and later successes separate;
+   further reuse of Xilinx is development evidence only. Expand to qualified
+   independent migration commits. For a confirmatory token-budget comparison,
    a verified provider/model counter remains required; OpenRouter exposes no
    documented pre-generation token counter. Character caps and post-hoc usage
    must not be relabeled as equal model-token budgets. Acquire more qualified
@@ -262,4 +283,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–21 describe the current contracts.
+status and reports 08–24 describe the current contracts.

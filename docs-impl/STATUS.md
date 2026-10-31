@@ -1,7 +1,10 @@
 # Context engineering — status, 2026-09-14
 
-The current package is on `codex/exact-substring-pilot`: exact-substring v2
-generation `0e5ed41` and a separate post-hoc identity evaluator `de8ef8f`.
+The current package is on `codex/identity-contract-ntb`: production identity
+contract `87b7aa2`, owned-source extraction/module controls `c092786`, and
+explicit excerpt provenance `f112edc`. It follows exact-substring v2
+generation `0e5ed41` and a separate post-hoc identity evaluator `de8ef8f`
+on `codex/exact-substring-pilot` (report `bfce019`).
 It follows `codex/structured-edit-pilot` (`6c9fac6`, report `5f4ef23`),
 `codex/paired-character-pilot` (`e13e895`, report `271eb2c`) and `codex/paired-context-budget`
 (`446e42c`, report `c452c18`), `codex/xilinx-module-pilot` (`9e1f7bd`, report
@@ -241,13 +244,17 @@ canonical artifact verification pass. Commands and results are in reports
 
 ## Next TODO, in order
 
-1. Choose and freeze an explicit identity-operation policy for fresh cases,
-   preserving exact unique/disjoint original spans and complete-list audits.
-   V2 now passes the JSON/substrings requirements but rejects no-ops; separate
-   post-hoc interpretation builds the identical proposed patch successfully in
-   both copies. Keep these canonical failures and later successes separate;
-   further reuse of Xilinx is development evidence only. Expand to qualified
-   independent migration commits. For a confirmatory token-budget comparison,
+1. Extend production evidence coverage to kernel declarations of functions
+   defined by the OLD module. NTB's verified pool has 99 blocks but no changed
+   requirements; with zero overlap, ranked selection reduces to size ordering.
+   Validate any coverage change using OLD target and OLD/NEW kernel-side
+   evidence, keeping NEW target source and build diagnoses evaluation-only.
+   The explicit v3 identity contract is implemented; do not rerun Xilinx just
+   to exercise it. Preserve canonical v1/v2 failures and post-hoc successes
+   separately. Qualify more independent commits before method comparison.
+   A future NTB dispatch needs a frozen case/input anchor and meaningful
+   evidence coverage; the structured runner still retains its Xilinx anchor.
+   For a confirmatory token-budget comparison,
    a verified provider/model counter remains required; OpenRouter exposes no
    documented pre-generation token counter. Character caps and post-hoc usage
    must not be relabeled as equal model-token budgets. Acquire more qualified
@@ -283,4 +290,4 @@ stable. No destructive reset of their checkout or historical worktrees is needed
 | Frozen sample | `924a8b5` | unchanged pre-registration |
 
 Reports 00–05 and the saved notebook describe earlier implementations; this
-status and reports 08–24 describe the current contracts.
+status and reports 08–29 describe the current contracts.

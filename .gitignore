@@ -29,3 +29,9 @@ result-*
 .vscode/
 *.swp
 *.swo
+
+# Python venvs (local)
+.venv-ppl/
+
+# Nested separate repo (Doldrums/ai4os_representations) checked out here locally
+ai4os_representations/
